@@ -1,0 +1,8 @@
+automaton_core
+chainlit
+sqlalchemy
+psycopg2-binary
+huggingface_hub
+sentence_transformers
+pyyaml
+indico

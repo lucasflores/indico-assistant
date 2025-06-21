@@ -1,0 +1,279 @@
+Table: attachments.files
+Description: Table containing information about files uploaded to the system.
+Columns:
+- id: INTEGER — Unique identifier for the file.
+- attachment_id: INTEGER — References the associated attachment record.
+- user_id: INTEGER — Identifier of the user who uploaded the file.
+- filename: VARCHAR — The original name of the uploaded file.
+- content_type: VARCHAR — The MIME type of the file (e.g., application/pdf, image/png).
+- size: BIGINT — The file size in bytes.
+- md5: VARCHAR — The MD5 hash of the file, used for integrity verification.
+- storage_backend: VARCHAR — The storage system used to store the file (e.g., local storage, S3).
+- storage_file_id: VARCHAR — Relative path to the file within the filesystem.
+- created_dt: TIMESTAMP — The timestamp when the file was uploaded.
+Foreign Keys:
+- (attachment_id) → attachments.attachments(id)
+- (user_id) → users.users(id)
+
+Table: events.events
+Description: Table containing information about events.
+Columns:
+- id: INTEGER — Unique identifier for the event.
+- is_deleted: BOOLEAN — Indicates whether the event has been deleted (soft deletion).
+- is_locked: BOOLEAN — Indicates whether the event is locked from further modifications.
+- creator_id: INTEGER — The user ID of the person who created the event.
+- category_id: INTEGER — The ID of the category under which the event is organized.
+- series_id: INTEGER — ID of the event series if this event is part of a recurring series.
+- cloned_from_id: INTEGER — ID of the original event if this event was cloned from another.
+- label_id: INTEGER — ID of a label/tag assigned to the event.
+- label_message: TEXT — Custom label message associated with the event.
+- created_dt: TIMESTAMP — Date and time when the event was created.
+- start_dt: TIMESTAMP — Date and time when the event starts.
+- end_dt: TIMESTAMP — Date and time when the event ends.
+- timezone: VARCHAR — Timezone in which the event takes place.
+- type: SMALLINT — Numeric identifier for the event type (lecture=1, meeting=2, conference=3).
+- visibility: INTEGER — Numeric value determining the event’s visibility settings.
+- keywords: ARRAY — List of keywords associated with the event for search purposes.
+- url_shortcut: VARCHAR — Custom URL shortcut that redirects to the event’s page.
+- logo_metadata: JSONB — Metadata for the event’s logo (e.g., dimensions, format).
+- logo: BYTEA — Binary data representing the event’s logo.
+- stylesheet_metadata: JSONB — Metadata for the event’s custom stylesheet.
+- stylesheet: TEXT — Custom CSS used to style the event’s page.
+- default_page_id: INTEGER — The ID of the default page to display when viewing the event.
+- map_url: VARCHAR — URL to a map for the event’s location.
+- custom_boa_id: INTEGER — Custom Board of Abstracts (BOA) identifier for the event.
+- subcontrib_speakers_can_submit: BOOLEAN — Whether speakers of subcontributions can submit materials.
+- last_friendly_registration_id: INTEGER — The last used friendly ID for event registrations.
+- last_friendly_contribution_id: INTEGER — The last used friendly ID for event contributions.
+- last_friendly_session_id: INTEGER — The last used friendly ID for event sessions.
+- title: VARCHAR — The title of the event.
+- description: TEXT — textual description of the event.
+- room_id: INTEGER — ID of the room where the event takes place.
+- venue_id: INTEGER — ID of the venue where the event takes place.
+- venue_name: VARCHAR — Name of the venue where the event is held.
+- room_name: VARCHAR — Name of the specific room where the event takes place.
+- address: TEXT — Physical address of the event venue.
+- protection_mode: SMALLINT — Numeric value defining access restrictions to the event.
+- access_key: VARCHAR — Optional access key required to enter the event.
+- no_access_contact: VARCHAR — Contact information for access requests when restrictions apply.
+Foreign Keys:
+- (category_id) → categories.categories(id)
+- (cloned_from_id) → events.events(id)
+- (creator_id) → users.users(id)
+- (custom_boa_id) → indico.files(id)
+- (default_page_id) → events.pages(id)
+- (label_id) → events.labels(id)
+- (room_id) → roombooking.rooms(id)
+- (series_id) → events.series(id)
+- (venue_id) → roombooking.locations(id)
+- (venue_id, room_id) → roombooking.rooms(location_id, id)
+
+Table: events.persons
+Description: Table containing information about persons associated with events.
+Columns:
+- id: INTEGER — A unique identifier for the person in the event.
+- event_id: INTEGER — The ID of the event to which the person is associated.
+- user_id: INTEGER — The ID of the user linked to this person, if they have an Indico account.
+- first_name: VARCHAR — The first name of the person.
+- last_name: VARCHAR — The last name of the person.
+- email: VARCHAR — The email address of the person.
+- title: SMALLINT — A numeric identifier representing the person’s title (e.g., Dr., Prof., Mr., Ms.).
+- affiliation_id: INTEGER — The ID of the affiliation associated with the person, if it exists in the database.
+- affiliation: VARCHAR — The name of the person's affiliation (e.g., university or organization).
+- address: TEXT — The address of the person, typically related to their affiliation.
+- phone: VARCHAR — The phone number of the person.
+- invited_dt: TIMESTAMP — The timestamp indicating when the person was invited to the event.
+- is_untrusted: BOOLEAN — A boolean flag indicating whether the person is considered untrusted (e.g., for access control or moderation purposes).
+Foreign Keys:
+- (affiliation_id) → indico.affiliations(id)
+- (event_id) → events.events(id)
+- (user_id) → users.users(id)
+
+Table: events.contributions
+Description: Table storing information about individual contributions (e.g., talks, presentations) that are part of an event's program.
+Columns:
+- id: INTEGER — Unique identifier for the contribution.
+- friendly_id: INTEGER — Short numeric identifier for user-friendly display.
+- event_id: INTEGER — ID of the event to which this contribution belongs.
+- session_id: INTEGER — ID of the session to which this contribution is assigned.
+- session_block_id: INTEGER — ID of the specific session block where the contribution is scheduled.
+- track_id: INTEGER — ID of the track grouping this contribution by subject or topic.
+- abstract_id: INTEGER — ID of the abstract associated with this contribution.
+- type_id: INTEGER — ID of the contribution type (e.g., talk, poster).
+- code: VARCHAR — Optional alphanumeric code identifying the contribution.
+- duration: INTERVAL — The scheduled duration of the contribution.
+- board_number: VARCHAR — Identifier used for poster board assignment.
+- keywords: ARRAY — List of keywords associated with the contribution.
+- is_deleted: BOOLEAN — Flag indicating whether the contribution has been deleted.
+- last_friendly_subcontribution_id: INTEGER — Last used friendly ID for subcontributions.
+- description: TEXT — Description or abstract of the contribution.
+- title: VARCHAR — Title of the contribution.
+- render_mode: SMALLINT — Format in which the content is rendered (e.g., markdown, HTML).
+- protection_mode: SMALLINT — Defines access permissions for the contribution.
+- inherit_location: BOOLEAN — Indicates if the contribution inherits location info from its session block.
+- room_id: INTEGER — ID of the room where the contribution will be presented.
+- venue_id: INTEGER — ID of the venue for the contribution.
+- venue_name: VARCHAR — Name of the venue, if not referencing a predefined one.
+- room_name: VARCHAR — Name of the room, if not referencing a predefined one.
+- address: TEXT — Address of the venue.
+Foreign Keys:
+- (abstract_id) → event_abstracts.abstracts(id)
+- (event_id) → events.events(id)
+- (room_id) → roombooking.rooms(id)
+- (session_block_id) → events.session_blocks(id)
+- (session_block_id, session_id) → events.session_blocks(id, session_id)
+- (session_id) → events.sessions(id)
+- (track_id) → events.tracks(id)
+- (type_id) → events.contribution_types(id)
+- (venue_id) → roombooking.locations(id)
+- (venue_id, room_id) → roombooking.rooms(location_id, id)
+  
+Table: events.contribution_person_links
+Description: Table linking persons to contributions, specifying their roles such as speaker or author within a specific contribution.
+Columns:
+- id: INTEGER — Unique identifier for the person-contribution link.
+- contribution_id: INTEGER — ID of the contribution associated with this person.
+- person_id: INTEGER — ID of the person involved in the contribution.
+- is_speaker: BOOLEAN — Indicates whether the person is a speaker for the contribution.
+- author_type: SMALLINT — Numeric code representing the author role (e.g., primary author, co-author).
+- first_name: VARCHAR — First name of the person at the time of association.
+- last_name: VARCHAR — Last name of the person at the time of association.
+- title: SMALLINT — Numeric identifier for the person’s title (e.g., Dr., Prof.).
+- affiliation_id: INTEGER — ID referencing a known affiliation, if applicable.
+- affiliation: VARCHAR — Textual name of the person’s affiliation.
+- address: TEXT — Address related to the person’s affiliation or personal contact.
+- phone: VARCHAR — Phone number for the person.
+- display_order: INTEGER — Order in which the person should be displayed in lists or programs.
+Foreign Keys:
+- (affiliation_id) → indico.affiliations(id)
+- (contribution_id) → events.contributions(id)
+- (person_id) → events.persons(id)
+
+Table: events.timetable_entries
+Description: Table representing time-based entries in the event timetable, which can correspond to contributions, breaks, sessions, or custom blocks.
+Columns:
+- id: INTEGER — Unique identifier for the timetable entry.
+- event_id: INTEGER — ID of the event to which this timetable entry belongs.
+- parent_id: INTEGER — ID of the parent timetable entry, if this is a nested entry.
+- session_block_id: INTEGER — ID of the session block this entry is associated with.
+Foreign Keys:
+- (event_id) → events.events(id)
+- (session_block_id) → events.session_blocks(id)
+- (parent_id) → events.timetable_entries(id)
+
+Table: extracted_files
+Description: Table containing information about files extracted from the system.
+Columns:
+- id: INTEGER — Unique identifier for the extracted chunk.
+- file_id: INTEGER — References the associated file record.
+- user_id: INTEGER — Identifier of the user who uploaded the file.
+- storage_file_id: VARCHAR — Relative path to the extracted file within the filesystem.
+- extracted_content: TEXT — The text content extracted from the file.
+- embeddings: VECTOR — The vector representation of the extracted content, used for similarity search.
+Foreign Keys:
+- (file_id) → attachments.files(id)
+
+Table: events.notes
+Description: Table containing notes, meeting minutes attached to events, contributions, or sessions.
+Columns:
+- id: INTEGER — Unique identifier for the note.
+- is_deleted: BOOLEAN — Indicates whether the note has been deleted.
+- html: TEXT — The contents of the notes/meeting mintutes.
+- current_revision_id: INTEGER — The ID of the current revision of the note.
+- link_type: SMALLINT — The type of object the note is linked to.
+- event_id: INTEGER — ID of the related event.
+- linked_event_id: INTEGER — ID of a secondary event related via this note.
+- session_id: INTEGER — ID of the session this note is linked to.
+- contribution_id: INTEGER — ID of the contribution this note is linked to.
+- subcontribution_id: INTEGER — ID of the subcontribution this note is linked to.
+Foreign_keys:
+- (contribution_id) → events.contributions(id)
+- (current_revision_id) → events.note_revisions(id)
+- (event_id) → events.events(id)
+- (linked_event_id) → events.events(id)
+- (session_id) → events.sessions(id)
+- (subcontribution_id) → events.subcontributions(id)
+
+Table: events.event_person_links
+Description: Table linking persons to events with display metadata.
+Columns:
+- event_id: INTEGER — ID of the related event.
+- id: INTEGER — Unique ID for the link.
+- person_id: INTEGER — ID of the person.
+- first_name: VARCHAR — First name of the person.
+- last_name: VARCHAR — Last name of the person.
+- title: SMALLINT — Title identifier of the person.
+- affiliation_id: INTEGER — ID of the affiliation.
+- affiliation: VARCHAR — Name of the affiliation.
+- address: TEXT — Address of the person.
+- phone: VARCHAR — Phone number of the person.
+- display_order: INTEGER — Position in the display order.
+Foreign_keys:
+- (affiliation_id) → indico.affiliations(id)
+- (event_id) → events.events(id)
+- (person_id) → events.persons(id)
+
+Table: categories.categories
+Description: Table containing category hierarchy and metadata.
+Columns:
+- id: INTEGER — Unique ID of the category.
+- parent_id: INTEGER — ID of the parent category.
+- is_deleted: BOOLEAN — Indicates if the category is deleted.
+- position: INTEGER — Ordering within siblings.
+- visibility: INTEGER — Visibility level of the category.
+- icon_metadata: JSONB — Metadata for the category icon.
+- icon: BYTEA — Binary icon data.
+- logo_metadata: JSONB — Metadata for the category logo.
+- logo: BYTEA — Binary logo data.
+- timezone: VARCHAR — Timezone used in the category.
+- default_event_themes: JSONB — Default themes for events.
+- event_creation_mode: SMALLINT — Creation policy for events.
+- event_creation_notification_emails: ARRAY — Emails notified on event creation.
+- event_message_mode: SMALLINT — How messages are displayed.
+- event_message: TEXT — Default message shown on event pages.
+- suggestions_disabled: BOOLEAN — Whether event suggestions are disabled.
+- notify_managers: BOOLEAN — Notify managers on changes.
+- show_future_months: INTEGER — Number of future months shown.
+- google_wallet_mode: SMALLINT — Google Wallet config.
+- google_wallet_settings: JSONB — Google Wallet setup data.
+- apple_wallet_mode: SMALLINT — Apple Wallet config.
+- apple_wallet_settings: JSONB — Apple Wallet setup data.
+- is_flat_view_enabled: BOOLEAN — Whether flat view is enabled.
+- default_ticket_template_id: INTEGER — Default ticket template ID.
+- default_badge_template_id: INTEGER — Default badge template ID.
+- title: VARCHAR — Name of the category.
+- description: TEXT — Description of the category.
+- protection_mode: SMALLINT — Access control level.
+- no_access_contact: VARCHAR — Contact for access issues.
+Foreign_keys:
+- (default_badge_template_id) → indico.designer_templates(id)
+- (default_ticket_template_id) → indico.designer_templates(id)
+- (parent_id) → categories.categories(id)
+
+Table: users.users
+Description: Table storing user profile and system status.
+Columns:
+- id: INTEGER — Unique identifier for the user.
+- first_name: VARCHAR — First name of the user.
+- last_name: VARCHAR — Last name of the user.
+- title: SMALLINT — Title of the user.
+- affiliation: VARCHAR — Affiliation of the user.
+- affiliation_id: INTEGER — ID of the affiliation.
+- phone: VARCHAR — Phone number of the user.
+- address: TEXT — Address of the user.
+- merged_into_id: INTEGER — ID of the user this one was merged into.
+- is_system: BOOLEAN — Indicates system user.
+- is_admin: BOOLEAN — Indicates administrative privileges.
+- is_blocked: BOOLEAN — Indicates blocked account.
+- is_pending: BOOLEAN — Indicates pending approval.
+- is_deleted: BOOLEAN — Indicates deleted account.
+- accepted_terms_dt: TIMESTAMP — Timestamp of terms acceptance.
+- signing_secret: UUID — Unique signing identifier.
+- picture: BYTEA — Profile picture binary data.
+- picture_metadata: JSONB — Metadata for profile picture.
+- picture_source: SMALLINT — Source identifier for picture.
+- created_dt: TIMESTAMP — Account creation date.
+foreign_keys:
+- (affiliation_id) → indico.affiliations(id)
+- (merged_into_id) → users.users(id)
+
