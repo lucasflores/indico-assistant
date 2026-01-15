@@ -56,8 +56,9 @@ class RHHealth(RH):
         # Check if plugin is enabled
         enabled = plugin.settings.get("enabled") if plugin else False
 
-        # Check LLM connectivity
-        llm_status = self._check_llm_status(plugin)
+        # Check LLM connectivity (returns dict with status details)
+        llm_info = self._check_llm_status(plugin)
+        llm_status = llm_info.get("status", "not_configured")
 
         # Determine overall status
         if not enabled:
@@ -74,7 +75,7 @@ class RHHealth(RH):
             "status": status,
             "plugin_version": __version__,
             "indico_version": get_indico_version(),
-            "llm_status": llm_status,
+            "llm": llm_info,  # Full LLM status with details
             "settings_valid": settings_valid,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -82,25 +83,63 @@ class RHHealth(RH):
     def _check_llm_status(self, plugin):
         """Check the LLM service connectivity status.
 
+        Uses the LLM service's health_check() method to verify actual
+        connectivity to the LLM provider.
+
         Args:
             plugin: The AssistantPlugin instance.
 
         Returns:
-            String indicating LLM status: 'connected', 'unavailable', or 'not_configured'.
+            Dictionary containing LLM status information:
+            - status: 'connected', 'unavailable', 'timeout', or 'not_configured'
+            - latency_ms: Response latency in milliseconds (if connected)
+            - provider: The LLM provider name
+            - model: The LLM model name
+            - error: Error message (if not connected)
         """
         if plugin is None:
-            return "not_configured"
+            return {
+                "status": "not_configured",
+                "provider": None,
+                "model": None,
+            }
 
         # Check if LLM is configured
         provider = plugin.settings.get("llm_provider")
+        model = plugin.settings.get("llm_model")
         if not provider:
-            return "not_configured"
+            return {
+                "status": "not_configured",
+                "provider": None,
+                "model": None,
+            }
 
-        # Check if LLM client is available
-        if plugin.llm_client is None:
-            return "unavailable"
-
-        return "connected"
+        # Use the LLM service to perform actual health check
+        try:
+            health_status = plugin.llm_service.health_check()
+            result = {
+                "status": health_status.status,
+                "provider": provider,
+                "model": model,
+            }
+            
+            # Add latency if connected
+            if health_status.latency_ms is not None:
+                result["latency_ms"] = health_status.latency_ms
+            
+            # Add error message if not connected
+            if health_status.error:
+                result["error"] = health_status.error
+            
+            return result
+        except Exception as e:
+            # Fallback in case of unexpected errors
+            return {
+                "status": "unavailable",
+                "provider": provider,
+                "model": model,
+                "error": str(e),
+            }
 
     def _validate_settings(self, plugin):
         """Validate current plugin settings.

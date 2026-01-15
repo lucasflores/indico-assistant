@@ -11,6 +11,7 @@ DEFAULT_SETTINGS = {
     "llm_api_key": None,
     "timeout_seconds": 30,
     "max_tokens": 2048,
+    "max_retries": 2,
 }
 
 EVENT_SETTINGS_DEFAULTS = {
