@@ -4,8 +4,10 @@ This module defines the URL routes for the plugin's REST API,
 including health check and chat API endpoints.
 
 Feature: 004-chat-api
+Feature: 005-langfuse-observability (T023 - request teardown flush)
 """
 
+from flask import g
 from indico.core.plugins import IndicoPluginBlueprint
 
 # Create the blueprint with /api/assistant prefix
@@ -14,6 +16,31 @@ blueprint = IndicoPluginBlueprint(
     __name__,
     url_prefix="/api/assistant",
 )
+
+
+@blueprint.after_request
+def _flush_observability_traces(response):
+    """Flush Langfuse traces after each request (T023).
+    
+    This ensures traces are sent before the response completes,
+    providing timely observability data. Uses graceful degradation -
+    flush failures are logged but don't affect the response.
+    
+    Args:
+        response: The Flask response object
+        
+    Returns:
+        The unmodified response
+    """
+    # Only flush if tracer was used during this request
+    tracer = getattr(g, "_observability_tracer", None)
+    if tracer is not None:
+        try:
+            tracer.flush()
+        except Exception:
+            # Graceful degradation - don't fail the request
+            pass
+    return response
 
 
 def _register_routes():
@@ -53,6 +80,17 @@ def _register_routes():
     
     # Feedback endpoint (Feature 004, User Story 3)
     blueprint.add_url_rule("/feedback", "feedback", RHFeedback, methods=["POST"])
+    
+    # Admin API endpoints (Feature 005, T043)
+    from indico_assistant.controllers.admin import (
+        RHAdminErrors,
+        RHAdminHealth,
+        RHAdminStats,
+    )
+    
+    blueprint.add_url_rule("/admin/stats", "admin_stats", RHAdminStats, methods=["GET"])
+    blueprint.add_url_rule("/admin/errors", "admin_errors", RHAdminErrors, methods=["GET"])
+    blueprint.add_url_rule("/admin/health", "admin_health", RHAdminHealth, methods=["GET"])
 
 
 # Defer route registration to avoid circular imports

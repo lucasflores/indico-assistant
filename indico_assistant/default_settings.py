@@ -12,6 +12,12 @@ DEFAULT_SETTINGS = {
     "timeout_seconds": 30,
     "max_tokens": 2048,
     "max_retries": 2,
+    # Langfuse observability settings (Feature 005)
+    "langfuse_enabled": False,
+    "langfuse_host": "https://cloud.langfuse.com",
+    "langfuse_public_key": None,
+    "langfuse_secret_key": None,
+    "langfuse_privacy_level": "metadata",  # "metadata", "masked", or "full"
 }
 
 EVENT_SETTINGS_DEFAULTS = {
