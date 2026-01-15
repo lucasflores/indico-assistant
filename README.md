@@ -84,6 +84,65 @@ Status values:
 - `degraded`: Plugin functional but LLM unavailable
 - `unhealthy`: Plugin disabled or critical error
 
+## NL2SQL Pipeline
+
+The NL2SQL pipeline allows users to ask natural language questions about event data:
+
+### Basic Usage
+
+```python
+from indico_assistant.services import NL2SQLPipeline, create_nl2sql_pipeline
+
+# In a request handler
+pipeline = create_nl2sql_pipeline(plugin)
+result = pipeline.process(
+    question="How many events are there this week?",
+    user_id=current_user.id,
+)
+
+if result.success:
+    print(result.answer)  # "There are 12 events this week..."
+else:
+    print(result.error.user_message)  # "I couldn't understand..."
+```
+
+### Supported Questions
+
+| Question Type | Example |
+|--------------|---------|
+| Event counts | "How many events are there this month?" |
+| Event lists | "Show me all workshops next week" |
+| Registrations | "Who registered for the physics conference?" |
+| Contributions | "List talks in the parallel sessions" |
+| Speakers | "Who are the speakers at tomorrow's event?" |
+
+### Security Features
+
+- **SELECT-only queries**: No data modification allowed
+- **Table allowlist**: Only approved tables can be queried
+- **Permission filtering**: Results filtered by user access
+- **Query timeout**: 30-second default timeout
+- **Row limit**: Maximum 1000 rows per query
+
+### Pipeline Result
+
+```python
+result = pipeline.process(question="...", user_id=user_id)
+
+# Success response
+result.success        # True
+result.answer         # Natural language answer
+result.generated_sql  # SQL query (for debugging)
+result.row_count      # Number of results
+result.total_time_ms  # Processing time
+
+# Error response
+result.success                  # False
+result.error.user_message       # User-friendly error
+result.error.error_type         # Error classification
+result.error.message            # Internal error (for logging)
+```
+
 ## CLI Commands
 
 ```bash

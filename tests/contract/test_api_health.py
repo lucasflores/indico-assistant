@@ -71,7 +71,9 @@ class TestHealthEndpointContract:
         assert isinstance(response["status"], str)
         assert isinstance(response["plugin_version"], str)
         assert isinstance(response["indico_version"], str)
-        assert isinstance(response["llm_status"], str)
+        # llm field is now a dict with detailed info, not a simple string
+        assert isinstance(response["llm"], dict)
+        assert "status" in response["llm"]
         assert isinstance(response["settings_valid"], bool)
         assert isinstance(response["timestamp"], str)
 
