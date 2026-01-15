@@ -39,7 +39,7 @@ class TestHealthCLICommand:
 
         runner = CliRunner()
 
-        with patch("indico_assistant.cli.plugin_engine") as mock_engine:
+        with patch("indico.core.plugins.plugin_engine") as mock_engine:
             mock_plugin = MagicMock()
             mock_plugin.settings.get = MagicMock(side_effect=lambda k: {
                 "enabled": True,
@@ -62,7 +62,7 @@ class TestHealthCLICommand:
 
         runner = CliRunner()
 
-        with patch("indico_assistant.cli.plugin_engine") as mock_engine:
+        with patch("indico.core.plugins.plugin_engine") as mock_engine:
             mock_engine.get_plugin.return_value = None
 
             result = runner.invoke(health_command)
@@ -80,7 +80,7 @@ class TestConfigCLICommand:
 
         runner = CliRunner()
 
-        with patch("indico_assistant.cli.plugin_engine") as mock_engine:
+        with patch("indico.core.plugins.plugin_engine") as mock_engine:
             mock_plugin = MagicMock()
             mock_plugin.settings.get = MagicMock(side_effect=lambda k: {
                 "enabled": True,
@@ -106,7 +106,7 @@ class TestConfigCLICommand:
 
         runner = CliRunner()
 
-        with patch("indico_assistant.cli.plugin_engine") as mock_engine:
+        with patch("indico.core.plugins.plugin_engine") as mock_engine:
             mock_plugin = MagicMock()
             mock_plugin.settings.get = MagicMock(side_effect=lambda k: {
                 "enabled": True,
@@ -132,7 +132,7 @@ class TestConfigCLICommand:
 
         runner = CliRunner()
 
-        with patch("indico_assistant.cli.plugin_engine") as mock_engine:
+        with patch("indico.core.plugins.plugin_engine") as mock_engine:
             mock_plugin = MagicMock()
             mock_plugin.settings.get = MagicMock(side_effect=lambda k: {
                 "enabled": True,
