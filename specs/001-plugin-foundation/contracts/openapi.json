@@ -1,0 +1,159 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Indico Assistant Plugin API",
+    "description": "API for the Indico Assistant plugin - Plugin Foundation feature",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Indico Assistant Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/assistant",
+      "description": "Plugin API mounted under Indico"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Health Check",
+        "description": "Returns the health status of the plugin including LLM connectivity and configuration validity.",
+        "tags": ["Health"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Health status response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "healthy": {
+                    "summary": "Healthy system",
+                    "value": {
+                      "status": "healthy",
+                      "plugin_version": "0.1.0",
+                      "indico_version": "3.3.0",
+                      "llm_status": "connected",
+                      "settings_valid": true,
+                      "timestamp": "2025-01-14T12:00:00Z"
+                    }
+                  },
+                  "degraded": {
+                    "summary": "Degraded (LLM unavailable)",
+                    "value": {
+                      "status": "degraded",
+                      "plugin_version": "0.1.0",
+                      "indico_version": "3.3.0",
+                      "llm_status": "unavailable",
+                      "settings_valid": true,
+                      "timestamp": "2025-01-14T12:00:00Z",
+                      "details": {
+                        "llm_error": "Connection refused to http://localhost:11434"
+                      }
+                    }
+                  },
+                  "unhealthy": {
+                    "summary": "Unhealthy (disabled)",
+                    "value": {
+                      "status": "unhealthy",
+                      "plugin_version": "0.1.0",
+                      "indico_version": "3.3.0",
+                      "llm_status": "not_configured",
+                      "settings_valid": false,
+                      "timestamp": "2025-01-14T12:00:00Z",
+                      "details": {
+                        "reason": "Plugin is disabled by administrator"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "plugin_version", "indico_version", "llm_status", "settings_valid", "timestamp"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unhealthy"],
+            "description": "Overall health status of the plugin"
+          },
+          "plugin_version": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+",
+            "description": "Semantic version of the plugin",
+            "example": "0.1.0"
+          },
+          "indico_version": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+",
+            "description": "Version of the Indico installation",
+            "example": "3.3.0"
+          },
+          "llm_status": {
+            "type": "string",
+            "enum": ["connected", "unavailable", "not_configured"],
+            "description": "Current LLM service connectivity status"
+          },
+          "settings_valid": {
+            "type": "boolean",
+            "description": "Whether current plugin settings pass validation"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the health check"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Additional diagnostic information (optional)"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error code",
+            "example": "internal_error"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message",
+            "example": "An unexpected error occurred"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Plugin health and status endpoints"
+    }
+  ]
+}

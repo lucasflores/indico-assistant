@@ -1,0 +1,20 @@
+"""Default settings for the Indico Assistant plugin.
+
+These values are used when no settings have been configured by an administrator.
+"""
+
+DEFAULT_SETTINGS = {
+    "enabled": True,
+    "llm_provider": "ollama",
+    "llm_model": "llama3.2",
+    "llm_base_url": "http://localhost:11434",
+    "llm_api_key": None,
+    "timeout_seconds": 30,
+    "max_tokens": 2048,
+}
+
+EVENT_SETTINGS_DEFAULTS = {
+    "enabled": None,  # None = inherit from global
+    "custom_system_prompt": None,
+    "allowed_tables": None,  # None = all tables allowed
+}
