@@ -1,0 +1,613 @@
+openapi: 3.1.0
+info:
+  title: Indico Assistant Chat API
+  description: REST API for conversational chat with session persistence and feedback collection
+  version: 1.0.0
+  contact:
+    name: Indico Assistant Team
+
+servers:
+  - url: /api/assistant
+    description: Plugin API prefix
+
+tags:
+  - name: Chat
+    description: Send messages and receive AI responses
+  - name: Sessions
+    description: Manage conversation sessions
+  - name: Feedback
+    description: Submit feedback on assistant responses
+
+paths:
+  /chat:
+    post:
+      operationId: sendChatMessage
+      tags: [Chat]
+      summary: Send a chat message
+      description: |
+        Send a message to the assistant and receive a response.
+        - If `session_id` is provided, continues existing conversation
+        - If `session_id` is omitted, creates a new session
+        - If `event_id` is provided, scopes queries to that event
+      security:
+        - indicoSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              newSession:
+                summary: Start new conversation
+                value:
+                  message: "How many registrations for ICHEP 2024?"
+              continueSession:
+                summary: Continue existing conversation
+                value:
+                  message: "Break that down by country"
+                  session_id: "550e8400-e29b-41d4-a716-446655440000"
+              eventScoped:
+                summary: Event-scoped query
+                value:
+                  message: "Show me the schedule for tomorrow"
+                  event_id: 12345
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              example:
+                response: "ICHEP 2024 has 1,247 registrations across 52 countries."
+                session_id: "550e8400-e29b-41d4-a716-446655440000"
+                message_id: "660e8400-e29b-41d4-a716-446655440001"
+                metadata:
+                  sql_generated: "SELECT COUNT(*) FROM registrations WHERE event_id = 12345"
+                  confidence: 0.95
+                  data_sources: ["registrations"]
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyMessage:
+                  value:
+                    error: "VALIDATION_ERROR"
+                    message: "Message cannot be empty"
+                    details: { field: "message" }
+                messageTooLong:
+                  value:
+                    error: "VALIDATION_ERROR"
+                    message: "Message exceeds 10,000 character limit"
+                    details: { field: "message", max_length: 10000 }
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "UNAUTHORIZED"
+                message: "Authentication required"
+        '403':
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                eventAccessDenied:
+                  value:
+                    error: "FORBIDDEN"
+                    message: "You do not have access to this event"
+                    details: { event_id: 12345 }
+                sessionAccessDenied:
+                  value:
+                    error: "FORBIDDEN"
+                    message: "Session belongs to another user"
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "NOT_FOUND"
+                message: "Session not found"
+                details: { session_id: "550e8400-e29b-41d4-a716-446655440000" }
+        '422':
+          description: Query could not be processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "UNPROCESSABLE_QUERY"
+                message: "Unable to generate SQL for this query"
+                details: { reason: "ambiguous_reference" }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "RATE_LIMITED"
+                message: "Too many requests, please wait before retrying"
+                details: { retry_after: 60 }
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until rate limit resets
+
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      summary: List user's chat sessions
+      description: |
+        Returns paginated list of chat sessions for the authenticated user.
+        Sessions are sorted by last activity (most recent first).
+      security:
+        - indicoSession: []
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of sessions to return (1-100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of sessions to skip for pagination
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: event_id
+          in: query
+          description: Filter sessions by event (optional)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+              example:
+                sessions:
+                  - session_id: "550e8400-e29b-41d4-a716-446655440000"
+                    created_at: "2026-01-10T10:00:00Z"
+                    last_message_at: "2026-01-14T15:30:00Z"
+                    message_count: 12
+                    event_id: null
+                  - session_id: "660e8400-e29b-41d4-a716-446655440000"
+                    created_at: "2026-01-12T09:00:00Z"
+                    last_message_at: "2026-01-12T09:45:00Z"
+                    message_count: 4
+                    event_id: 12345
+                total: 5
+                limit: 20
+                offset: 0
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      summary: Get session with message history
+      description: |
+        Returns full conversation history for a session.
+        Only returns sessions owned by the authenticated user.
+      security:
+        - indicoSession: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session details with messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetailResponse'
+              example:
+                session_id: "550e8400-e29b-41d4-a716-446655440000"
+                event_id: null
+                created_at: "2026-01-10T10:00:00Z"
+                messages:
+                  - message_id: "770e8400-e29b-41d4-a716-446655440001"
+                    role: "user"
+                    content: "How many registrations for ICHEP 2024?"
+                    created_at: "2026-01-10T10:00:00Z"
+                    metadata: null
+                  - message_id: "880e8400-e29b-41d4-a716-446655440002"
+                    role: "assistant"
+                    content: "ICHEP 2024 has 1,247 registrations across 52 countries."
+                    created_at: "2026-01-10T10:00:05Z"
+                    metadata:
+                      sql_generated: "SELECT COUNT(*) FROM registrations..."
+                      confidence: 0.95
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Session belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      operationId: deleteSession
+      tags: [Sessions]
+      summary: Delete a chat session
+      description: |
+        Permanently deletes a session and all its messages.
+        Only the session owner can delete their sessions.
+      security:
+        - indicoSession: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Session deleted successfully (no content)
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Session belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /feedback:
+    post:
+      operationId: submitFeedback
+      tags: [Feedback]
+      summary: Submit feedback on a message
+      description: |
+        Records user feedback for an assistant response.
+        Users can only submit feedback on messages in their own sessions.
+        Supports thumbs up/down, 1-5 rating, and text comments.
+        Duplicate feedback of the same type updates the existing entry.
+      security:
+        - indicoSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackRequest'
+            examples:
+              thumbsUp:
+                summary: Positive feedback
+                value:
+                  message_id: "880e8400-e29b-41d4-a716-446655440002"
+                  feedback_type: "thumbs_up"
+                  value: true
+              thumbsDown:
+                summary: Negative feedback
+                value:
+                  message_id: "880e8400-e29b-41d4-a716-446655440002"
+                  feedback_type: "thumbs_down"
+                  value: true
+              rating:
+                summary: Star rating
+                value:
+                  message_id: "880e8400-e29b-41d4-a716-446655440002"
+                  feedback_type: "rating"
+                  value: 4
+              comment:
+                summary: Text feedback
+                value:
+                  message_id: "880e8400-e29b-41d4-a716-446655440002"
+                  feedback_type: "comment"
+                  value: "The SQL query returned correct results but explanation could be clearer"
+      responses:
+        '201':
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                feedback_id: "990e8400-e29b-41d4-a716-446655440003"
+                message: "Feedback recorded"
+        '400':
+          description: Invalid feedback data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidRating:
+                  value:
+                    error: "VALIDATION_ERROR"
+                    message: "Rating must be between 1 and 5"
+                    details: { field: "value", min: 1, max: 5 }
+                invalidType:
+                  value:
+                    error: "VALIDATION_ERROR"
+                    message: "Invalid feedback type"
+                    details: { field: "feedback_type", allowed: ["thumbs_up", "thumbs_down", "rating", "comment"] }
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Cannot submit feedback on another user's message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Message not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    indicoSession:
+      type: apiKey
+      in: cookie
+      name: indico_session
+      description: Indico session cookie for authenticated users
+
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: User's message to the assistant
+        session_id:
+          type: string
+          format: uuid
+          description: Continue an existing session (optional)
+        event_id:
+          type: integer
+          description: Scope queries to a specific event (optional)
+
+    ChatResponse:
+      type: object
+      required:
+        - response
+        - session_id
+        - message_id
+      properties:
+        response:
+          type: string
+          description: Assistant's response text
+        session_id:
+          type: string
+          format: uuid
+          description: Session UUID (existing or newly created)
+        message_id:
+          type: string
+          format: uuid
+          description: UUID of the assistant's response message
+        metadata:
+          type: object
+          description: Additional metadata about the response
+          properties:
+            sql_generated:
+              type: string
+              description: Generated SQL query (if applicable)
+            confidence:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+              description: Confidence score for the response
+            data_sources:
+              type: array
+              items:
+                type: string
+              description: Tables/sources used in the query
+
+    SessionListResponse:
+      type: object
+      required:
+        - sessions
+        - total
+        - limit
+        - offset
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionListItem'
+        total:
+          type: integer
+          description: Total number of sessions for this user
+        limit:
+          type: integer
+          description: Requested limit
+        offset:
+          type: integer
+          description: Requested offset
+
+    SessionListItem:
+      type: object
+      required:
+        - session_id
+        - created_at
+        - last_message_at
+        - message_count
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        last_message_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+        event_id:
+          type: integer
+          nullable: true
+
+    SessionDetailResponse:
+      type: object
+      required:
+        - session_id
+        - created_at
+        - messages
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        event_id:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageItem'
+
+    MessageItem:
+      type: object
+      required:
+        - message_id
+        - role
+        - content
+        - created_at
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          nullable: true
+
+    FeedbackRequest:
+      type: object
+      required:
+        - message_id
+        - feedback_type
+        - value
+      properties:
+        message_id:
+          type: string
+          format: uuid
+          description: UUID of the message to provide feedback on
+        feedback_type:
+          type: string
+          enum: [thumbs_up, thumbs_down, rating, comment]
+          description: Type of feedback being submitted
+        value:
+          oneOf:
+            - type: boolean
+            - type: integer
+              minimum: 1
+              maximum: 5
+            - type: string
+          description: |
+            Feedback value (type depends on feedback_type):
+            - thumbs_up/thumbs_down: boolean
+            - rating: integer 1-5
+            - comment: string
+
+    FeedbackResponse:
+      type: object
+      required:
+        - feedback_id
+      properties:
+        feedback_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          default: "Feedback recorded"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - UNPROCESSABLE_QUERY
+            - RATE_LIMITED
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          nullable: true
+          description: Additional error context
