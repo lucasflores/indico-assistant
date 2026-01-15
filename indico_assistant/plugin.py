@@ -32,6 +32,7 @@ class AssistantPlugin(IndicoPlugin):
         """
         super().init()
         self._llm_client = None  # Lazy initialization for graceful degradation
+        self._llm_service = None  # Lazy initialization for LLM service
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
@@ -60,6 +61,22 @@ class AssistantPlugin(IndicoPlugin):
         # LLM client will be implemented in a later feature
         # For now, return None to indicate degraded mode
         return None
+
+    @property
+    def llm_service(self):
+        """Get the LLM service, initializing lazily if needed.
+
+        The LLM service provides structured LLM interactions with
+        automatic validation, retry logic, and error handling.
+
+        Returns:
+            LLMService: The LLM service instance.
+        """
+        if self._llm_service is None:
+            from indico_assistant.services.llm import create_llm_service
+
+            self._llm_service = create_llm_service(self)
+        return self._llm_service
 
     def get_blueprints(self):
         """Return the blueprints for this plugin.

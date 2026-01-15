@@ -27,6 +27,9 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "indico>=3.3",
+    "instructor>=1.0.0",
+    "openai>=1.0.0",
+    "ollama>=0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -78,7 +81,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --basetemp=/tmp/pytest"
 
 [tool.coverage.run]
 source = ["indico_assistant"]
