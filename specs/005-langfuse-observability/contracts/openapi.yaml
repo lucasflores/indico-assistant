@@ -1,0 +1,395 @@
+openapi: 3.0.3
+info:
+  title: Indico Assistant Admin API
+  description: |
+    Admin endpoints for observability metrics and error debugging.
+    These endpoints require admin permission and serve data from local PostgreSQL cache.
+  version: 1.0.0
+
+servers:
+  - url: /api/assistant
+    description: Plugin API base path
+
+paths:
+  /admin/stats:
+    get:
+      summary: Get usage statistics
+      description: |
+        Returns aggregated usage statistics for the specified time period.
+        Data is served from local cache (synced hourly from Langfuse).
+      operationId: getAdminStats
+      tags:
+        - Admin
+      security:
+        - indicoSession: []
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: day
+          description: Time period for aggregation
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Start date for custom range (ISO 8601)
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: End date for custom range (ISO 8601)
+      responses:
+        '200':
+          description: Usage statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageStatsResponse'
+        '403':
+          description: Admin permission required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/errors:
+    get:
+      summary: Get recent errors
+      description: |
+        Returns recent error records for debugging.
+        Errors are stored for 7 days and can be filtered by type.
+      operationId: getAdminErrors
+      tags:
+        - Admin
+      security:
+        - indicoSession: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Maximum number of errors to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Offset for pagination
+        - name: error_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - LLM_TIMEOUT
+              - LLM_RATE_LIMIT
+              - LLM_VALIDATION
+              - LLM_PROVIDER_ERROR
+              - SQL_SYNTAX_ERROR
+              - SQL_EXECUTION_ERROR
+              - SQL_TIMEOUT
+              - PERMISSION_DENIED
+              - VALIDATION_ERROR
+              - INTERNAL_ERROR
+          description: Filter by error type
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Filter errors after this timestamp
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Filter errors before this timestamp
+      responses:
+        '200':
+          description: Error records retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorListResponse'
+        '403':
+          description: Admin permission required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/health:
+    get:
+      summary: Get observability health status
+      description: |
+        Returns health status of observability components including
+        Langfuse connectivity and sync status.
+      operationId: getAdminHealth
+      tags:
+        - Admin
+      security:
+        - indicoSession: []
+      responses:
+        '200':
+          description: Health status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '403':
+          description: Admin permission required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    indicoSession:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Indico session cookie (admin permission required)
+
+  schemas:
+    UsageStatsResponse:
+      type: object
+      required:
+        - period
+        - stats
+        - last_synced_at
+      properties:
+        period:
+          type: object
+          required:
+            - type
+            - start
+            - end
+          properties:
+            type:
+              type: string
+              enum: [day, week, month, custom]
+              example: day
+            start:
+              type: string
+              format: date-time
+              example: "2026-01-15T00:00:00Z"
+            end:
+              type: string
+              format: date-time
+              example: "2026-01-15T23:59:59Z"
+        stats:
+          type: object
+          required:
+            - total_queries
+            - successful_queries
+            - error_count
+          properties:
+            total_queries:
+              type: integer
+              minimum: 0
+              example: 1250
+            successful_queries:
+              type: integer
+              minimum: 0
+              example: 1180
+            error_count:
+              type: integer
+              minimum: 0
+              example: 70
+            error_rate:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+              example: 0.056
+            avg_latency_ms:
+              type: number
+              format: float
+              nullable: true
+              example: 2450.5
+            p95_latency_ms:
+              type: number
+              format: float
+              nullable: true
+              example: 5200.0
+            total_input_tokens:
+              type: integer
+              minimum: 0
+              example: 125000
+            total_output_tokens:
+              type: integer
+              minimum: 0
+              example: 250000
+            queries_by_intent:
+              type: object
+              additionalProperties:
+                type: integer
+              example:
+                count_query: 500
+                search: 300
+                aggregation: 200
+                lookup: 250
+        last_synced_at:
+          type: string
+          format: date-time
+          example: "2026-01-15T14:00:00Z"
+
+    ErrorListResponse:
+      type: object
+      required:
+        - errors
+        - total
+        - limit
+        - offset
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorRecord'
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of errors matching filters
+          example: 150
+        limit:
+          type: integer
+          example: 50
+        offset:
+          type: integer
+          example: 0
+
+    ErrorRecord:
+      type: object
+      required:
+        - id
+        - correlation_id
+        - timestamp
+        - error_type
+        - error_message
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        correlation_id:
+          type: string
+          example: "abcdef1234567890abcdef1234567890"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-01-15T10:30:00Z"
+        error_type:
+          type: string
+          enum:
+            - LLM_TIMEOUT
+            - LLM_RATE_LIMIT
+            - LLM_VALIDATION
+            - LLM_PROVIDER_ERROR
+            - SQL_SYNTAX_ERROR
+            - SQL_EXECUTION_ERROR
+            - SQL_TIMEOUT
+            - PERMISSION_DENIED
+            - VALIDATION_ERROR
+            - INTERNAL_ERROR
+          example: SQL_EXECUTION_ERROR
+        error_message:
+          type: string
+          example: "Query execution timed out after 30 seconds"
+        stack_trace:
+          type: string
+          nullable: true
+          description: Full stack trace (only at "full" privacy level)
+        langfuse_trace_url:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://cloud.langfuse.com/trace/abc123"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - components
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          example: healthy
+        components:
+          type: object
+          properties:
+            langfuse:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [connected, disconnected, disabled]
+                  example: connected
+                last_check:
+                  type: string
+                  format: date-time
+                  example: "2026-01-15T14:30:00Z"
+            local_storage:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [connected, disconnected]
+                  example: connected
+                last_sync:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  example: "2026-01-15T14:00:00Z"
+                sync_status:
+                  type: string
+                  enum: [completed, running, failed]
+                  example: completed
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          example: FORBIDDEN
+        message:
+          type: string
+          example: Admin permission required
+        details:
+          type: object
+          additionalProperties: true
+
+tags:
+  - name: Admin
+    description: Administrative endpoints for observability metrics and debugging

@@ -2,13 +2,15 @@
 
 This module provides the LLMService class which handles all LLM
 provider interactions using the Instructor library.
+
+Feature: 005-langfuse-observability (T019) - Added tracing instrumentation
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -17,6 +19,7 @@ from indico_assistant.services.llm.models import LLMResponse, HealthStatus
 
 if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
+    from indico_assistant.services.observability.tracer import Tracer
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,15 @@ class LLMService:
         self._plugin = plugin
         self._client = None
         self._logger = logger
+        self._tracer: Optional["Tracer"] = None
+    
+    def set_tracer(self, tracer: "Tracer") -> None:
+        """Set tracer for observability instrumentation (T019).
+        
+        Args:
+            tracer: Tracer instance for LLM call tracing
+        """
+        self._tracer = tracer
     
     def _get_settings(self) -> dict[str, Any]:
         """Extract LLM configuration from plugin settings.
@@ -149,6 +161,7 @@ class LLMService:
             - Never raises exceptions to caller (all errors wrapped in LLMResponse)
             - Logs call metadata but NOT prompt/response content
             - Automatically retries on validation failures
+            - Traces LLM calls if tracer is configured (Feature 005)
         """
         start_time = time.time()
         retries = 0
@@ -170,16 +183,42 @@ class LLMService:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
+        # Prepare tracing context (T019)
+        tracer = self._tracer
+        generation_name = f"llm-{response_model.__name__}"
+        
         try:
-            # Make the LLM call with Instructor
-            result = client.chat.completions.create(
-                messages=messages,
-                response_model=response_model,
-                max_retries=effective_max_retries,
-                timeout=effective_timeout,
-            )
-            
-            latency_ms = int((time.time() - start_time) * 1000)
+            # Make the LLM call with Instructor, optionally traced
+            if tracer is not None:
+                with tracer.generation(
+                    name=generation_name,
+                    model=settings["model"],
+                    prompt=prompt,
+                ) as gen:
+                    result = client.chat.completions.create(
+                        messages=messages,
+                        response_model=response_model,
+                        max_retries=effective_max_retries,
+                        timeout=effective_timeout,
+                    )
+                    
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    
+                    # Complete the generation span with response details
+                    response_str = result.model_dump_json() if hasattr(result, 'model_dump_json') else str(result)
+                    gen.complete(
+                        response=response_str,
+                        latency_ms=latency_ms,
+                    )
+            else:
+                # No tracing - original behavior
+                result = client.chat.completions.create(
+                    messages=messages,
+                    response_model=response_model,
+                    max_retries=effective_max_retries,
+                    timeout=effective_timeout,
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
             
             # Log metadata (not content)
             self._logger.info(
@@ -202,6 +241,18 @@ class LLMService:
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             error = _map_exception_to_error(e)
+            
+            # Record error in trace if available (T019)
+            if tracer is not None:
+                try:
+                    with tracer.generation(
+                        name=generation_name,
+                        model=settings["model"],
+                        prompt=prompt,
+                    ) as gen:
+                        gen.error(e, include_trace=True)
+                except Exception:
+                    pass  # Tracing errors must not affect main flow
             
             # Log error metadata with validation error details for FR-008
             log_extra = {
