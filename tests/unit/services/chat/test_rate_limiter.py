@@ -12,11 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from indico_assistant.services.chat.rate_limiter import (
-    RATE_LIMITS,
     RateLimitResult,
     RateLimiter,
     get_rate_limiter,
 )
+
+# Access RATE_LIMITS from the class
+RATE_LIMITS = RateLimiter.RATE_LIMITS
 
 
 class TestRateLimitResult:
