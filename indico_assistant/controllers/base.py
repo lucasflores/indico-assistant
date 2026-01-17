@@ -1,6 +1,7 @@
 """Base controller classes for Chat API endpoints.
 
 Feature: 004-chat-api
+Feature: 006-vector-search-rag
 Task: T011
 """
 
@@ -13,7 +14,42 @@ from werkzeug.exceptions import Forbidden, NotFound, Unauthorized
 from indico_assistant.schemas.errors import ErrorCode, create_error_response
 
 
-class RHChatBase(RH):
+class RHAssistantBase(RH):
+    """Base class for all Assistant plugin API endpoints.
+    
+    Provides common functionality for authenticated endpoints.
+    Subclasses should override _process() to implement endpoint logic.
+    """
+    
+    DENY_FRAMES = True  # Prevent clickjacking
+    ADMIN_ONLY = False  # Override to True for admin-only endpoints
+
+    def _check_access(self):
+        """Enforce authentication for all Assistant API endpoints.
+        
+        Raises:
+            Unauthorized: If user is not authenticated
+            Forbidden: If ADMIN_ONLY and user is not admin
+        """
+        if session.user is None:
+            raise Unauthorized("Authentication required")
+        
+        if self.ADMIN_ONLY and not session.user.is_admin:
+            raise Forbidden("Admin access required")
+    
+    @property
+    def user(self):
+        """Get the current authenticated user."""
+        return session.user
+    
+    @property
+    def plugin(self):
+        """Get the plugin instance."""
+        from indico.core.plugins import plugin_engine
+        return plugin_engine.get_plugin("assistant")
+
+
+class RHChatBase(RHAssistantBase):
     """Base class for authenticated Chat API endpoints.
     
     All Chat API endpoints require Indico authentication. This base class
@@ -21,17 +57,6 @@ class RHChatBase(RH):
     
     Subclasses should override _process() to implement endpoint logic.
     """
-    
-    DENY_FRAMES = True  # Prevent clickjacking
-
-    def _check_access(self):
-        """Enforce authentication for all Chat API endpoints.
-        
-        Raises:
-            Unauthorized: If user is not authenticated
-        """
-        if session.user is None:
-            raise Unauthorized("Authentication required")
 
     def _get_current_user_id(self) -> int:
         """Get the current authenticated user's ID.

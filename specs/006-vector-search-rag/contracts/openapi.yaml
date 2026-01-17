@@ -1,0 +1,359 @@
+openapi: 3.0.3
+info:
+  title: Indico Assistant Search API
+  description: |
+    Vector search API for semantic document search within events.
+    These endpoints enable searching across indexed event materials using natural language.
+  version: 1.0.0
+
+servers:
+  - url: /api/assistant
+    description: Plugin API base path
+
+paths:
+  /search:
+    post:
+      summary: Semantic document search
+      description: |
+        Search for relevant document chunks using natural language queries.
+        Returns semantically similar content from indexed event attachments.
+      operationId: searchDocuments
+      tags:
+        - Search
+      security:
+        - indicoSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Vector search unavailable (pgvector not installed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /documents/sync:
+    post:
+      summary: Trigger document sync for an event
+      description: |
+        Manually trigger document synchronization for a specific event.
+        This indexes all attachments that haven't been processed yet.
+        Admin permission required.
+      operationId: syncDocuments
+      tags:
+        - Documents
+      security:
+        - indicoSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRequest'
+      responses:
+        '202':
+          description: Sync task queued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
+        '403':
+          description: Admin permission required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Vector search unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /documents/status:
+    get:
+      summary: Get document indexing status
+      description: |
+        Get the status of document indexing for an event.
+        Returns counts of indexed, pending, and failed documents.
+      operationId: getDocumentStatus
+      tags:
+        - Documents
+      security:
+        - indicoSession: []
+      parameters:
+        - name: event_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Event ID to get status for (omit for global status)
+      responses:
+        '200':
+          description: Document status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentStatusResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    indicoSession:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Indico session cookie
+
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Natural language search query
+          example: "What are the main topics discussed in the workshop?"
+        event_id:
+          type: integer
+          nullable: true
+          description: Optional event ID to scope search (null for user's accessible events)
+          example: 12345
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of results to return
+        threshold:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.7
+          description: Minimum similarity threshold (0-1)
+
+    SearchResponse:
+      type: object
+      required:
+        - success
+        - results
+        - total
+        - query
+      properties:
+        success:
+          type: boolean
+          description: Whether the search completed successfully
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+          description: Array of matching document chunks
+        total:
+          type: integer
+          description: Total number of matches found
+        query:
+          type: string
+          description: The original query
+        search_time_ms:
+          type: number
+          format: float
+          description: Search execution time in milliseconds
+
+    SearchResult:
+      type: object
+      required:
+        - content
+        - similarity
+        - source
+      properties:
+        content:
+          type: string
+          description: The matching text content
+        similarity:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Similarity score (0-1, higher is better)
+        source:
+          $ref: '#/components/schemas/DocumentSource'
+        highlight:
+          type: string
+          nullable: true
+          description: Highlighted excerpt if available
+
+    DocumentSource:
+      type: object
+      required:
+        - filename
+        - attachment_id
+        - event_id
+      properties:
+        filename:
+          type: string
+          description: Original filename
+          example: "presentation.pdf"
+        attachment_id:
+          type: integer
+          description: Indico attachment ID
+        event_id:
+          type: integer
+          description: Event ID containing this document
+        chunk_index:
+          type: integer
+          description: Position of this chunk in the document
+        page_number:
+          type: integer
+          nullable: true
+          description: Page number for paginated documents (PDF)
+        file_type:
+          type: string
+          description: File type (pdf, docx, txt, md)
+          example: "pdf"
+
+    SyncRequest:
+      type: object
+      properties:
+        event_id:
+          type: integer
+          nullable: true
+          description: Event ID to sync (null for all events)
+        force:
+          type: boolean
+          default: false
+          description: Force re-index even if documents haven't changed
+
+    SyncResponse:
+      type: object
+      required:
+        - success
+        - task_id
+        - message
+      properties:
+        success:
+          type: boolean
+        task_id:
+          type: string
+          format: uuid
+          description: Celery task ID for tracking progress
+        message:
+          type: string
+          description: Status message
+          example: "Document sync task queued for event 12345"
+
+    DocumentStatusResponse:
+      type: object
+      required:
+        - success
+        - vector_search_available
+        - stats
+      properties:
+        success:
+          type: boolean
+        vector_search_available:
+          type: boolean
+          description: Whether vector search is available (pgvector installed)
+        stats:
+          $ref: '#/components/schemas/DocumentStats'
+        last_sync:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last successful sync
+
+    DocumentStats:
+      type: object
+      properties:
+        total_documents:
+          type: integer
+          description: Total unique attachments processed
+        total_chunks:
+          type: integer
+          description: Total document chunks stored
+        indexed:
+          type: integer
+          description: Chunks with embeddings
+        pending:
+          type: integer
+          description: Chunks awaiting processing
+        failed:
+          type: integer
+          description: Chunks that failed processing
+        by_file_type:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Document counts by file type
+          example:
+            pdf: 45
+            docx: 12
+            txt: 8
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Error code
+              enum:
+                - INVALID_REQUEST
+                - AUTHENTICATION_REQUIRED
+                - PERMISSION_DENIED
+                - VECTOR_SEARCH_UNAVAILABLE
+                - INTERNAL_ERROR
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              additionalProperties: true
+              description: Additional error details
+
+tags:
+  - name: Search
+    description: Semantic document search operations
+  - name: Documents
+    description: Document management and sync operations

@@ -4,6 +4,7 @@ Coordinates the chat flow: session management, context building,
 NL2SQL processing, and response generation.
 
 Feature: 004-chat-api
+Feature: 006-vector-search-rag (RAG integration T039, T040)
 Task: T015
 """
 
@@ -146,9 +147,9 @@ class ChatService:
             # Build context from previous messages
             context = self._context_builder.build_context(session.id)
             
-            # Process through NL2SQL pipeline
+            # Process through NL2SQL pipeline (with RAG enhancement)
             response_text, metadata = self._process_with_nl2sql(
-                message, context, session.event_id
+                message, context, session.event_id, user_id=user_id
             )
             
             # Save assistant response
@@ -244,47 +245,128 @@ class ChatService:
         self,
         message: str,
         context: list[dict[str, str]],
-        event_id: Optional[int]
+        event_id: Optional[int],
+        user_id: Optional[int] = None
     ) -> tuple[str, dict[str, Any]]:
-        """Process message through NL2SQL pipeline.
+        """Process message through NL2SQL pipeline with RAG enhancement.
         
         Args:
             message: User's message
             context: Conversation history
             event_id: Event scope (optional)
+            user_id: User ID for permission filtering (optional)
             
         Returns:
             Tuple of (response_text, metadata)
         """
+        # Initialize metadata
+        metadata: dict[str, Any] = {}
+        rag_context = None
+        rag_sources = []
+        
+        # Try to get RAG context if available (Feature 006)
+        try:
+            from indico_assistant.services.vector_search.rag import RAGService
+            from indico_assistant.services.vector_search.search import create_search_service
+            from indico_assistant.plugin import AssistantPlugin
+            
+            # Get plugin instance for settings
+            plugin = AssistantPlugin.instance
+            if plugin and plugin.settings.get("vector_search_enabled", True):
+                from indico_assistant.services.vector_search.rag import create_rag_service
+                
+                rag_service = create_rag_service(plugin)
+                rag_result = rag_service.get_context(
+                    query=message,
+                    event_id=event_id,
+                    user_id=user_id
+                )
+                
+                if rag_result.should_use_rag and rag_result.context:
+                    rag_context = rag_result.context
+                    rag_sources = rag_result.context.sources
+                    metadata["rag_enabled"] = True
+                    metadata["rag_sources"] = rag_sources
+                    metadata["query_type"] = rag_result.query_type
+                    logger.debug(
+                        f"RAG context retrieved: {len(rag_sources)} sources, "
+                        f"query_type={rag_result.query_type}"
+                    )
+                else:
+                    metadata["rag_enabled"] = False
+                    metadata["query_type"] = rag_result.query_type
+                    
+        except ImportError:
+            logger.debug("RAG services not available")
+            metadata["rag_enabled"] = False
+        except Exception as e:
+            logger.warning(f"RAG context retrieval failed: {e}")
+            metadata["rag_enabled"] = False
+            metadata["rag_error"] = str(e)
+        
         try:
             from indico_assistant.services.nl2sql import NL2SQLService
             
             # Get or create NL2SQL service
             service = NL2SQLService()
             
+            # Build enhanced prompt with RAG context if available
+            enhanced_context = context.copy() if context else []
+            if rag_context and rag_context.has_context:
+                # Add RAG context as a system message for the LLM
+                rag_system_message = {
+                    "role": "system",
+                    "content": (
+                        "The following context from event documents may be relevant:\n\n"
+                        f"{rag_context.text}\n\n"
+                        "Use this context when relevant to answer the user's question. "
+                        "If citing information from documents, mention the source."
+                    )
+                }
+                enhanced_context.insert(0, rag_system_message)
+            
             # Process the query
             result = service.process_query(
                 question=message,
-                conversation_context=context,
+                conversation_context=enhanced_context,
                 event_id=event_id
             )
             
-            metadata = {
+            # Build response with citations if RAG was used
+            response_text = result.response
+            if rag_sources:
+                # Format citations for the response
+                from indico_assistant.services.vector_search.rag import RAGService
+                citations = RAGService._format_citations_static(rag_sources)
+                if citations:
+                    response_text = f"{response_text}\n\n{citations}"
+            
+            metadata.update({
                 "sql_generated": result.sql if hasattr(result, 'sql') else None,
                 "confidence": result.confidence if hasattr(result, 'confidence') else None,
                 "data_sources": result.data_sources if hasattr(result, 'data_sources') else [],
-            }
+            })
             
-            return result.response, metadata
+            return response_text, metadata
             
         except ImportError:
             # NL2SQL service not available, return mock response
             logger.warning("NL2SQL service not available, returning mock response")
-            return (
+            response = (
                 f"I received your message: '{message}'. "
-                "The NL2SQL pipeline is not configured.",
-                {"mock_response": True}
+                "The NL2SQL pipeline is not configured."
             )
+            
+            # Still include RAG context if available
+            if rag_context and rag_context.has_context:
+                response = (
+                    f"Based on the event documents:\n\n{rag_context.text}\n\n"
+                    f"(NL2SQL pipeline not configured for additional queries)"
+                )
+            
+            metadata["mock_response"] = True
+            return response, metadata
+            
         except Exception as e:
             logger.exception("NL2SQL processing failed")
             raise QueryProcessingError(

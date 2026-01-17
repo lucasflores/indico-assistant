@@ -5,6 +5,7 @@ including health check and chat API endpoints.
 
 Feature: 004-chat-api
 Feature: 005-langfuse-observability (T023 - request teardown flush)
+Feature: 006-vector-search-rag (search endpoints)
 """
 
 from flask import g
@@ -48,7 +49,7 @@ def _register_routes():
 
     This is called after controllers are imported to avoid circular imports.
     """
-    from indico_assistant.controllers import RHHealth
+    from indico_assistant.controllers.health import RHHealth
     from indico_assistant.controllers.chat import RHChat
     from indico_assistant.controllers.feedback import RHFeedback
     from indico_assistant.controllers.sessions import (
@@ -91,6 +92,19 @@ def _register_routes():
     blueprint.add_url_rule("/admin/stats", "admin_stats", RHAdminStats, methods=["GET"])
     blueprint.add_url_rule("/admin/errors", "admin_errors", RHAdminErrors, methods=["GET"])
     blueprint.add_url_rule("/admin/health", "admin_health", RHAdminHealth, methods=["GET"])
+    
+    # Vector Search API endpoints (Feature 006)
+    from indico_assistant.controllers.search import (
+        RHVectorSearch,
+        RHSearchStatus,
+        RHSyncDocuments,
+        RHSyncAllDocuments,
+    )
+    
+    blueprint.add_url_rule("/search", "search", RHVectorSearch, methods=["POST"])
+    blueprint.add_url_rule("/search/status", "search_status", RHSearchStatus, methods=["GET"])
+    blueprint.add_url_rule("/search/sync", "search_sync", RHSyncDocuments, methods=["POST"])
+    blueprint.add_url_rule("/search/sync/all", "search_sync_all", RHSyncAllDocuments, methods=["POST"])
 
 
 # Defer route registration to avoid circular imports

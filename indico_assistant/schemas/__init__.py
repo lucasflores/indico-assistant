@@ -4,6 +4,7 @@ Provides request/response validation schemas for all API endpoints.
 
 Feature: 004-chat-api
 Feature: 005-langfuse-observability (admin schemas)
+Feature: 006-vector-search-rag (search schemas)
 """
 
 from indico_assistant.schemas.admin import (
@@ -30,6 +31,20 @@ from indico_assistant.schemas.session import (
     SessionListItem,
     SessionListQueryParams,
     SessionListResponse,
+)
+from indico_assistant.schemas.search import (
+    SearchRequestSchema,
+    SearchResponseSchema,
+    SearchResultSchema,
+    SearchStatusSchema,
+    SyncRequestSchema,
+    SyncResponseSchema,
+    search_request_schema,
+    search_response_schema,
+    search_result_schema,
+    search_status_schema,
+    sync_request_schema,
+    sync_response_schema,
 )
 
 __all__ = [
@@ -59,4 +74,17 @@ __all__ = [
     "HealthResponse",
     "LangfuseStatus",
     "SyncStatus",
+    # Search (Feature 006)
+    "SearchRequestSchema",
+    "SearchResponseSchema",
+    "SearchResultSchema",
+    "SearchStatusSchema",
+    "SyncRequestSchema",
+    "SyncResponseSchema",
+    "search_request_schema",
+    "search_response_schema",
+    "search_result_schema",
+    "search_status_schema",
+    "sync_request_schema",
+    "sync_response_schema",
 ]

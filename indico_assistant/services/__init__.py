@@ -7,6 +7,7 @@ Services:
     - LLMService: Low-level LLM interaction service (from 002-llm-service-layer)
     - NL2SQLPipeline: Natural language to SQL translation pipeline (from 003-nl2sql-pipeline)
     - Observability: Langfuse tracing and metrics (from 005-langfuse-observability)
+    - Vector Search: Document embedding, search, and RAG (from 006-vector-search-rag)
 """
 
 from indico_assistant.services.llm import LLMService, create_llm_service
@@ -24,6 +25,21 @@ from indico_assistant.services.observability import (
 )
 from indico_assistant.services.observability.tracer import Tracer, create_tracer
 
+# Vector Search services (006-vector-search-rag)
+from indico_assistant.services.vector_search import (
+    check_pgvector_available,
+    reset_pgvector_cache,
+    VectorStore,
+    SearchService,
+    RAGService,
+)
+from indico_assistant.services.embedding import EmbeddingService
+from indico_assistant.services.document import (
+    DocumentExtractor,
+    DocumentChunker,
+    DocumentProcessor,
+)
+
 __all__ = [
     # LLM Service (002)
     "LLMService",
@@ -40,4 +56,14 @@ __all__ = [
     "get_observability_logger",
     "Tracer",
     "create_tracer",
+    # Vector Search (006)
+    "check_pgvector_available",
+    "reset_pgvector_cache",
+    "VectorStore",
+    "SearchService",
+    "RAGService",
+    "EmbeddingService",
+    "DocumentExtractor",
+    "DocumentChunker",
+    "DocumentProcessor",
 ]

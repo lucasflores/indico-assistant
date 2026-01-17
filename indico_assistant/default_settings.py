@@ -18,6 +18,16 @@ DEFAULT_SETTINGS = {
     "langfuse_public_key": None,
     "langfuse_secret_key": None,
     "langfuse_privacy_level": "metadata",  # "metadata", "masked", or "full"
+    # Vector search settings (Feature 006)
+    "vector_search_enabled": True,
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "embedding_dimensions": 384,
+    "chunk_size": 1000,
+    "chunk_overlap": 200,
+    "similarity_threshold": 0.7,
+    "max_search_results": 5,
+    "embedding_batch_size": 32,
+    "supported_extensions": [".pdf", ".docx", ".doc", ".txt", ".md"],
 }
 
 EVENT_SETTINGS_DEFAULTS = {

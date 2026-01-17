@@ -1,6 +1,7 @@
 """Admin API controllers for observability dashboard.
 
 Feature: 005-langfuse-observability
+Feature: 006-vector-search-rag (T056 - health endpoint vector search status)
 Tasks: T039, T040, T041, T042, T044, T045
 
 This module provides REST API handlers for:
@@ -224,9 +225,10 @@ class RHAdminErrors(RHAdminBase):
 class RHAdminHealth(RHAdminBase):
     """Handler for GET /admin/health endpoint.
     
-    Tasks: T041, T042
+    Tasks: T041, T042, T056
     
-    Returns system health status including Langfuse connectivity.
+    Returns system health status including Langfuse connectivity
+    and vector search availability.
     Requires admin permission (inherited from RHAdminBase).
     """
 
@@ -261,9 +263,14 @@ class RHAdminHealth(RHAdminBase):
             except Exception as e:
                 langfuse_error = str(e)
         
+        # Check vector search status (T056)
+        vector_search_status = self._get_vector_search_status(settings)
+        
         # Overall status
         overall_status = "healthy"
         if langfuse_enabled and not langfuse_connected:
+            overall_status = "degraded"
+        if vector_search_status.get("enabled") and not vector_search_status.get("available"):
             overall_status = "degraded"
         
         # Build response
@@ -274,14 +281,62 @@ class RHAdminHealth(RHAdminBase):
             last_error=langfuse_error,
         )
         
-        response = HealthResponse(
+        response_data = HealthResponse(
             status=overall_status,
             langfuse=langfuse_status,
             last_sync=None,  # TODO: Get from MetricsSyncLog
             privacy_level=settings.get("langfuse_privacy_level", "metadata"),
-        )
+        ).model_dump(mode="json")
         
-        return jsonify(response.model_dump(mode="json"))
+        # Add vector search status to response
+        response_data["vector_search"] = vector_search_status
+        
+        return jsonify(response_data)
+    
+    def _get_vector_search_status(self, settings: dict) -> dict:
+        """Get vector search system status.
+        
+        Args:
+            settings: Plugin settings dict.
+            
+        Returns:
+            Dict with vector search status information.
+        """
+        vector_enabled = settings.get("vector_search_enabled", True)
+        pgvector_available = False
+        embedding_model = settings.get("embedding_model", "BAAI/bge-small-en-v1.5")
+        stats = {}
+        error_msg = None
+        
+        if vector_enabled:
+            try:
+                from indico_assistant.services.vector_search import check_pgvector_available
+                pgvector_available = check_pgvector_available()
+                
+                if pgvector_available:
+                    # Try to get stats
+                    try:
+                        from indico_assistant.services.vector_search.store import VectorStore
+                        store = VectorStore()
+                        stats = store.get_stats() or {}
+                    except Exception as e:
+                        error_msg = f"Stats unavailable: {str(e)}"
+                else:
+                    error_msg = "pgvector extension not installed"
+                    
+            except ImportError:
+                error_msg = "Vector search services not available"
+            except Exception as e:
+                error_msg = str(e)
+        
+        return {
+            "enabled": vector_enabled,
+            "available": vector_enabled and pgvector_available,
+            "pgvector_installed": pgvector_available,
+            "embedding_model": embedding_model if vector_enabled else None,
+            "stats": stats,
+            "error": error_msg,
+        }
 
 
 __all__ = ["RHAdminStats", "RHAdminErrors", "RHAdminHealth"]
