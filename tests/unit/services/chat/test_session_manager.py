@@ -33,11 +33,11 @@ class TestSessionManager:
             mock_session.id = uuid4()
             mock_session.user_id = 123
             mock_session.event_id = None
-            mock_cls.return_value = mock_session
+            mock_cls.create.return_value = mock_session
             
             result = session_manager.create_session(user_id=123)
             
-            mock_cls.assert_called_once_with(user_id=123, event_id=None)
+            mock_cls.create.assert_called_once_with(user_id=123, event_id=None)
             assert result == mock_session
 
     def test_create_session_with_event_id(self, session_manager):
@@ -47,11 +47,11 @@ class TestSessionManager:
             mock_session.id = uuid4()
             mock_session.user_id = 123
             mock_session.event_id = 456
-            mock_cls.return_value = mock_session
+            mock_cls.create.return_value = mock_session
             
             result = session_manager.create_session(user_id=123, event_id=456)
             
-            mock_cls.assert_called_once_with(user_id=123, event_id=456)
+            mock_cls.create.assert_called_once_with(user_id=123, event_id=456)
             assert result.event_id == 456
 
     def test_get_session(self, session_manager):
@@ -101,7 +101,7 @@ class TestSessionManager:
         with patch('indico_assistant.services.chat.session_manager.ChatSession') as mock_cls:
             mock_session = MagicMock()
             mock_session.id = uuid4()
-            mock_cls.return_value = mock_session
+            mock_cls.create.return_value = mock_session
             mock_cls.query.get.return_value = None
             
             result, created = session_manager.get_session_or_create(
@@ -139,12 +139,12 @@ class TestSessionManager:
             mock_message = MagicMock()
             mock_message.id = uuid4()
             mock_message.role = "user"
-            mock_cls.return_value = mock_message
+            mock_cls.create.return_value = mock_message
             
             result = session_manager.add_user_message(mock_session, "Hello")
             
-            mock_cls.assert_called_once()
-            call_kwargs = mock_cls.call_args[1]
+            mock_cls.create.assert_called_once()
+            call_kwargs = mock_cls.create.call_args[1]
             assert call_kwargs['session_id'] == mock_session.id
             assert call_kwargs['role'] == 'user'
             assert call_kwargs['content'] == 'Hello'
@@ -159,7 +159,7 @@ class TestSessionManager:
             mock_message = MagicMock()
             mock_message.id = uuid4()
             mock_message.role = "assistant"
-            mock_cls.return_value = mock_message
+            mock_cls.create.return_value = mock_message
             
             result = session_manager.add_assistant_message(
                 mock_session, 
@@ -167,8 +167,8 @@ class TestSessionManager:
                 metadata
             )
             
-            mock_cls.assert_called_once()
-            call_kwargs = mock_cls.call_args[1]
+            mock_cls.create.assert_called_once()
+            call_kwargs = mock_cls.create.call_args[1]
             assert call_kwargs['role'] == 'assistant'
             assert call_kwargs['content'] == 'Here are your events'
             assert call_kwargs['metadata'] == metadata

@@ -65,7 +65,7 @@ class RHSessionList(RHChatBase):
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Invalid pagination parameters",
-                422
+                status=422
             )
         
         # Validate pagination bounds
@@ -73,14 +73,14 @@ class RHSessionList(RHChatBase):
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Limit must be between 1 and 100",
-                422
+                status=422
             )
         
         if offset < 0:
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Offset must be non-negative",
-                422
+                status=422
             )
         
         try:
@@ -103,7 +103,7 @@ class RHSessionList(RHChatBase):
                     session_id=str(session.id),
                     event_id=session.event_id,
                     created_at=session.created_at.isoformat(),
-                    updated_at=session.updated_at.isoformat(),
+                    last_message_at=session.last_message_at.isoformat() if session.last_message_at else session.updated_at.isoformat(),
                     message_count=session.message_count
                 ))
             
@@ -114,14 +114,14 @@ class RHSessionList(RHChatBase):
                 offset=offset
             )
             
-            return jsonify(response.model_dump()), 200
+            return jsonify(response.model_dump(mode='json')), 200
             
         except Exception as e:
             logger.exception("Error listing sessions")
             return self._error_response(
                 "INTERNAL_ERROR",
                 "Failed to retrieve sessions",
-                500
+                status=500
             )
 
 
@@ -158,7 +158,7 @@ class RHSessionDetail(RHChatBase):
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Invalid session_id format",
-                422
+                status=422
             )
         
         try:
@@ -170,7 +170,7 @@ class RHSessionDetail(RHChatBase):
                 return self._error_response(
                     "SESSION_NOT_FOUND",
                     "Session not found",
-                    404
+                    status=404
                 )
             
             # Validate ownership
@@ -178,7 +178,7 @@ class RHSessionDetail(RHChatBase):
                 return self._error_response(
                     "ACCESS_DENIED",
                     "Session belongs to another user",
-                    403
+                    status=403
                 )
             
             # Get messages
@@ -203,14 +203,14 @@ class RHSessionDetail(RHChatBase):
                 messages=message_items
             )
             
-            return jsonify(response.model_dump(exclude_none=True)), 200
+            return jsonify(response.model_dump(exclude_none=True, mode='json')), 200
             
         except Exception as e:
             logger.exception("Error retrieving session")
             return self._error_response(
                 "INTERNAL_ERROR",
                 "Failed to retrieve session",
-                500
+                status=500
             )
 
 
@@ -247,7 +247,7 @@ class RHSessionDelete(RHChatBase):
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Invalid session_id format",
-                422
+                status=422
             )
         
         try:
@@ -259,7 +259,7 @@ class RHSessionDelete(RHChatBase):
                 return self._error_response(
                     "SESSION_NOT_FOUND",
                     "Session not found",
-                    404
+                    status=404
                 )
             
             # Validate ownership
@@ -267,7 +267,7 @@ class RHSessionDelete(RHChatBase):
                 return self._error_response(
                     "ACCESS_DENIED",
                     "Session belongs to another user",
-                    403
+                    status=403
                 )
             
             # Delete session (cascade will delete messages and feedback)
@@ -280,7 +280,7 @@ class RHSessionDelete(RHChatBase):
                 return self._error_response(
                     "SESSION_NOT_FOUND",
                     "Session not found",
-                    404
+                    status=404
                 )
                 
         except Exception as e:
@@ -289,5 +289,5 @@ class RHSessionDelete(RHChatBase):
             return self._error_response(
                 "INTERNAL_ERROR",
                 "Failed to delete session",
-                500
+                status=500
             )

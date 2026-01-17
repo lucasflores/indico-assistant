@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import pytest
 
+import indico_assistant.controllers.sessions as sessions_module
+
 
 class TestRHSessionList:
     """Tests for RHSessionList controller."""
@@ -32,69 +34,33 @@ class TestRHSessionList:
         ctrl.user = mock_user
         return ctrl
 
-    def test_list_sessions_returns_paginated_results(self, controller):
+    @pytest.fixture
+    def mock_request(self):
+        """Create and inject a mock request into the sessions module."""
+        mock_req = MagicMock()
+        original_request = getattr(sessions_module, 'request', None)
+        sessions_module.request = mock_req
+        yield mock_req
+        if original_request:
+            sessions_module.request = original_request
+
+    def test_list_sessions_returns_paginated_results(self, controller, mock_request):
         """Test listing sessions with default pagination."""
         mock_sessions = [MagicMock() for _ in range(3)]
         for i, s in enumerate(mock_sessions):
             s.id = uuid4()
             s.event_id = None
             s.created_at = datetime.now(timezone.utc)
-            s.updated_at = datetime.now(timezone.utc)
+            s.last_message_at = datetime.now(timezone.utc)
             s.message_count = i + 1
         
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
-            mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "0"}.get(k, d)
-            
-            with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
-                mock_manager = MagicMock()
-                mock_get.return_value = mock_manager
-                mock_manager.list_user_sessions.return_value = mock_sessions
-                mock_manager.count_user_sessions.return_value = 3
-                
-                with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
-                    from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                    mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                        allowed=True, remaining=199, retry_after=None
-                    )
-                    
-                    response, status = controller._process()
-                    
-                    assert status == 200
-                    data = response.get_json()
-                    assert len(data["sessions"]) == 3
-                    assert data["total"] == 3
-                    assert data["limit"] == 20
-                    assert data["offset"] == 0
-
-    def test_list_sessions_respects_pagination_params(self, controller):
-        """Test custom pagination parameters."""
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
-            mock_request.args.get.side_effect = lambda k, d=None: {"limit": "5", "offset": "10"}.get(k, d)
-            
-            with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
-                mock_manager = MagicMock()
-                mock_get.return_value = mock_manager
-                mock_manager.list_user_sessions.return_value = []
-                mock_manager.count_user_sessions.return_value = 50
-                
-                with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
-                    from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                    mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                        allowed=True, remaining=199, retry_after=None
-                    )
-                    
-                    controller._process()
-                    
-                    mock_manager.list_user_sessions.assert_called_once_with(
-                        user_id=123,
-                        limit=5,
-                        offset=10
-                    )
-
-    def test_list_sessions_validates_limit_bounds(self, controller):
-        """Test limit must be within bounds."""
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
-            mock_request.args.get.side_effect = lambda k, d=None: {"limit": "500", "offset": "0"}.get(k, d)
+        mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "0"}.get(k, d)
+        
+        with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
+            mock_manager = MagicMock()
+            mock_get.return_value = mock_manager
+            mock_manager.list_user_sessions.return_value = mock_sessions
+            mock_manager.count_user_sessions.return_value = 3
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
@@ -104,14 +70,22 @@ class TestRHSessionList:
                 
                 response, status = controller._process()
                 
-                assert status == 422
+                assert status == 200
                 data = response.get_json()
-                assert data["code"] == "VALIDATION_ERROR"
+                assert len(data["sessions"]) == 3
+                assert data["total"] == 3
+                assert data["limit"] == 20
+                assert data["offset"] == 0
 
-    def test_list_sessions_validates_negative_offset(self, controller):
-        """Test offset must be non-negative."""
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
-            mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "-5"}.get(k, d)
+    def test_list_sessions_respects_pagination_params(self, controller, mock_request):
+        """Test custom pagination parameters."""
+        mock_request.args.get.side_effect = lambda k, d=None: {"limit": "5", "offset": "10"}.get(k, d)
+        
+        with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
+            mock_manager = MagicMock()
+            mock_get.return_value = mock_manager
+            mock_manager.list_user_sessions.return_value = []
+            mock_manager.count_user_sessions.return_value = 50
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
@@ -119,9 +93,43 @@ class TestRHSessionList:
                     allowed=True, remaining=199, retry_after=None
                 )
                 
-                response, status = controller._process()
+                controller._process()
                 
-                assert status == 422
+                mock_manager.list_user_sessions.assert_called_once_with(
+                    user_id=123,
+                    limit=5,
+                    offset=10
+                )
+
+    def test_list_sessions_validates_limit_bounds(self, controller, mock_request):
+        """Test limit must be within bounds."""
+        mock_request.args.get.side_effect = lambda k, d=None: {"limit": "500", "offset": "0"}.get(k, d)
+        
+        with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            from indico_assistant.services.chat.rate_limiter import RateLimitResult
+            mock_limiter.return_value.check_rate.return_value = RateLimitResult(
+                allowed=True, remaining=199, retry_after=None
+            )
+            
+            response, status = controller._process()
+            
+            assert status == 422
+            data = response.get_json()
+            assert data["error"] == "VALIDATION_ERROR"
+
+    def test_list_sessions_validates_negative_offset(self, controller, mock_request):
+        """Test offset must be non-negative."""
+        mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "-5"}.get(k, d)
+        
+        with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            from indico_assistant.services.chat.rate_limiter import RateLimitResult
+            mock_limiter.return_value.check_rate.return_value = RateLimitResult(
+                allowed=True, remaining=199, retry_after=None
+            )
+            
+            response, status = controller._process()
+            
+            assert status == 422
 
 
 class TestRHSessionDetail:

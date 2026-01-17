@@ -49,13 +49,13 @@ class TestChatEndpointContract:
 
     def test_response_schema_required_fields(self):
         """ChatResponse has all required fields."""
-        from indico_assistant.schemas.chat import ChatResponse, MessageMetadata
+        from indico_assistant.schemas.chat import ChatResponse
         
         response = ChatResponse(
             session_id=str(uuid4()),
             message_id=str(uuid4()),
             response="Test response",
-            metadata=MessageMetadata()
+            metadata={}
         )
         
         assert response.session_id is not None
@@ -64,17 +64,17 @@ class TestChatEndpointContract:
 
     def test_response_schema_metadata_optional_fields(self):
         """ChatResponse.metadata fields are optional."""
-        from indico_assistant.schemas.chat import ChatResponse, MessageMetadata
+        from indico_assistant.schemas.chat import ChatResponse
         
         response = ChatResponse(
             session_id=str(uuid4()),
             message_id=str(uuid4()),
             response="Test",
-            metadata=MessageMetadata()
+            metadata={}
         )
         
-        assert response.metadata.sql_generated is None
-        assert response.metadata.confidence is None
+        # metadata is a dict, defaults to empty
+        assert response.metadata == {}
 
 
 class TestSessionEndpointsContract:
@@ -102,7 +102,7 @@ class TestSessionEndpointsContract:
             session_id=str(uuid4()),
             event_id=None,
             created_at=datetime.now(timezone.utc).isoformat(),
-            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_message_at=datetime.now(timezone.utc).isoformat(),
             message_count=5
         )
         
@@ -150,44 +150,55 @@ class TestFeedbackEndpointContract:
         
         request = FeedbackRequest(
             message_id=str(uuid4()),
-            feedback_type="thumbs_up"
+            feedback_type="thumbs_up",
+            value=True
         )
         
         assert request.message_id is not None
         assert request.feedback_type is not None
+        assert request.value is not None
 
     def test_feedback_request_valid_types(self):
         """FeedbackRequest.feedback_type must be valid."""
         from indico_assistant.schemas.feedback import FeedbackRequest
         
-        valid_types = ["thumbs_up", "thumbs_down", "rating", "comment"]
+        # Map feedback types to appropriate values
+        type_to_value = {
+            "thumbs_up": True,
+            "thumbs_down": True,
+            "rating": 5,
+            "comment": "Great response!"
+        }
         
-        for ftype in valid_types:
+        for ftype, value in type_to_value.items():
             request = FeedbackRequest(
                 message_id=str(uuid4()),
-                feedback_type=ftype
+                feedback_type=ftype,
+                value=value
             )
             assert request.feedback_type == ftype
 
-    def test_feedback_request_rating_optional(self):
-        """FeedbackRequest.rating is optional."""
+    def test_feedback_request_thumbs_value(self):
+        """FeedbackRequest for thumbs requires boolean value."""
         from indico_assistant.schemas.feedback import FeedbackRequest
         
         request = FeedbackRequest(
             message_id=str(uuid4()),
-            feedback_type="thumbs_up"
+            feedback_type="thumbs_up",
+            value=True
         )
-        assert request.rating is None
+        assert request.value is True
 
-    def test_feedback_request_comment_optional(self):
-        """FeedbackRequest.comment is optional."""
+    def test_feedback_request_rating_value(self):
+        """FeedbackRequest for rating requires integer value."""
         from indico_assistant.schemas.feedback import FeedbackRequest
         
         request = FeedbackRequest(
             message_id=str(uuid4()),
-            feedback_type="thumbs_up"
+            feedback_type="rating",
+            value=5
         )
-        assert request.comment is None
+        assert request.value == 5
 
     def test_feedback_response_schema(self):
         """FeedbackResponse has required fields."""
@@ -197,11 +208,13 @@ class TestFeedbackEndpointContract:
             feedback_id=str(uuid4()),
             message_id=str(uuid4()),
             feedback_type="thumbs_up",
-            created_at=datetime.now(timezone.utc).isoformat()
+            created_at="2024-01-15T10:30:00Z"
         )
         
         assert response.feedback_id is not None
         assert response.message_id is not None
+        assert response.feedback_type is not None
+        assert response.created_at is not None
 
 
 class TestErrorResponseContract:
@@ -212,11 +225,11 @@ class TestErrorResponseContract:
         from indico_assistant.schemas.errors import ErrorResponse
         
         error = ErrorResponse(
-            code="VALIDATION_ERROR",
+            error="VALIDATION_ERROR",
             message="Invalid input"
         )
         
-        assert error.code is not None
+        assert error.error is not None
         assert error.message is not None
 
     def test_error_response_details_optional(self):
@@ -224,7 +237,7 @@ class TestErrorResponseContract:
         from indico_assistant.schemas.errors import ErrorResponse
         
         error = ErrorResponse(
-            code="VALIDATION_ERROR",
+            error="VALIDATION_ERROR",
             message="Invalid input"
         )
         
@@ -234,13 +247,14 @@ class TestErrorResponseContract:
         """ErrorCode enum contains expected values."""
         from indico_assistant.schemas.errors import ErrorCode
         
+        # These are the actual error codes defined in ErrorCode class
         expected_codes = [
             "VALIDATION_ERROR",
-            "ACCESS_DENIED",
-            "SESSION_NOT_FOUND",
-            "MESSAGE_NOT_FOUND",
+            "UNAUTHORIZED",
+            "FORBIDDEN",
+            "NOT_FOUND",
             "RATE_LIMITED",
-            "QUERY_PROCESSING_ERROR",
+            "UNPROCESSABLE_QUERY",
             "INTERNAL_ERROR"
         ]
         

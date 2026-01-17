@@ -60,10 +60,11 @@ class TestRateLimiter:
             limiter = RateLimiter()
             limiter._redis = None  # Force memory backend
             
-            result = limiter.check_rate(user_id=123, endpoint="chat")
+            result = limiter.check_rate(user_id=123, endpoint_type="chat")
             
             assert result.allowed is True
-            assert result.remaining == RATE_LIMITS["chat"]["requests"] - 1
+            # RATE_LIMITS["chat"] is (max_requests, window_seconds) tuple
+            assert result.remaining == RATE_LIMITS["chat"][0] - 1
 
     def test_check_rate_under_limit_allowed(self):
         """Test requests under limit are allowed."""
@@ -73,7 +74,7 @@ class TestRateLimiter:
             
             # Make several requests, all should be allowed
             for i in range(5):
-                result = limiter.check_rate(user_id=123, endpoint="chat")
+                result = limiter.check_rate(user_id=123, endpoint_type="chat")
                 assert result.allowed is True
 
     def test_check_rate_over_limit_denied(self):
@@ -82,13 +83,13 @@ class TestRateLimiter:
             limiter = RateLimiter()
             limiter._redis = None
             
-            # Exhaust the limit
-            limit = RATE_LIMITS["chat"]["requests"]
+            # Exhaust the limit - RATE_LIMITS["chat"][0] is max_requests
+            limit = RATE_LIMITS["chat"][0]
             for i in range(limit):
-                limiter.check_rate(user_id=123, endpoint="chat")
+                limiter.check_rate(user_id=123, endpoint_type="chat")
             
             # Next request should be denied
-            result = limiter.check_rate(user_id=123, endpoint="chat")
+            result = limiter.check_rate(user_id=123, endpoint_type="chat")
             assert result.allowed is False
             assert result.retry_after is not None
 
@@ -98,8 +99,8 @@ class TestRateLimiter:
             limiter = RateLimiter()
             limiter._redis = None
             
-            result1 = limiter.check_rate(user_id=123, endpoint="chat")
-            result2 = limiter.check_rate(user_id=456, endpoint="chat")
+            result1 = limiter.check_rate(user_id=123, endpoint_type="chat")
+            result2 = limiter.check_rate(user_id=456, endpoint_type="chat")
             
             assert result1.allowed is True
             assert result2.allowed is True
@@ -111,8 +112,8 @@ class TestRateLimiter:
             limiter = RateLimiter()
             limiter._redis = None
             
-            result_chat = limiter.check_rate(user_id=123, endpoint="chat")
-            result_read = limiter.check_rate(user_id=123, endpoint="read")
+            result_chat = limiter.check_rate(user_id=123, endpoint_type="chat")
+            result_read = limiter.check_rate(user_id=123, endpoint_type="read")
             
             assert result_chat.allowed is True
             assert result_read.allowed is True
@@ -123,7 +124,7 @@ class TestRateLimiter:
             limiter = RateLimiter()
             limiter._redis = None
             
-            result = limiter.check_rate(user_id=123, endpoint="unknown")
+            result = limiter.check_rate(user_id=123, endpoint_type="unknown")
             
             assert result.allowed is True
 
@@ -132,11 +133,12 @@ class TestRateLimiter:
         assert "chat" in RATE_LIMITS
         assert "read" in RATE_LIMITS
         
-        assert RATE_LIMITS["chat"]["requests"] == 60
-        assert RATE_LIMITS["chat"]["window"] == 60
+        # RATE_LIMITS values are (max_requests, window_seconds) tuples
+        assert RATE_LIMITS["chat"][0] == 60  # max_requests
+        assert RATE_LIMITS["chat"][1] == 60  # window_seconds
         
-        assert RATE_LIMITS["read"]["requests"] == 200
-        assert RATE_LIMITS["read"]["window"] == 60
+        assert RATE_LIMITS["read"][0] == 200  # max_requests
+        assert RATE_LIMITS["read"][1] == 60   # window_seconds
 
 
 class TestRateLimiterRedisBackend:
@@ -145,12 +147,12 @@ class TestRateLimiterRedisBackend:
     def test_init_with_redis(self):
         """Test initialization with Redis backend."""
         mock_redis_instance = MagicMock()
+        mock_redis_instance.ping.return_value = True
         
         with patch('indico_assistant.services.chat.rate_limiter.redis') as mock_redis:
-            mock_redis.StrictRedis.return_value = mock_redis_instance
-            mock_redis_instance.ping.return_value = True
+            mock_redis.from_url.return_value = mock_redis_instance
             
-            limiter = RateLimiter()
+            limiter = RateLimiter(redis_url="redis://localhost:6379")
             
             # Redis should be configured
             assert limiter._redis is not None
@@ -161,15 +163,15 @@ class TestRateLimiterRedisBackend:
         mock_pipe = MagicMock()
         
         with patch('indico_assistant.services.chat.rate_limiter.redis') as mock_redis:
-            mock_redis.StrictRedis.return_value = mock_redis_instance
+            mock_redis.from_url.return_value = mock_redis_instance
             mock_redis_instance.ping.return_value = True
             mock_redis_instance.pipeline.return_value = mock_pipe
-            mock_pipe.execute.return_value = [1, True]  # INCR result, EXPIRE result
+            # Pipeline returns: (zremrangebyscore result, zcard count)
+            mock_pipe.execute.return_value = [0, 5]  # 0 removed, 5 current count
             
-            limiter = RateLimiter()
-            limiter._redis = mock_redis_instance
+            limiter = RateLimiter(redis_url="redis://localhost:6379")
             
-            result = limiter.check_rate(user_id=123, endpoint="chat")
+            result = limiter.check_rate(user_id=123, endpoint_type="chat")
             
             assert result.allowed is True
 

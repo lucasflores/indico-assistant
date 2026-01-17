@@ -39,8 +39,18 @@ class RHAssistantBase(RH):
     
     @property
     def user(self):
-        """Get the current authenticated user."""
+        """Get the current authenticated user.
+        
+        Allows test injection via _user attribute.
+        """
+        if hasattr(self, '_user') and self._user is not None:
+            return self._user
         return session.user
+    
+    @user.setter
+    def user(self, value):
+        """Set user for testing purposes."""
+        self._user = value
     
     @property
     def plugin(self):
@@ -99,14 +109,14 @@ class RHChatBase(RHAssistantBase):
             field: Optional field name that failed validation
             
         Returns:
-            Flask response tuple with 400 status
+            Flask response tuple with 422 status
         """
         details = {"field": field} if field else None
         return self._error_response(
             ErrorCode.VALIDATION_ERROR,
             message,
             details,
-            400
+            status=422
         )
 
     def _not_found_error(self, resource: str, resource_id: str | None = None):

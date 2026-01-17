@@ -37,37 +37,45 @@ class TestSessionsEndpointIntegration:
             s.id = uuid4()
             s.event_id = None if i == 0 else i * 100
             s.created_at = datetime.now(timezone.utc)
-            s.updated_at = datetime.now(timezone.utc)
+            s.last_message_at = datetime.now(timezone.utc)
             s.message_count = (i + 1) * 2
             mock_sessions.append(s)
         
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
-            mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "0"}.get(k, d)
-            
-            with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
-                mock_manager = MagicMock()
-                mock_get.return_value = mock_manager
-                mock_manager.list_user_sessions.return_value = mock_sessions
-                mock_manager.count_user_sessions.return_value = 3
-                
-                with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
-                    from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                    mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                        allowed=True, remaining=199, retry_after=None
-                    )
+        mock_request = MagicMock()
+        mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "0"}.get(k, d)
+        
+        with patch.dict('sys.modules', {'flask': MagicMock(request=mock_request)}):
+            import indico_assistant.controllers.sessions as sessions_module
+            original_request = getattr(sessions_module, 'request', None)
+            sessions_module.request = mock_request
+            try:
+                with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
+                    mock_manager = MagicMock()
+                    mock_get.return_value = mock_manager
+                    mock_manager.list_user_sessions.return_value = mock_sessions
+                    mock_manager.count_user_sessions.return_value = 3
                     
-                    response, status = ctrl._process()
-                    
-                    assert status == 200
-                    data = response.get_json()
-                    assert len(data["sessions"]) == 3
-                    assert data["total"] == 3
-                    
-                    # Verify session data
-                    session = data["sessions"][0]
-                    assert "session_id" in session
-                    assert "created_at" in session
-                    assert "updated_at" in session
+                    with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+                        from indico_assistant.services.chat.rate_limiter import RateLimitResult
+                        mock_limiter.return_value.check_rate.return_value = RateLimitResult(
+                            allowed=True, remaining=199, retry_after=None
+                        )
+                        
+                        response, status = ctrl._process()
+                        
+                        assert status == 200
+                        data = response.get_json()
+                        assert len(data["sessions"]) == 3
+                        assert data["total"] == 3
+                        
+                        # Verify session data
+                        session = data["sessions"][0]
+                        assert "session_id" in session
+                        assert "created_at" in session
+                        assert "message_count" in session
+            finally:
+                if original_request:
+                    sessions_module.request = original_request
                     assert "message_count" in session
 
     def test_get_session_detail_with_messages(self, mock_user):
@@ -193,7 +201,7 @@ class TestSessionsEndpointIntegration:
                 
                 assert status == 403
                 data = response.get_json()
-                assert data["code"] == "ACCESS_DENIED"
+                assert data["error"] == "ACCESS_DENIED"
 
     def test_pagination_works_correctly(self, mock_user):
         """Test pagination returns correct page of results."""

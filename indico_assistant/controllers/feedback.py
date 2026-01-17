@@ -57,29 +57,30 @@ class RHFeedback(RHChatBase):
                 return self._error_response(
                     "VALIDATION_ERROR",
                     "Request body is required",
-                    422
+                    status=422
                 )
             
             feedback_request = FeedbackRequest.model_validate(data)
         except ValidationError as e:
-            return self._validation_error(e)
+            return self._validation_error(str(e))
         except Exception as e:
             logger.warning("Failed to parse request body: %s", e)
             return self._error_response(
                 "VALIDATION_ERROR",
                 "Invalid request body",
-                422
+                status=422
             )
 
-        # Parse message_id
-        try:
-            message_id = UUID(feedback_request.message_id)
-        except ValueError:
-            return self._error_response(
-                "VALIDATION_ERROR",
-                "Invalid message_id format",
-                422
-            )
+        # message_id is already parsed as UUID by the schema
+        message_id = feedback_request.message_id
+
+        # Extract rating/comment from value based on feedback_type
+        rating = None
+        comment = None
+        if feedback_request.feedback_type == 'rating':
+            rating = feedback_request.value
+        elif feedback_request.feedback_type == 'comment':
+            comment = feedback_request.value
 
         # Submit feedback
         try:
@@ -88,8 +89,8 @@ class RHFeedback(RHChatBase):
                 user_id=self.user.id,
                 message_id=message_id,
                 feedback_type=feedback_request.feedback_type,
-                rating=feedback_request.rating,
-                comment=feedback_request.comment
+                rating=rating,
+                comment=comment
             )
             feedback_service.commit()
             
@@ -100,19 +101,19 @@ class RHFeedback(RHChatBase):
                 created_at=feedback.created_at.isoformat()
             )
             
-            return jsonify(response.model_dump()), 201
+            return jsonify(response.model_dump(mode='json')), 201
             
         except MessageNotFoundError:
             return self._error_response(
                 "MESSAGE_NOT_FOUND",
                 "Message not found",
-                404
+                status=404
             )
         except MessageAccessDeniedError:
             return self._error_response(
                 "ACCESS_DENIED",
                 "Cannot provide feedback on messages from other users' sessions",
-                403
+                status=403
             )
         except Exception as e:
             feedback_service.rollback()
@@ -120,5 +121,5 @@ class RHFeedback(RHChatBase):
             return self._error_response(
                 "INTERNAL_ERROR",
                 "Failed to submit feedback",
-                500
+                status=500
             )

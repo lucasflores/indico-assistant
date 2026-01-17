@@ -62,10 +62,14 @@ class FeedbackResponse(BaseModel):
     
     Attributes:
         feedback_id: UUID of the created/updated feedback entry
-        message: Confirmation message
+        message_id: UUID of the message the feedback is for
+        feedback_type: Type of feedback submitted
+        created_at: Timestamp when feedback was created
     """
     
     feedback_id: UUID = Field(..., description="Feedback entry UUID")
-    message: str = Field(default="Feedback recorded", description="Confirmation message")
+    message_id: UUID = Field(..., description="Message UUID")
+    feedback_type: str = Field(..., description="Type of feedback submitted")
+    created_at: str = Field(..., description="Timestamp when feedback was created")
 
     model_config = {"from_attributes": True}
