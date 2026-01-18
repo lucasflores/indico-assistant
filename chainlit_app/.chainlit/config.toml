@@ -92,7 +92,7 @@ reaction_on_message_received = false
 
 [UI]
 # Name of the assistant.
-name = "Assistant"
+name = "Indico Assistant"
 
 # Apply custom styling for the embedded widget
 custom_css = "/public/widget.css"

@@ -17,6 +17,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - N/A (documentation + test files) (007-tdd-gap-analysis)
 - Python 3.11+ (plugin), JavaScript ES6 (widget injection) + Chainlit Copilot widget, Flask (via Indico), Indico plugin system (008-chat-widget)
 - sessionStorage (client-side thread persistence via Chainlit), PostgreSQL (existing) (008-chat-widget)
+- Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode) (009-chat-widget-styling)
+- N/A (static configuration files only) (009-chat-widget-styling)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -36,9 +38,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 009-chat-widget-styling: Added Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode)
+- 009-chat-widget-styling: Added Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode)
 - 008-chat-widget: Added Python 3.11+ (plugin), JavaScript ES6 (widget injection) + Chainlit Copilot widget, Flask (via Indico), Indico plugin system
-- 007-tdd-gap-analysis: Added Python 3.11+ + pytest, pytest-cov, indico fixtures
-- 006-rag-vector-search: Added Python 3.11+ (matches Indico minimum) + sentence-transformers (BAAI/bge-small-en-v1.5), pgvector, PyPDF2, python-docx
 
 
 <!-- MANUAL ADDITIONS START -->

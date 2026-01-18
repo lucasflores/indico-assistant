@@ -27,3 +27,29 @@ In Indico Admin → Plugins → Assistant set:
 
 - Auth: JWT from the plugin is validated in `app_chnlit.py` via `header_auth_callback`.
 - Handler: `on_message` currently echoes input; replace with real assistant logic when ready.
+
+## Customization
+
+### Logos and Branding
+
+The widget uses Indico branding via the following files in `public/`:
+
+| File | Purpose |
+|------|---------|
+| `logo_light.png` | Header logo (light mode) |
+| `logo_dark.png` | Header logo (dark mode) |
+| `favicon.png` | Browser favicon + widget launcher button |
+| `avatars/assistant.png` | Avatar shown next to assistant messages |
+
+To customize:
+1. Replace the PNG files with your own branding (maintain similar dimensions)
+2. Clear browser cache to see changes
+3. Chainlit auto-detects `logo_light.png` and `logo_dark.png` by filename
+
+### Theme
+
+Edit `public/theme.json` to customize colors and fonts. Uses Shadcn/Radix CSS variable format (HSL values).
+
+### Custom CSS
+
+Additional styling overrides in `public/widget.css`. Referenced in `.chainlit/config.toml`.
