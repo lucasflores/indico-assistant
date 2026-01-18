@@ -1,23 +1,44 @@
-:root[data-chainlit-theme="light"] [class*="cl-widget"] [class*="cl-chat"],
-:root[data-chainlit-theme="light"] [class*="chainlit"] [class*="chat"] {
-  background: rgba(255, 255, 255, 0.9);
+/* Chat Widget Styling - Indico Assistant */
+/* Ensures fully opaque backgrounds for readability (FR-001, FR-002, FR-003) */
+
+/* Light theme: solid white backgrounds */
+:root[data-chainlit-theme="light"] {
+  --cl-widget-background: #ffffff;
+}
+
+/* Dark theme: solid dark backgrounds */
+:root[data-chainlit-theme="dark"] {
+  --cl-widget-background: #111827;
+}
+
+/* Widget container - ensure full opacity */
+[data-radix-popper-content-wrapper] {
+  background: var(--cl-widget-background, #ffffff) !important;
+}
+
+/* Chat container styling */
+.cl-chat-container,
+[class*="chat-container"] {
+  background: var(--cl-widget-background, #ffffff);
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+  border-radius: 0.75rem;
 }
 
-:root[data-chainlit-theme="dark"] [class*="cl-widget"] [class*="cl-chat"],
-:root[data-chainlit-theme="dark"] [class*="chainlit"] [class*="chat"] {
-  background: rgba(17, 24, 39, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+/* Message area background */
+.cl-messages,
+[class*="messages"] {
+  background: var(--cl-widget-background, #ffffff);
 }
 
-:root[data-chainlit-theme="light"] [class*="cl-widget-button"],
-:root[data-chainlit-theme="light"] [class*="chainlit"] button,
-:root[data-chainlit-theme="dark"] [class*="cl-widget-button"],
-:root[data-chainlit-theme="dark"] [class*="chainlit"] button {
-  background-image: url("/public/indico-icon.svg");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 20px 20px;
+/* Input area background */
+.cl-input-container,
+[class*="input-container"] {
+  background: var(--cl-widget-background, #ffffff);
+}
+
+/* Header background */
+.cl-header,
+[class*="header"] {
+  background: var(--cl-widget-background, #ffffff);
 }
