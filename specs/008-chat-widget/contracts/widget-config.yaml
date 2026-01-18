@@ -1,0 +1,71 @@
+openapi: 3.0.0
+info:
+  title: Chat Widget Configuration API
+  description: |
+    Configuration endpoint for the Indico Assistant chat widget.
+    This is exposed via get_vars_js() for client-side access.
+  version: 1.0.0
+
+components:
+  schemas:
+    WidgetConfig:
+      type: object
+      description: Configuration for the Chainlit Copilot widget
+      required:
+        - enabled
+        - chainlitUrl
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the chat widget is enabled
+          example: true
+        chainlitUrl:
+          type: string
+          format: uri
+          description: URL of the Chainlit server
+          example: "http://localhost:8000"
+        authToken:
+          type: string
+          nullable: true
+          description: |
+            JWT token for authenticating with Chainlit server.
+            Null if user is not authenticated.
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        theme:
+          type: string
+          enum: [light, dark, auto]
+          default: auto
+          description: Widget color theme
+          example: "auto"
+
+    JWTClaims:
+      type: object
+      description: Claims included in the Chainlit authentication JWT
+      required:
+        - identifier
+        - exp
+      properties:
+        identifier:
+          type: string
+          description: User identifier (Indico user ID)
+          example: "12345"
+        metadata:
+          type: object
+          properties:
+            name:
+              type: string
+              description: User's full name
+              example: "John Doe"
+            email:
+              type: string
+              format: email
+              description: User's email address
+              example: "john.doe@example.com"
+        exp:
+          type: integer
+          description: Token expiration timestamp (Unix epoch)
+          example: 1737100800
+
+# Note: This configuration is exposed via JavaScript, not a REST endpoint.
+# The get_vars_js() method in plugin.py returns this structure as:
+# IndicoAssistant = { enabled: true, chainlitUrl: "...", authToken: "..." }

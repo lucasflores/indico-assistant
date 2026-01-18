@@ -9,6 +9,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 - **Per-Event Configuration**: Customize assistant behavior for specific events
 - **Health Monitoring**: Built-in health check endpoint for monitoring
 - **CLI Tools**: Command-line interface for administration and diagnostics
+- **Embedded Chat Widget**: Chainlit Copilot widget injected on every page with JWT auth, theme sync, persistence, and feedback
 
 ## Requirements
 
@@ -47,6 +48,22 @@ pip install -e ".[dev]"
 | API Key | Authentication key (for cloud providers) | - |
 | Timeout | Request timeout in seconds | 30 |
 | Max Tokens | Maximum response tokens | 2048 |
+
+### Chat Widget Settings
+
+Configured in **Admin → Plugins → Assistant → Settings** (must match Chainlit server):
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Chat Widget Enabled | Master switch for widget injection | False |
+| Chainlit Server URL | Base URL of the Chainlit app | http://localhost:8000 |
+| Chainlit Auth Secret | Shared HS256 secret for JWT auth | (blank) |
+
+Widget behavior:
+- JWT issued per user via `get_vars_js()` and validated by Chainlit header_auth_callback
+- Theme auto-detected from Indico CSS vars / media queries; overrides via `IndicoAssistant.theme`
+- Session continuity via Chainlit threadId; feedback bridged to Indico API
+- Graceful degradation: loading/error bubble, hidden when not ready, `noscript` fallback available (see docs/DEPLOYMENT.md)
 
 ### Per-Event Settings
 

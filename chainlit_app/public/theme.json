@@ -1,0 +1,12 @@
+{
+  "mode": "light",
+  "colors": {
+    "primary": "#1f77d0",
+    "secondary": "#1558a3",
+    "background": "#ffffff",
+    "text": "#1b1b1b"
+  },
+  "fonts": {
+    "body": "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  }
+}

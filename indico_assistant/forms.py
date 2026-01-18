@@ -98,6 +98,24 @@ class SettingsForm(IndicoForm):
         description="Comma-separated list of tables allowed for NL2SQL queries (leave empty for default set)",
     )
 
+    # Chat Widget Settings (Feature 008)
+    chat_widget_enabled = BooleanField(
+        "Enable Chat Widget",
+        description="Show floating chat widget on all Indico pages",
+    )
+
+    chainlit_server_url = StringField(
+        "Chainlit Server URL",
+        validators=[Optional(), URL(message="Please enter a valid URL")],
+        description="URL of the Chainlit server (e.g., http://localhost:8000)",
+    )
+
+    chainlit_auth_secret = PasswordField(
+        "Chainlit Auth Secret",
+        validators=[Optional()],
+        description="Shared secret for JWT authentication with Chainlit (must match CHAINLIT_AUTH_SECRET)",
+    )
+
     def validate_nl2sql_allowed_tables(self, field):
         """Convert comma-separated string to list or None."""
         if field.data:

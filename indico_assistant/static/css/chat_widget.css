@@ -1,0 +1,102 @@
+:root:not([data-assistant-ready]) [class*="cl-widget"],
+:root:not([data-assistant-ready]) [class*="chainlit"] {
+  display: none !important;
+}
+
+.assistant-nojs-message {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 10px 12px;
+  background: #1f77d0;
+  color: #ffffff;
+  border-radius: 10px;
+  font-size: 13px;
+  z-index: 2147483000;
+}
+:root {
+  --assistant-primary: var(--indico-color-primary, var(--primary-color, #1f77d0));
+  --assistant-primary-strong: var(--indico-color-primary-strong, #1558a3);
+  --assistant-surface: var(--page-background, #ffffff);
+  --assistant-surface-muted: var(--paper-bg, #f5f7fb);
+  --assistant-text: var(--text-color, #1b1b1b);
+  --assistant-surface-dark: var(--page-background-dark, #111827);
+  --assistant-surface-dark-muted: var(--paper-bg-dark, #1f2937);
+  --assistant-text-dark: var(--text-color-strong, #f3f4f6);
+  --assistant-border-light: rgba(0, 0, 0, 0.08);
+  --assistant-border-dark: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget"],
+:root[data-chainlit-theme="light"] [class*="chainlit"] {
+  font-family: inherit;
+  color: var(--assistant-text);
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget"] [class*="cl-chat"],
+:root[data-chainlit-theme="light"] [class*="chainlit"] [class*="chat"] {
+  /* Add slight opacity for readability while letting the page show through */
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--assistant-border-light);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget-button"],
+:root[data-chainlit-theme="light"] [class*="chainlit"] button {
+  background: var(--assistant-primary);
+  color: #ffffff;
+  border: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Ccircle cx='18' cy='18' r='18' fill='%23ffffff' fill-opacity='0.15'/%3E%3Ccircle cx='18' cy='18' r='14' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Ctext x='18' y='22' text-anchor='middle' font-size='14' font-family='Arial, sans-serif' fill='%23ffffff' font-weight='700'%3Ei%3C/text%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px 20px;
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget-button"]:hover,
+:root[data-chainlit-theme="light"] [class*="chainlit"] button:hover {
+  background: var(--assistant-primary-strong);
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget"],
+:root[data-chainlit-theme="dark"] [class*="chainlit"] {
+  font-family: inherit;
+  color: var(--assistant-text-dark);
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget"] [class*="cl-chat"],
+:root[data-chainlit-theme="dark"] [class*="chainlit"] [class*="chat"] {
+  /* Semi-opaque dark surface for readability */
+  background: rgba(17, 24, 39, 0.9);
+  border: 1px solid var(--assistant-border-dark);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget-button"],
+:root[data-chainlit-theme="dark"] [class*="chainlit"] button {
+  background: var(--assistant-primary);
+  color: #ffffff;
+  border: 1px solid var(--assistant-border-dark);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Ccircle cx='18' cy='18' r='18' fill='%23ffffff' fill-opacity='0.15'/%3E%3Ccircle cx='18' cy='18' r='14' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Ctext x='18' y='22' text-anchor='middle' font-size='14' font-family='Arial, sans-serif' fill='%23ffffff' font-weight='700'%3Ei%3C/text%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px 20px;
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget-button"]:hover,
+:root[data-chainlit-theme="dark"] [class*="chainlit"] button:hover {
+  background: var(--assistant-primary-strong);
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget"] input,
+:root[data-chainlit-theme="dark"] [class*="cl-widget"] textarea {
+  background: var(--assistant-surface-dark-muted);
+  color: var(--assistant-text-dark);
+  border-color: var(--assistant-border-dark);
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget"] input,
+:root[data-chainlit-theme="light"] [class*="cl-widget"] textarea {
+  background: var(--assistant-surface-muted);
+  color: var(--assistant-text);
+  border-color: var(--assistant-border-light);
+}

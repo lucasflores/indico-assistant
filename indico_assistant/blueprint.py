@@ -1,14 +1,19 @@
-"""Blueprint for Indico Assistant plugin HTTP endpoints.
+"""Blueprint for Indico Assistant plugin HTTP endpoints and widget assets.
 
 This module defines the URL routes for the plugin's REST API,
-including health check and chat API endpoints.
+including health check and chat API endpoints, and also exposes the
+Chainlit widget bundle so it can be loaded from an absolute path.
 
 Feature: 004-chat-api
 Feature: 005-langfuse-observability (T023 - request teardown flush)
 Feature: 006-vector-search-rag (search endpoints)
 """
 
-from flask import g
+import os
+import json
+
+from flask import g, send_from_directory, current_app
+from indico.core.plugins import plugin_engine
 from indico.core.plugins import IndicoPluginBlueprint
 
 # Create the blueprint with /api/assistant prefix
@@ -17,6 +22,34 @@ blueprint = IndicoPluginBlueprint(
     __name__,
     url_prefix="/api/assistant",
 )
+
+_STATIC_DIST = os.path.join(os.path.dirname(__file__), "static", "dist")
+_STATIC_CSS = os.path.join(os.path.dirname(__file__), "static", "css")
+
+
+@blueprint.route("/widget/<path:filename>")
+def widget_static(filename):
+    """Serve Chainlit widget assets from a stable absolute URL.
+
+    This avoids relative-path 404s when the widget is injected on pages with
+    nested URLs (e.g., /event/123/...).
+    """
+    return send_from_directory(_STATIC_DIST, filename)
+
+
+@blueprint.route("/widget/css/<path:filename>")
+def widget_static_css(filename):
+    """Serve widget CSS alongside the bundle."""
+    return send_from_directory(_STATIC_CSS, filename)
+
+
+@blueprint.route("/widget/config.js")
+def widget_config():
+    """Serve dynamic configuration as JS (defines window.IndicoAssistant)."""
+    plugin = plugin_engine.get_plugin("assistant")
+    config = plugin.get_vars_js() if plugin else {}
+    payload = f"window.IndicoAssistant = {json.dumps(config)};"
+    return current_app.response_class(payload, mimetype="application/javascript")
 
 
 @blueprint.after_request

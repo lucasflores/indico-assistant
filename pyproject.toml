@@ -36,6 +36,8 @@ dependencies = [
     "PyPDF2>=3.0.0",
     "python-docx>=0.8.11",
     "pgvector>=0.2.0",
+    # Chat widget dependencies (Feature 008)
+    "PyJWT>=2.8.0",
 ]
 
 [project.optional-dependencies]

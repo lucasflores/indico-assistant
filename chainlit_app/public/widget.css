@@ -1,0 +1,23 @@
+:root[data-chainlit-theme="light"] [class*="cl-widget"] [class*="cl-chat"],
+:root[data-chainlit-theme="light"] [class*="chainlit"] [class*="chat"] {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-chainlit-theme="dark"] [class*="cl-widget"] [class*="cl-chat"],
+:root[data-chainlit-theme="dark"] [class*="chainlit"] [class*="chat"] {
+  background: rgba(17, 24, 39, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-chainlit-theme="light"] [class*="cl-widget-button"],
+:root[data-chainlit-theme="light"] [class*="chainlit"] button,
+:root[data-chainlit-theme="dark"] [class*="cl-widget-button"],
+:root[data-chainlit-theme="dark"] [class*="chainlit"] button {
+  background-image: url("/public/indico-icon.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px 20px;
+}
