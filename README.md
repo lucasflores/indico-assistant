@@ -10,6 +10,12 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 - **Health Monitoring**: Built-in health check endpoint for monitoring
 - **CLI Tools**: Command-line interface for administration and diagnostics
 - **Embedded Chat Widget**: Chainlit Copilot widget injected on every page with JWT auth, theme sync, persistence, and feedback
+- **Real-time Document Indexing**: Automatically indexes PDF, DOCX, DOC, TXT, and Markdown files when uploaded as attachments, making them immediately searchable
+  - **Immediate Search**: Documents become searchable within seconds of upload
+  - **Duplicate Detection**: Skips re-indexing identical documents based on content hash
+  - **Graceful Degradation**: Continues working even when vector search is unavailable
+  - **File Size Tiers**: Fast indexing (<10MB), best-effort (10-50MB), automatic rejection (>50MB)
+  - **Supported Formats**: PDF, DOCX, DOC, TXT, MD (silently ignores images, videos, archives)
 
 ## Requirements
 

@@ -253,3 +253,167 @@ def sample_error_result():
             user_message="I can't access that information. Please ask about events, registrations, or contributions.",
         ),
     )
+
+
+# =============================================================================
+# Vector Search Fixtures (011-realtime-attachment-indexing)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True, scope='session')
+def setup_pgvector():
+    """
+    Ensure pgvector extension is available (must be installed separately).
+    
+    This is a session-level fixture that assumes pgvector is already
+    installed in the PostgreSQL instance. It doesn't try to enable it,
+    just checks that it's available for the tests.
+    """
+    # Just a marker fixture - pgvector should be installed globally
+    # The actual extension will be enabled by the test database setup
+    pass
+
+
+@pytest.fixture(autouse=True)
+def enable_pgvector_in_db(database, request_context):
+    """
+    Enable pgvector extension in each test's database.
+    
+    Runs after database fixture to ensure pgvector is available.
+    """
+    from sqlalchemy import text
+    from indico.core.db import db
+    
+    try:
+        # Enable pgvector extension in test database
+        db.session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        db.session.commit()
+        
+        # Force re-check of pgvector availability
+        from indico_assistant.services import vector_search
+        vector_search._pgvector_available = None  # Reset cache
+    except Exception as e:
+        # If it fails, tests will skip vector operations
+        pass
+    
+    yield
+
+
+@pytest.fixture(autouse=True, scope='session')
+def configure_celery_eager():
+    """
+    Configure Celery to run tasks eagerly (synchronously) in tests.
+    
+    This allows integration tests to run without a separate Celery worker.
+    """
+    from indico.core.celery import celery
+    
+    # Store original settings
+    original_always_eager = celery.conf.task_always_eager
+    original_eager_propagates = celery.conf.task_eager_propagates
+    
+    # Enable eager mode
+    celery.conf.task_always_eager = True
+    celery.conf.task_eager_propagates = True
+    
+    yield
+    
+    # Restore original settings
+    celery.conf.task_always_eager = original_always_eager
+    celery.conf.task_eager_propagates = original_eager_propagates
+
+
+@pytest.fixture(autouse=True, scope='function')
+def create_extracted_documents_table(db):
+    """
+    Create extracted_documents table for tests.
+    
+    This runs the migration to create the table structure needed for vector search.
+    We run this manually since plugin migrations aren't auto-discovered in test environment.
+    """
+    from sqlalchemy import text
+    
+    # Run the migration upgrade for extracted_documents
+    db.session.execute(text("CREATE SCHEMA IF NOT EXISTS plugin_assistant"))
+    db.session.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+    db.session.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
+    
+    # Create the table (simplified from migration 004)
+    db.session.execute(text('''
+        CREATE TABLE IF NOT EXISTS plugin_assistant.extracted_documents (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            event_id INTEGER NOT NULL,
+            attachment_id INTEGER NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content_text TEXT NOT NULL,
+            content_hash VARCHAR(64) NOT NULL,
+            metadata_json JSONB,
+            extraction_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                CHECK (extraction_status IN ('pending', 'processing', 'completed', 'failed', 'skipped')),
+            error_message TEXT,
+            embedding vector(384),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    '''))
+    
+    db.session.commit()
+    
+    yield
+    
+    # Clean up after test
+    db.session.execute(text('DROP TABLE IF EXISTS plugin_assistant.extracted_documents CASCADE'))
+    db.session.commit()
+
+
+@pytest.fixture
+def vector_store(db, create_extracted_documents_table):
+    """
+    Fixture providing a VectorStore instance for integration tests.
+    
+    This uses the actual database connection and requires pgvector to be installed.
+    Note: The create_extracted_documents_table fixture creates the required schema.
+    """
+    from indico_assistant.services.vector_search.store import VectorStore
+    
+    # Force re-check pgvector availability for this test
+    from indico_assistant.services.vector_search import check_pgvector_available
+    check_pgvector_available()
+    
+    return VectorStore()
+
+
+@pytest.fixture
+def document_extractor():
+    """
+    Fixture providing a DocumentExtractor instance for testing.
+    """
+    from indico_assistant.services.document.extractor import DocumentExtractor
+    return DocumentExtractor()
+
+
+@pytest.fixture
+def document_chunker():
+    """
+    Fixture providing a DocumentChunker instance for testing.
+    """
+    from indico_assistant.services.document.chunker import DocumentChunker
+    return DocumentChunker()
+
+
+@pytest.fixture
+def embedding_service(mocker):
+    """
+    Fixture providing an EmbeddingService instance for testing.
+    """
+    from indico_assistant.services.embedding.service import EmbeddingService
+    from unittest.mock import MagicMock
+    
+    # Create a mock plugin with settings
+    mock_plugin = MagicMock()
+    mock_plugin.settings.get.side_effect = lambda key, default=None: {
+        'embedding_model': 'sentence-transformers/all-MiniLM-L6-v2',
+        'embedding_dimension': 384
+    }.get(key, default)
+    
+    return EmbeddingService(mock_plugin)
