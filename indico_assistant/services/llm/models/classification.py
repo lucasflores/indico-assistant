@@ -76,13 +76,15 @@ class QueryClassification(BaseModel):
         entities: List of extracted named entities.
         time_range: Temporal constraints if present.
         filters: Additional filter criteria extracted from query.
+        confidence: Overall classification confidence (0.0-1.0).
     
     Example:
         >>> classification = QueryClassification(
         ...     intent="search_events",
         ...     entities=[Entity(type="person", value="John Smith", confidence=0.95)],
         ...     time_range=TimeRange(start="2026-01-14", end="2026-01-21"),
-        ...     filters={"category": "workshop"}
+        ...     filters={"category": "workshop"},
+        ...     confidence=0.92
         ... )
     """
     intent: str = Field(description="Primary query intent")
@@ -97,4 +99,10 @@ class QueryClassification(BaseModel):
     filters: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional filter criteria"
+    )
+    confidence: float = Field(
+        default=0.9,
+        ge=0.0,
+        le=1.0,
+        description="Overall classification confidence (0.0-1.0)"
     )

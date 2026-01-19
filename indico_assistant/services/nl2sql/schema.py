@@ -65,6 +65,7 @@ class SchemaContext:
             "attachments.folders",
             "events.events",
             "events.contributions",
+            "plugin_assistant.extracted_documents",
         ],
         "schedule_query": [
             "events.events",
@@ -117,24 +118,91 @@ class SchemaContext:
             return self._schema_cache
 
         if self._schema_file_path is None:
-            # Default to config_modules/all_tables.yaml relative to package
-            default_path = (
-                Path(__file__).parent.parent.parent
-                / "config_modules"
-                / "all_tables.yaml"
-            )
-            self._schema_file_path = str(default_path)
+            # Prefer curated schema file if present, then fall back to full schema
+            base_path = Path(__file__).parent.parent.parent / "config_modules"
+            curated_path = base_path / "available_tables.yaml"
+            default_path = base_path / "all_tables.yaml"
+            if curated_path.exists():
+                self._schema_file_path = str(curated_path)
+            else:
+                self._schema_file_path = str(default_path)
 
         path = Path(self._schema_file_path)
         if not path.exists():
-            # Return empty schema if file doesn't exist
-            self._schema_cache = {}
+            # Fallback: attempt to build minimal schema from database
+            self._schema_cache = self._build_schema_from_database()
             return self._schema_cache
 
         with open(path, "r") as f:
             self._schema_cache = yaml.safe_load(f) or {}
 
+        # Ensure all intent tables are represented; fill missing from DB
+        missing_tables = []
+        for intent_tables in self.INTENT_TABLES_MAP.values():
+            for table_name in intent_tables:
+                if table_name not in self._schema_cache:
+                    missing_tables.append(table_name)
+
+        if missing_tables:
+            db_schema = self._build_schema_from_database()
+            for table_name in missing_tables:
+                if table_name in db_schema:
+                    self._schema_cache[table_name] = db_schema[table_name]
+
         return self._schema_cache
+
+    def _build_schema_from_database(self) -> dict[str, Any]:
+        """Build a minimal schema from the live database if YAML is missing.
+
+        Returns:
+            Dictionary in the same shape as the YAML schema.
+        """
+        try:
+            from indico.core.db import db
+            from sqlalchemy import inspect
+        except Exception:
+            return {}
+
+        try:
+            engine = db.session.get_bind()
+            inspector = inspect(engine)
+        except Exception:
+            return {}
+
+        schema: dict[str, Any] = {}
+
+        # Build list of tables referenced by intents
+        tables = set()
+        for intent_tables in self.INTENT_TABLES_MAP.values():
+            tables.update(intent_tables)
+
+        for table_ref in sorted(tables):
+            if "." in table_ref:
+                schema_name, table_name = table_ref.split(".", 1)
+            else:
+                schema_name, table_name = None, table_ref
+
+            try:
+                columns = inspector.get_columns(table_name, schema=schema_name)
+            except Exception:
+                continue
+
+            column_map: dict[str, Any] = {}
+            for col in columns:
+                col_type = str(col.get("type", "unknown"))
+                column_map[col["name"]] = {
+                    "type": col_type,
+                    "description": "",
+                    "nullable": bool(col.get("nullable", True)),
+                }
+
+            schema[table_ref] = {
+                "description": "",
+                "columns": column_map,
+                "relationships": [],
+            }
+
+        return schema
 
     def get_tables_for_intent(self, intent: str) -> list[str]:
         """

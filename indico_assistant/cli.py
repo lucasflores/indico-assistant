@@ -35,16 +35,18 @@ def health_command():
     provider = plugin.settings.get("llm_provider")
     base_url = plugin.settings.get("llm_base_url")
 
-    # Determine LLM status
+    # Determine LLM status using real health check
     if not provider:
         llm_status = "not_configured"
         status_color = "yellow"
-    elif plugin.llm_client is None:
-        llm_status = "unavailable"
-        status_color = "yellow"
+        llm_error = None
+        llm_latency = None
     else:
-        llm_status = "connected"
-        status_color = "green"
+        health_status = plugin.llm_service.health_check()
+        llm_status = health_status.status
+        llm_latency = health_status.latency_ms
+        llm_error = health_status.error
+        status_color = "green" if llm_status == "connected" else "yellow"
 
     # Determine overall status
     if not enabled:
@@ -65,6 +67,10 @@ def health_command():
     click.secho(llm_status, fg=status_color)
     if provider and base_url:
         click.echo(f"  Provider: {provider} @ {base_url}")
+    if llm_latency is not None:
+        click.echo(f"  Latency: {llm_latency} ms")
+    if llm_error:
+        click.echo(f"  Error: {llm_error}")
 
 
 @cli.command("config")

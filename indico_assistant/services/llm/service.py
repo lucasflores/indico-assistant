@@ -197,6 +197,7 @@ class LLMService:
                 ) as gen:
                     result = client.chat.completions.create(
                         messages=messages,
+                        model=settings["model"],
                         response_model=response_model,
                         max_retries=effective_max_retries,
                         timeout=effective_timeout,
@@ -214,6 +215,7 @@ class LLMService:
                 # No tracing - original behavior
                 result = client.chat.completions.create(
                     messages=messages,
+                    model=settings["model"],
                     response_model=response_model,
                     max_retries=effective_max_retries,
                     timeout=effective_timeout,
@@ -325,6 +327,7 @@ class LLMService:
             # Make minimal LLM call
             client.chat.completions.create(
                 messages=[{"role": "user", "content": "Reply with exactly: ok"}],
+                model=settings["model"],
                 response_model=HealthCheckResponse,
                 timeout=5.0,  # Short timeout for health check
             )

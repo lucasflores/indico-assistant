@@ -30,12 +30,14 @@ STRICT RULES:
 2. Use ONLY the tables listed in the schema below
 3. Use proper table aliases for clarity (see suggested aliases in schema)
 4. Include appropriate WHERE clauses for filtering
-5. Use parameterized queries with :param_name syntax for user-provided values
+5. Use literal values when filtering (avoid parameter placeholders)
 6. Limit results appropriately (use LIMIT if returning many rows)
 7. Do NOT use CTEs (WITH clause), subqueries, or window functions
 8. Use JOINs ONLY when the question requires data from multiple tables
 9. When JOINing tables, use the JOIN hints provided below
 10. Always use LEFT JOIN unless data from both tables is strictly required
+11. If a time range is provided, use a range filter (BETWEEN or >= / <=) on date/time columns;
+    avoid exact timestamp equality unless the user asked for a specific moment.
 
 {schema_context}
 

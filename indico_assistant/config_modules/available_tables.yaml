@@ -1,0 +1,1347 @@
+attachments.files:
+  description: Table containing information about files uploaded to the system.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the file.
+      nullable: false
+    attachment_id:
+      type: INTEGER
+      description: References the associated attachment record.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: Identifier of the user who uploaded the file.
+      nullable: false
+    filename:
+      type: VARCHAR
+      description: The original name of the uploaded file.
+      nullable: false
+    content_type:
+      type: VARCHAR
+      description: The MIME type of the file.
+      nullable: false
+    size:
+      type: BIGINT
+      description: The file size in bytes.
+      nullable: false
+    md5:
+      type: VARCHAR
+      description: The MD5 hash of the file.
+      nullable: false
+    storage_backend:
+      type: VARCHAR
+      description: The storage system used to store the file.
+      nullable: false
+    storage_file_id:
+      type: VARCHAR
+      description: Relative path to the file within the filesystem.
+      nullable: false
+    created_dt:
+      type: TIMESTAMP
+      description: The timestamp when the file was uploaded.
+      nullable: false
+  relationships:
+    - attachments.attachments.id -> attachments.files.attachment_id
+    - users.users.id -> attachments.files.user_id
+
+attachments.attachments:
+  description: Table containing attachment records.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the attachment.
+      nullable: false
+    folder_id:
+      type: INTEGER
+      description: Folder ID containing this attachment.
+      nullable: true
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the attachment.
+      nullable: true
+    title:
+      type: VARCHAR
+      description: Attachment title.
+      nullable: true
+  relationships:
+    - attachments.folders.id -> attachments.attachments.folder_id
+    - events.events.id -> attachments.attachments.event_id
+
+attachments.folders:
+  description: Table containing folder metadata for attachments.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the folder.
+      nullable: false
+    title:
+      type: VARCHAR
+      description: Folder title.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the folder.
+      nullable: true
+  relationships:
+    - events.events.id -> attachments.folders.event_id
+
+events.events:
+  description: Table containing information about events.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the event.
+      nullable: false
+    is_deleted:
+      type: BOOLEAN
+      description: Indicates whether the event has been deleted.
+      nullable: false
+    is_locked:
+      type: BOOLEAN
+      description: Indicates whether the event is locked from further modifications.
+      nullable: false
+    creator_id:
+      type: INTEGER
+      description: The user ID of the person who created the event.
+      nullable: true
+    category_id:
+      type: INTEGER
+      description: The ID of the category under which the event is organized.
+      nullable: true
+    series_id:
+      type: INTEGER
+      description: ID of the event series if this event is part of a recurring series.
+      nullable: true
+    cloned_from_id:
+      type: INTEGER
+      description: ID of the original event if this event was cloned from another.
+      nullable: true
+    label_id:
+      type: INTEGER
+      description: ID of a label/tag assigned to the event.
+      nullable: true
+    label_message:
+      type: TEXT
+      description: Custom label message associated with the event.
+      nullable: true
+    created_dt:
+      type: TIMESTAMP
+      description: Date and time when the event was created.
+      nullable: false
+    start_dt:
+      type: TIMESTAMP
+      description: Date and time when the event starts.
+      nullable: false
+    end_dt:
+      type: TIMESTAMP
+      description: Date and time when the event ends.
+      nullable: false
+    timezone:
+      type: VARCHAR
+      description: Timezone in which the event takes place.
+      nullable: false
+    type:
+      type: SMALLINT
+      description: Numeric identifier for the event type.
+      nullable: false
+    visibility:
+      type: INTEGER
+      description: Numeric value determining the event’s visibility settings.
+      nullable: false
+    keywords:
+      type: ARRAY
+      description: List of keywords associated with the event.
+      nullable: true
+    url_shortcut:
+      type: VARCHAR
+      description: Custom URL shortcut that redirects to the event’s page.
+      nullable: true
+    logo_metadata:
+      type: JSONB
+      description: Metadata for the event’s logo.
+      nullable: true
+    logo:
+      type: BYTEA
+      description: Binary data representing the event’s logo.
+      nullable: true
+    stylesheet_metadata:
+      type: JSONB
+      description: Metadata for the event’s custom stylesheet.
+      nullable: true
+    stylesheet:
+      type: TEXT
+      description: Custom CSS used to style the event’s page.
+      nullable: true
+    default_page_id:
+      type: INTEGER
+      description: The ID of the default page to display when viewing the event.
+      nullable: true
+    map_url:
+      type: VARCHAR
+      description: URL to a map for the event’s location.
+      nullable: true
+    custom_boa_id:
+      type: INTEGER
+      description: Custom Board of Abstracts (BOA) identifier for the event.
+      nullable: true
+    subcontrib_speakers_can_submit:
+      type: BOOLEAN
+      description: Whether speakers of subcontributions can submit materials.
+      nullable: false
+    last_friendly_registration_id:
+      type: INTEGER
+      description: The last used friendly ID for event registrations.
+      nullable: true
+    last_friendly_contribution_id:
+      type: INTEGER
+      description: The last used friendly ID for event contributions.
+      nullable: true
+    last_friendly_session_id:
+      type: INTEGER
+      description: The last used friendly ID for event sessions.
+      nullable: true
+    title:
+      type: VARCHAR
+      description: The title of the event.
+      nullable: false
+    description:
+      type: TEXT
+      description: Textual description of the event.
+      nullable: true
+    room_id:
+      type: INTEGER
+      description: ID of the room where the event takes place.
+      nullable: true
+    venue_id:
+      type: INTEGER
+      description: ID of the venue where the event takes place.
+      nullable: true
+    venue_name:
+      type: VARCHAR
+      description: Name of the venue where the event is held.
+      nullable: true
+    room_name:
+      type: VARCHAR
+      description: Name of the specific room where the event takes place.
+      nullable: true
+    address:
+      type: TEXT
+      description: Physical address of the event venue.
+      nullable: true
+    protection_mode:
+      type: SMALLINT
+      description: Numeric value defining access restrictions to the event.
+      nullable: false
+    access_key:
+      type: VARCHAR
+      description: Optional access key required to enter the event.
+      nullable: true
+    no_access_contact:
+      type: VARCHAR
+      description: Contact information for access requests when restrictions apply.
+      nullable: true
+  relationships:
+    - categories.categories.id -> events.events.category_id
+    - events.events.id -> events.events.cloned_from_id
+    - users.users.id -> events.events.creator_id
+    - events.pages.id -> events.events.default_page_id
+    - events.labels.id -> events.events.label_id
+    - roombooking.rooms.id -> events.events.room_id
+    - events.series.id -> events.events.series_id
+    - roombooking.locations.id -> events.events.venue_id
+    - roombooking.rooms.location_id/id -> events.events.venue_id/room_id
+
+events.persons:
+  description: Table containing information about persons associated with events.
+  columns:
+    id:
+      type: INTEGER
+      description: A unique identifier for the person in the event.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: The ID of the event to which the person is associated.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: The ID of the user linked to this person.
+      nullable: true
+    first_name:
+      type: VARCHAR
+      description: The first name of the person.
+      nullable: false
+    last_name:
+      type: VARCHAR
+      description: The last name of the person.
+      nullable: false
+    email:
+      type: VARCHAR
+      description: The email address of the person.
+      nullable: true
+    title:
+      type: SMALLINT
+      description: Numeric identifier representing the person’s title.
+      nullable: true
+    affiliation_id:
+      type: INTEGER
+      description: The ID of the affiliation associated with the person.
+      nullable: true
+    affiliation:
+      type: VARCHAR
+      description: The name of the person's affiliation.
+      nullable: true
+    address:
+      type: TEXT
+      description: The address of the person.
+      nullable: true
+    phone:
+      type: VARCHAR
+      description: The phone number of the person.
+      nullable: true
+    invited_dt:
+      type: TIMESTAMP
+      description: The timestamp indicating when the person was invited to the event.
+      nullable: true
+    is_untrusted:
+      type: BOOLEAN
+      description: Whether the person is considered untrusted.
+      nullable: false
+  relationships:
+    - indico.affiliations.id -> events.persons.affiliation_id
+    - events.events.id -> events.persons.event_id
+    - users.users.id -> events.persons.user_id
+
+events.contributions:
+  description: Table storing information about individual contributions that are part of an event's program.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the contribution.
+      nullable: false
+    friendly_id:
+      type: INTEGER
+      description: Short numeric identifier for user-friendly display.
+      nullable: true
+    event_id:
+      type: INTEGER
+      description: ID of the event to which this contribution belongs.
+      nullable: false
+    session_id:
+      type: INTEGER
+      description: ID of the session to which this contribution is assigned.
+      nullable: true
+    session_block_id:
+      type: INTEGER
+      description: ID of the specific session block where the contribution is scheduled.
+      nullable: true
+    track_id:
+      type: INTEGER
+      description: ID of the track grouping this contribution by subject or topic.
+      nullable: true
+    abstract_id:
+      type: INTEGER
+      description: ID of the abstract associated with this contribution.
+      nullable: true
+    type_id:
+      type: INTEGER
+      description: ID of the contribution type.
+      nullable: true
+    code:
+      type: VARCHAR
+      description: Optional alphanumeric code identifying the contribution.
+      nullable: true
+    duration:
+      type: INTERVAL
+      description: The scheduled duration of the contribution.
+      nullable: true
+    board_number:
+      type: VARCHAR
+      description: Identifier used for poster board assignment.
+      nullable: true
+    keywords:
+      type: ARRAY
+      description: List of keywords associated with the contribution.
+      nullable: true
+    is_deleted:
+      type: BOOLEAN
+      description: Flag indicating whether the contribution has been deleted.
+      nullable: false
+    last_friendly_subcontribution_id:
+      type: INTEGER
+      description: Last used friendly ID for subcontributions.
+      nullable: true
+    description:
+      type: TEXT
+      description: Description or abstract of the contribution.
+      nullable: true
+    title:
+      type: VARCHAR
+      description: Title of the contribution.
+      nullable: false
+    render_mode:
+      type: SMALLINT
+      description: Format in which the content is rendered.
+      nullable: false
+    protection_mode:
+      type: SMALLINT
+      description: Defines access permissions for the contribution.
+      nullable: false
+    inherit_location:
+      type: BOOLEAN
+      description: Indicates if the contribution inherits location info from its session block.
+      nullable: false
+    room_id:
+      type: INTEGER
+      description: ID of the room where the contribution will be presented.
+      nullable: true
+    venue_id:
+      type: INTEGER
+      description: ID of the venue for the contribution.
+      nullable: true
+    venue_name:
+      type: VARCHAR
+      description: Name of the venue, if not referencing a predefined one.
+      nullable: true
+    room_name:
+      type: VARCHAR
+      description: Name of the room, if not referencing a predefined one.
+      nullable: true
+    address:
+      type: TEXT
+      description: Address of the venue.
+      nullable: true
+  relationships:
+    - event_abstracts.abstracts.id -> events.contributions.abstract_id
+    - events.events.id -> events.contributions.event_id
+    - roombooking.rooms.id -> events.contributions.room_id
+    - events.session_blocks.id -> events.contributions.session_block_id
+    - events.session_blocks.id/events.sessions.id -> events.contributions.session_block_id/session_id
+    - events.sessions.id -> events.contributions.session_id
+    - events.tracks.id -> events.contributions.track_id
+    - events.contribution_types.id -> events.contributions.type_id
+    - roombooking.locations.id -> events.contributions.venue_id
+    - roombooking.rooms.location_id/id -> events.contributions.venue_id/room_id
+
+events.contribution_person_links:
+  description: Table linking persons to contributions, specifying their roles such as speaker or author.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the person-contribution link.
+      nullable: false
+    contribution_id:
+      type: INTEGER
+      description: ID of the contribution associated with this person.
+      nullable: false
+    person_id:
+      type: INTEGER
+      description: ID of the person involved in the contribution.
+      nullable: false
+    is_speaker:
+      type: BOOLEAN
+      description: Indicates whether the person is a speaker for the contribution.
+      nullable: false
+    author_type:
+      type: SMALLINT
+      description: Numeric code representing the author role.
+      nullable: true
+    first_name:
+      type: VARCHAR
+      description: First name of the person at the time of association.
+      nullable: true
+    last_name:
+      type: VARCHAR
+      description: Last name of the person at the time of association.
+      nullable: true
+    title:
+      type: SMALLINT
+      description: Numeric identifier for the person’s title.
+      nullable: true
+    affiliation_id:
+      type: INTEGER
+      description: ID referencing a known affiliation.
+      nullable: true
+    affiliation:
+      type: VARCHAR
+      description: Textual name of the person’s affiliation.
+      nullable: true
+    address:
+      type: TEXT
+      description: Address related to the person’s affiliation.
+      nullable: true
+    phone:
+      type: VARCHAR
+      description: Phone number for the person.
+      nullable: true
+    display_order:
+      type: INTEGER
+      description: Order in which the person should be displayed in lists or programs.
+      nullable: true
+  relationships:
+    - indico.affiliations.id -> events.contribution_person_links.affiliation_id
+    - events.contributions.id -> events.contribution_person_links.contribution_id
+    - events.persons.id -> events.contribution_person_links.person_id
+
+events.timetable_entries:
+  description: Table representing time-based entries in the event timetable.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the timetable entry.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: ID of the event to which this timetable entry belongs.
+      nullable: false
+    parent_id:
+      type: INTEGER
+      description: ID of the parent timetable entry.
+      nullable: true
+    session_block_id:
+      type: INTEGER
+      description: ID of the session block this entry is associated with.
+      nullable: true
+  relationships:
+    - events.events.id -> events.timetable_entries.event_id
+    - events.session_blocks.id -> events.timetable_entries.session_block_id
+    - events.timetable_entries.id -> events.timetable_entries.parent_id
+
+events.sessions:
+  description: Table containing sessions within events.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the session.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the session.
+      nullable: false
+    title:
+      type: VARCHAR
+      description: Session title.
+      nullable: true
+  relationships:
+    - events.events.id -> events.sessions.event_id
+
+events.session_blocks:
+  description: Table containing scheduled blocks within sessions.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the session block.
+      nullable: false
+    session_id:
+      type: INTEGER
+      description: Session ID associated with the block.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the block.
+      nullable: false
+  relationships:
+    - events.sessions.id -> events.session_blocks.session_id
+    - events.events.id -> events.session_blocks.event_id
+
+events.registrations:
+  description: Table containing event registrations.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the registration.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the registration.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: User ID associated with the registration.
+      nullable: true
+    status:
+      type: VARCHAR
+      description: Registration status.
+      nullable: true
+  relationships:
+    - events.events.id -> events.registrations.event_id
+    - users.users.id -> events.registrations.user_id
+
+events.registration_data:
+  description: Table containing registration form data entries.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the registration data entry.
+      nullable: false
+    registration_id:
+      type: INTEGER
+      description: Registration ID associated with the data entry.
+      nullable: false
+    field_id:
+      type: INTEGER
+      description: Registration form field identifier.
+      nullable: true
+    value:
+      type: TEXT
+      description: Field value.
+      nullable: true
+  relationships:
+    - events.registrations.id -> events.registration_data.registration_id
+
+events.tracks:
+  description: Table containing contribution tracks within events.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the track.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the track.
+      nullable: false
+    title:
+      type: VARCHAR
+      description: Track title.
+      nullable: true
+  relationships:
+    - events.events.id -> events.tracks.event_id
+
+events.contribution_types:
+  description: Table containing contribution types for events.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the contribution type.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the contribution type.
+      nullable: false
+    name:
+      type: VARCHAR
+      description: Contribution type name.
+      nullable: true
+  relationships:
+    - events.events.id -> events.contribution_types.event_id
+
+events.notes:
+  description: Table containing notes, meeting minutes attached to events, contributions, or sessions.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the note.
+      nullable: false
+    is_deleted:
+      type: BOOLEAN
+      description: Indicates whether the note has been deleted.
+      nullable: false
+    html:
+      type: TEXT
+      description: The contents of the notes/meeting minutes.
+      nullable: true
+    current_revision_id:
+      type: INTEGER
+      description: The ID of the current revision of the note.
+      nullable: true
+    link_type:
+      type: SMALLINT
+      description: The type of object the note is linked to.
+      nullable: true
+    event_id:
+      type: INTEGER
+      description: ID of the related event.
+      nullable: true
+    linked_event_id:
+      type: INTEGER
+      description: ID of a secondary event related via this note.
+      nullable: true
+    session_id:
+      type: INTEGER
+      description: ID of the session this note is linked to.
+      nullable: true
+    contribution_id:
+      type: INTEGER
+      description: ID of the contribution this note is linked to.
+      nullable: true
+    subcontribution_id:
+      type: INTEGER
+      description: ID of the subcontribution this note is linked to.
+      nullable: true
+  relationships:
+    - events.contributions.id -> events.notes.contribution_id
+    - events.note_revisions.id -> events.notes.current_revision_id
+    - events.events.id -> events.notes.event_id
+    - events.events.id -> events.notes.linked_event_id
+    - events.sessions.id -> events.notes.session_id
+    - events.subcontributions.id -> events.notes.subcontribution_id
+
+events.event_person_links:
+  description: Table linking persons to events with display metadata.
+  columns:
+    event_id:
+      type: INTEGER
+      description: ID of the related event.
+      nullable: false
+    id:
+      type: INTEGER
+      description: Unique ID for the link.
+      nullable: false
+    person_id:
+      type: INTEGER
+      description: ID of the person.
+      nullable: false
+    first_name:
+      type: VARCHAR
+      description: First name of the person.
+      nullable: true
+    last_name:
+      type: VARCHAR
+      description: Last name of the person.
+      nullable: true
+    title:
+      type: SMALLINT
+      description: Title identifier of the person.
+      nullable: true
+    affiliation_id:
+      type: INTEGER
+      description: ID of the affiliation.
+      nullable: true
+    affiliation:
+      type: VARCHAR
+      description: Name of the affiliation.
+      nullable: true
+    address:
+      type: TEXT
+      description: Address of the person.
+      nullable: true
+    phone:
+      type: VARCHAR
+      description: Phone number of the person.
+      nullable: true
+    display_order:
+      type: INTEGER
+      description: Position in the display order.
+      nullable: true
+  relationships:
+    - indico.affiliations.id -> events.event_person_links.affiliation_id
+    - events.events.id -> events.event_person_links.event_id
+    - events.persons.id -> events.event_person_links.person_id
+
+categories.categories:
+  description: Table containing category hierarchy and metadata.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique ID of the category.
+      nullable: false
+    parent_id:
+      type: INTEGER
+      description: ID of the parent category.
+      nullable: true
+    is_deleted:
+      type: BOOLEAN
+      description: Indicates if the category is deleted.
+      nullable: false
+    position:
+      type: INTEGER
+      description: Ordering within siblings.
+      nullable: true
+    visibility:
+      type: INTEGER
+      description: Visibility level of the category.
+      nullable: true
+    icon_metadata:
+      type: JSONB
+      description: Metadata for the category icon.
+      nullable: true
+    icon:
+      type: BYTEA
+      description: Binary icon data.
+      nullable: true
+    logo_metadata:
+      type: JSONB
+      description: Metadata for the category logo.
+      nullable: true
+    logo:
+      type: BYTEA
+      description: Binary logo data.
+      nullable: true
+    timezone:
+      type: VARCHAR
+      description: Timezone used in the category.
+      nullable: true
+    default_event_themes:
+      type: JSONB
+      description: Default themes for events.
+      nullable: true
+    event_creation_mode:
+      type: SMALLINT
+      description: Creation policy for events.
+      nullable: true
+    event_creation_notification_emails:
+      type: ARRAY
+      description: Emails notified on event creation.
+      nullable: true
+    event_message_mode:
+      type: SMALLINT
+      description: How messages are displayed.
+      nullable: true
+    event_message:
+      type: TEXT
+      description: Default message shown on event pages.
+      nullable: true
+    suggestions_disabled:
+      type: BOOLEAN
+      description: Whether event suggestions are disabled.
+      nullable: true
+    notify_managers:
+      type: BOOLEAN
+      description: Notify managers on changes.
+      nullable: true
+    show_future_months:
+      type: INTEGER
+      description: Number of future months shown.
+      nullable: true
+    google_wallet_mode:
+      type: SMALLINT
+      description: Google Wallet config.
+      nullable: true
+    google_wallet_settings:
+      type: JSONB
+      description: Google Wallet setup data.
+      nullable: true
+    apple_wallet_mode:
+      type: SMALLINT
+      description: Apple Wallet config.
+      nullable: true
+    apple_wallet_settings:
+      type: JSONB
+      description: Apple Wallet setup data.
+      nullable: true
+    is_flat_view_enabled:
+      type: BOOLEAN
+      description: Whether flat view is enabled.
+      nullable: true
+    default_ticket_template_id:
+      type: INTEGER
+      description: Default ticket template ID.
+      nullable: true
+    default_badge_template_id:
+      type: INTEGER
+      description: Default badge template ID.
+      nullable: true
+    title:
+      type: VARCHAR
+      description: Name of the category.
+      nullable: false
+    description:
+      type: TEXT
+      description: Description of the category.
+      nullable: true
+    protection_mode:
+      type: SMALLINT
+      description: Access control level.
+      nullable: true
+    no_access_contact:
+      type: VARCHAR
+      description: Contact for access issues.
+      nullable: true
+  relationships:
+    - categories.categories.id -> categories.categories.parent_id
+    - indico.designer_templates.id -> categories.categories.default_badge_template_id
+    - indico.designer_templates.id -> categories.categories.default_ticket_template_id
+
+users.users:
+  description: Table storing user profile and system status.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique identifier for the user.
+      nullable: false
+    first_name:
+      type: VARCHAR
+      description: First name of the user.
+      nullable: true
+    last_name:
+      type: VARCHAR
+      description: Last name of the user.
+      nullable: true
+    title:
+      type: SMALLINT
+      description: Title of the user.
+      nullable: true
+    affiliation:
+      type: VARCHAR
+      description: Affiliation of the user.
+      nullable: true
+    affiliation_id:
+      type: INTEGER
+      description: ID of the affiliation.
+      nullable: true
+    phone:
+      type: VARCHAR
+      description: Phone number of the user.
+      nullable: true
+    address:
+      type: TEXT
+      description: Address of the user.
+      nullable: true
+    merged_into_id:
+      type: INTEGER
+      description: ID of the user this one was merged into.
+      nullable: true
+    is_system:
+      type: BOOLEAN
+      description: Indicates system user.
+      nullable: true
+    is_admin:
+      type: BOOLEAN
+      description: Indicates administrative privileges.
+      nullable: true
+    is_blocked:
+      type: BOOLEAN
+      description: Indicates blocked account.
+      nullable: true
+    is_pending:
+      type: BOOLEAN
+      description: Indicates pending approval.
+      nullable: true
+    is_deleted:
+      type: BOOLEAN
+      description: Indicates deleted account.
+      nullable: true
+    accepted_terms_dt:
+      type: TIMESTAMP
+      description: Timestamp of terms acceptance.
+      nullable: true
+    signing_secret:
+      type: UUID
+      description: Unique signing identifier.
+      nullable: true
+    picture:
+      type: BYTEA
+      description: Profile picture binary data.
+      nullable: true
+    picture_metadata:
+      type: JSONB
+      description: Metadata for profile picture.
+      nullable: true
+    picture_source:
+      type: SMALLINT
+      description: Source identifier for picture.
+      nullable: true
+    created_dt:
+      type: TIMESTAMP
+      description: Account creation date.
+      nullable: true
+  relationships:
+    - indico.affiliations.id -> users.users.affiliation_id
+    - users.users.id -> users.users.merged_into_id
+
+plugin_assistant.extracted_documents:
+  description: Document chunks extracted from attachments for vector search.
+  columns:
+    id:
+      type: UUID
+      description: Unique identifier for the extracted chunk.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Event ID associated with the attachment.
+      nullable: false
+    attachment_id:
+      type: INTEGER
+      description: Attachment ID associated with the chunk.
+      nullable: false
+    chunk_index:
+      type: INTEGER
+      description: Index of the chunk within the attachment.
+      nullable: false
+    content_text:
+      type: TEXT
+      description: Extracted text content.
+      nullable: false
+    content_hash:
+      type: VARCHAR
+      description: Hash of the extracted content.
+      nullable: false
+    metadata_json:
+      type: JSONB
+      description: Extracted metadata for the chunk.
+      nullable: true
+    extraction_status:
+      type: VARCHAR
+      description: Extraction status (pending, processing, completed, failed, skipped).
+      nullable: false
+    error_message:
+      type: TEXT
+      description: Error message for failed extraction.
+      nullable: true
+    created_at:
+      type: TIMESTAMP
+      description: Creation time for the chunk.
+      nullable: false
+    updated_at:
+      type: TIMESTAMP
+      description: Last updated time for the chunk.
+      nullable: false
+    embedding:
+      type: VECTOR(384)
+      description: Vector embedding for similarity search (if pgvector enabled).
+      nullable: true
+  relationships:
+    - attachments.attachments.id -> plugin_assistant.extracted_documents.attachment_id
+
+plugin_assistant.document_sync_log:
+  description: Sync job tracking for document extraction.
+  columns:
+    id:
+      type: UUID
+      description: Unique identifier for the sync log entry.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Optional event ID for scoped sync jobs.
+      nullable: true
+    started_at:
+      type: TIMESTAMP
+      description: Sync start time.
+      nullable: false
+    completed_at:
+      type: TIMESTAMP
+      description: Sync completion time.
+      nullable: true
+    documents_processed:
+      type: INTEGER
+      description: Number of documents processed.
+      nullable: false
+    chunks_created:
+      type: INTEGER
+      description: Number of chunks created.
+      nullable: false
+    errors_count:
+      type: INTEGER
+      description: Number of errors recorded.
+      nullable: false
+    status:
+      type: VARCHAR
+      description: Sync status (running, completed, failed).
+      nullable: false
+    error_message:
+      type: TEXT
+      description: Error message for failed sync.
+      nullable: true
+  relationships: []
+
+plugin_assistant.chat_sessions:
+  description: Chat sessions for assistant conversations.
+  columns:
+    id:
+      type: UUID
+      description: Unique session identifier.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: User ID associated with the session.
+      nullable: false
+    event_id:
+      type: INTEGER
+      description: Optional event ID scope.
+      nullable: true
+    created_at:
+      type: TIMESTAMP
+      description: Session creation time.
+      nullable: false
+    updated_at:
+      type: TIMESTAMP
+      description: Session update time.
+      nullable: false
+  relationships:
+    - users.users.id -> plugin_assistant.chat_sessions.user_id
+
+plugin_assistant.chat_messages:
+  description: Messages within chat sessions.
+  columns:
+    id:
+      type: UUID
+      description: Unique message identifier.
+      nullable: false
+    session_id:
+      type: UUID
+      description: Associated chat session ID.
+      nullable: false
+    role:
+      type: VARCHAR
+      description: Role of the message (user or assistant).
+      nullable: false
+    content:
+      type: TEXT
+      description: Message content.
+      nullable: false
+    metadata_json:
+      type: JSONB
+      description: Optional metadata payload.
+      nullable: true
+    created_at:
+      type: TIMESTAMP
+      description: Message creation time.
+      nullable: false
+  relationships:
+    - plugin_assistant.chat_sessions.id -> plugin_assistant.chat_messages.session_id
+
+plugin_assistant.feedback_entries:
+  description: Feedback entries for assistant responses.
+  columns:
+    id:
+      type: UUID
+      description: Unique feedback identifier.
+      nullable: false
+    message_id:
+      type: UUID
+      description: Message ID being rated.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: User ID providing feedback.
+      nullable: false
+    feedback_type:
+      type: VARCHAR
+      description: Feedback type (thumbs_up, thumbs_down, rating, comment).
+      nullable: false
+    value:
+      type: TEXT
+      description: Feedback content.
+      nullable: false
+    created_at:
+      type: TIMESTAMP
+      description: Feedback creation time.
+      nullable: false
+  relationships:
+    - plugin_assistant.chat_messages.id -> plugin_assistant.feedback_entries.message_id
+    - users.users.id -> plugin_assistant.feedback_entries.user_id
+
+plugin_assistant.query_audit_log:
+  description: Audit log entries for NL2SQL queries.
+  columns:
+    id:
+      type: INTEGER
+      description: Unique audit log entry ID.
+      nullable: false
+    created_at:
+      type: TIMESTAMP
+      description: Entry creation time.
+      nullable: false
+    user_id:
+      type: INTEGER
+      description: User ID associated with the query.
+      nullable: true
+    user_email:
+      type: VARCHAR
+      description: User email address.
+      nullable: true
+    session_id:
+      type: VARCHAR
+      description: Session identifier.
+      nullable: true
+    question:
+      type: TEXT
+      description: Original user question.
+      nullable: false
+    intent:
+      type: VARCHAR
+      description: Classified intent.
+      nullable: true
+    intent_confidence:
+      type: FLOAT
+      description: Confidence of intent classification.
+      nullable: true
+    generated_sql:
+      type: TEXT
+      description: Generated SQL query.
+      nullable: true
+    execution_time_ms:
+      type: FLOAT
+      description: Query execution latency in ms.
+      nullable: true
+    row_count:
+      type: INTEGER
+      description: Number of rows returned.
+      nullable: true
+    success:
+      type: BOOLEAN
+      description: Whether the query succeeded.
+      nullable: false
+    error_message:
+      type: TEXT
+      description: Error message on failure.
+      nullable: true
+    validation_rejection_reason:
+      type: VARCHAR
+      description: Reason for validation rejection.
+      nullable: true
+    correction_attempts:
+      type: INTEGER
+      description: Number of correction attempts.
+      nullable: false
+    was_corrected:
+      type: BOOLEAN
+      description: Whether SQL was corrected successfully.
+      nullable: false
+    cached:
+      type: BOOLEAN
+      description: Whether the result was cached.
+      nullable: false
+    ip_address:
+      type: VARCHAR
+      description: Client IP address.
+      nullable: true
+  relationships: []
+
+plugin_assistant.observability_usage_stats:
+  description: Aggregated usage statistics for observability.
+  columns:
+    id:
+      type: UUID
+      description: Unique stats identifier.
+      nullable: false
+    period_type:
+      type: VARCHAR
+      description: Period type (day, week, month).
+      nullable: false
+    period_start:
+      type: TIMESTAMP
+      description: Period start time.
+      nullable: false
+    total_queries:
+      type: INTEGER
+      description: Total queries in period.
+      nullable: false
+    successful_queries:
+      type: INTEGER
+      description: Successful queries in period.
+      nullable: false
+    avg_latency_ms:
+      type: FLOAT
+      description: Average latency in ms.
+      nullable: true
+    p95_latency_ms:
+      type: FLOAT
+      description: 95th percentile latency in ms.
+      nullable: true
+    error_count:
+      type: INTEGER
+      description: Errors in period.
+      nullable: false
+    queries_by_intent:
+      type: JSON
+      description: Aggregated queries by intent.
+      nullable: true
+    total_input_tokens:
+      type: INTEGER
+      description: Total input tokens.
+      nullable: false
+    total_output_tokens:
+      type: INTEGER
+      description: Total output tokens.
+      nullable: false
+    last_synced_at:
+      type: TIMESTAMP
+      description: Last sync time.
+      nullable: false
+    created_at:
+      type: TIMESTAMP
+      description: Stats creation time.
+      nullable: false
+  relationships: []
+
+plugin_assistant.observability_error_records:
+  description: Recent error records for debugging.
+  columns:
+    id:
+      type: UUID
+      description: Unique error record identifier.
+      nullable: false
+    correlation_id:
+      type: VARCHAR
+      description: Correlation identifier.
+      nullable: false
+    timestamp:
+      type: TIMESTAMP
+      description: Error timestamp.
+      nullable: false
+    error_type:
+      type: VARCHAR
+      description: Error type.
+      nullable: false
+    error_message:
+      type: TEXT
+      description: Error message.
+      nullable: false
+    stack_trace:
+      type: TEXT
+      description: Stack trace.
+      nullable: true
+    user_id_hash:
+      type: VARCHAR
+      description: Hash of user id.
+      nullable: true
+    session_id:
+      type: UUID
+      description: Related session ID.
+      nullable: true
+    langfuse_trace_id:
+      type: VARCHAR
+      description: Langfuse trace id.
+      nullable: true
+    created_at:
+      type: TIMESTAMP
+      description: Record creation time.
+      nullable: false
+  relationships:
+    - plugin_assistant.chat_sessions.id -> plugin_assistant.observability_error_records.session_id
+
+plugin_assistant.observability_sync_log:
+  description: Sync job tracking for observability metrics.
+  columns:
+    id:
+      type: UUID
+      description: Unique sync log identifier.
+      nullable: false
+    started_at:
+      type: TIMESTAMP
+      description: Sync start time.
+      nullable: false
+    completed_at:
+      type: TIMESTAMP
+      description: Sync completion time.
+      nullable: true
+    period_start:
+      type: TIMESTAMP
+      description: Period start time.
+      nullable: false
+    period_end:
+      type: TIMESTAMP
+      description: Period end time.
+      nullable: false
+    traces_processed:
+      type: INTEGER
+      description: Traces processed.
+      nullable: false
+    stats_updated:
+      type: INTEGER
+      description: Stats updated.
+      nullable: false
+    errors_recorded:
+      type: INTEGER
+      description: Errors recorded.
+      nullable: false
+    status:
+      type: VARCHAR
+      description: Sync status (running, completed, failed).
+      nullable: false
+    error_message:
+      type: TEXT
+      description: Error message for failed sync.
+      nullable: true
+  relationships: []

@@ -5,6 +5,7 @@ Provides utilities for creating and managing audit log entries.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator, Optional
 
@@ -211,9 +212,27 @@ def log_validation_rejection(
         log_entry.mark_validation_rejected(reason)
 
 
+def _stringify_error(error_message: object | None) -> str:
+    if error_message is None:
+        return "Unknown error"
+    if isinstance(error_message, str):
+        return error_message
+    if hasattr(error_message, "model_dump"):
+        try:
+            return json.dumps(error_message.model_dump(), default=str)
+        except Exception:
+            return str(error_message)
+    if hasattr(error_message, "dict"):
+        try:
+            return json.dumps(error_message.dict(), default=str)
+        except Exception:
+            return str(error_message)
+    return str(error_message)
+
+
 def log_error(
     log_entry: Optional[QueryAuditLog],
-    error_message: str,
+    error_message: object,
 ) -> None:
     """Log error to audit entry.
     
@@ -224,7 +243,7 @@ def log_error(
         error_message: Error message
     """
     if log_entry is not None:
-        log_entry.mark_error(error_message)
+        log_entry.mark_error(_stringify_error(error_message))
 
 
 def log_correction_attempt(

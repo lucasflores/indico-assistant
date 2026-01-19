@@ -181,6 +181,11 @@ class SQLValidator:
         Returns:
             List of tables that are NOT allowed.
         """
+        allowed_tables = self._schema_context.get_all_allowed_tables(
+            self._allowed_tables
+        )
+        if not allowed_tables:
+            return []
         disallowed = []
         for table in tables:
             if not self._schema_context.is_table_allowed(

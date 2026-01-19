@@ -494,7 +494,7 @@ class NL2SQLPipeline:
     def _error_result(
         self,
         error_type: PipelineErrorType,
-        message: str,
+        message: object,
         user_message: str,
         total_time_ms: int = 0,
         classification_time_ms: int = 0,
@@ -505,11 +505,12 @@ class NL2SQLPipeline:
         correction_attempts: int = 0,
     ) -> PipelineResult:
         """Create an error PipelineResult."""
+        message_text = self._stringify_error_message(message)
         return PipelineResult(
             success=False,
             error=PipelineError(
                 error_type=error_type,
-                message=message,
+                message=message_text,
                 user_message=user_message,
             ),
             generated_sql=generated_sql,
@@ -520,6 +521,28 @@ class NL2SQLPipeline:
             execution_time_ms=execution_time_ms,
             correction_attempts=correction_attempts,
         )
+
+    @staticmethod
+    def _stringify_error_message(message: object) -> str:
+        if message is None:
+            return "Unknown error"
+        if isinstance(message, str):
+            return message
+        if hasattr(message, "model_dump"):
+            try:
+                import json
+
+                return json.dumps(message.model_dump(), default=str)
+            except Exception:
+                return str(message)
+        if hasattr(message, "dict"):
+            try:
+                import json
+
+                return json.dumps(message.dict(), default=str)
+            except Exception:
+                return str(message)
+        return str(message)
 
     @property
     def classifier(self) -> QueryClassifier:

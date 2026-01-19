@@ -7,11 +7,17 @@ Task: T011
 
 from __future__ import annotations
 
-from flask import jsonify, request, session
+import os
+
+import logging
+from flask import current_app, jsonify, request, session
 from indico.web.rh import RH
 from werkzeug.exceptions import Forbidden, NotFound, Unauthorized
 
 from indico_assistant.schemas.errors import ErrorCode, create_error_response
+from indico_assistant.services.jwt_service import validate_chainlit_token
+
+logger = logging.getLogger(__name__)
 
 
 class RHAssistantBase(RH):
@@ -23,6 +29,7 @@ class RHAssistantBase(RH):
     
     DENY_FRAMES = True  # Prevent clickjacking
     ADMIN_ONLY = False  # Override to True for admin-only endpoints
+    CSRF_ENABLED = False  # API auth is handled via JWT header
 
     def _check_access(self):
         """Enforce authentication for all Assistant API endpoints.
@@ -31,11 +38,86 @@ class RHAssistantBase(RH):
             Unauthorized: If user is not authenticated
             Forbidden: If ADMIN_ONLY and user is not admin
         """
-        if session.user is None:
+        auth_header = request.headers.get("Authorization", "")
+        print(
+            f"[assistant auth] _check_access called auth_header_present={bool(auth_header)}",
+            flush=True,
+        )
+
+        user = session.user
+        if user is None:
+            user = self._get_user_from_bearer_token()
+            if user is not None:
+                self._user = user
+        if user is None:
+            print("[assistant auth] session user missing", flush=True)
             raise Unauthorized("Authentication required")
         
-        if self.ADMIN_ONLY and not session.user.is_admin:
+        if self.ADMIN_ONLY and not user.is_admin:
             raise Forbidden("Admin access required")
+
+    def _get_user_from_bearer_token(self):
+        """Get authenticated user from Authorization header if present."""
+        auth_header = request.headers.get("Authorization", "")
+        assistant_header = request.headers.get("X-Assistant-Auth", "")
+        current_app.logger.warning(
+            "Assistant API auth header present=%s assistant_header_present=%s",
+            bool(auth_header),
+            bool(assistant_header),
+        )
+        print(
+            f"[assistant auth] Authorization header present={bool(auth_header)} "
+            f"assistant_header_present={bool(assistant_header)}",
+            flush=True,
+        )
+
+        token = assistant_header.strip()
+        if not token:
+            if not auth_header.startswith("Bearer "):
+                if auth_header:
+                    current_app.logger.warning("Assistant auth header not Bearer")
+                    print("[assistant auth] Authorization header not Bearer")
+                return None
+            token = auth_header.removeprefix("Bearer ").strip()
+            if not token:
+                return None
+
+        secret = None
+        plugin = self.plugin
+        if plugin:
+            secret = plugin.settings.get("chainlit_auth_secret")
+        if not secret:
+            secret = os.environ.get("CHAINLIT_AUTH_SECRET", "")
+        if not secret:
+            current_app.logger.warning("Assistant JWT secret not configured")
+            print("[assistant auth] JWT secret not configured")
+            return None
+
+        payload = validate_chainlit_token(token, secret)
+        if not payload:
+            current_app.logger.warning("Assistant JWT validation failed")
+            print("[assistant auth] JWT validation failed")
+            return None
+
+        user_id = payload.get("identifier") or payload.get("id")
+        if not user_id:
+            current_app.logger.warning("Assistant JWT missing identifier")
+            print("[assistant auth] JWT missing identifier")
+            return None
+
+        try:
+            from indico.modules.users import User
+            user = User.get(int(user_id))
+            if user is None:
+                current_app.logger.warning(
+                    "Assistant JWT user not found for id=%s", user_id
+                )
+                print(f"[assistant auth] JWT user not found id={user_id}")
+            return user
+        except Exception:
+            current_app.logger.exception("Assistant JWT user lookup failed")
+            print("[assistant auth] JWT user lookup failed")
+            return None
     
     @property
     def user(self):

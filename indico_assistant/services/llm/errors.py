@@ -81,6 +81,28 @@ def _map_exception_to_error(exc: Exception) -> LLMError:
     exc_type = type(exc).__name__
     exc_module = type(exc).__module__
     
+    # ValueError handling (often configuration issues)
+    if isinstance(exc, ValueError):
+        message = str(exc).strip() or "Invalid LLM configuration"
+        lowered = message.lower()
+        if "api key" in lowered or "api_key" in lowered:
+            return LLMError(
+                error_type=ErrorType.AUTHENTICATION_ERROR,
+                message=message,
+                details={"exception": exc_type}
+            )
+        if "provider" in lowered or "model" in lowered or "configuration" in lowered:
+            return LLMError(
+                error_type=ErrorType.NOT_CONFIGURED,
+                message=message,
+                details={"exception": exc_type}
+            )
+        return LLMError(
+            error_type=ErrorType.UNKNOWN_ERROR,
+            message=message,
+            details={"exception": exc_type}
+        )
+
     # OpenAI-specific exceptions
     if "openai" in exc_module.lower():
         if "Timeout" in exc_type or "APITimeoutError" in exc_type:
@@ -174,6 +196,6 @@ def _map_exception_to_error(exc: Exception) -> LLMError:
     # Unknown error fallback
     return LLMError(
         error_type=ErrorType.UNKNOWN_ERROR,
-        message=f"Unexpected error: {exc_type}",
+        message=f"Unexpected error: {exc_type}: {exc}",
         details={"exception": exc_type, "message": str(exc)}
     )

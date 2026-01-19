@@ -171,11 +171,14 @@ class ChatService:
         except (SessionNotFoundError, SessionAccessDeniedError, EventAccessDeniedError):
             self._session_manager.rollback()
             raise
+        except QueryProcessingError:
+            self._session_manager.rollback()
+            raise
         except Exception as e:
             self._session_manager.rollback()
             logger.exception("Error processing chat message")
             raise QueryProcessingError(
-                "Failed to process query",
+                "An unexpected error occurred while processing your request",
                 reason=str(e)
             ) from e
 
@@ -305,50 +308,70 @@ class ChatService:
             metadata["rag_error"] = str(e)
         
         try:
-            from indico_assistant.services.nl2sql import NL2SQLService
-            
-            # Get or create NL2SQL service
-            service = NL2SQLService()
-            
-            # Build enhanced prompt with RAG context if available
-            enhanced_context = context.copy() if context else []
+            from indico_assistant.plugin import AssistantPlugin
+            from indico_assistant.services.nl2sql import create_nl2sql_pipeline_from_plugin
+
+            plugin = AssistantPlugin.instance
+            if not plugin:
+                raise ImportError("Assistant plugin instance not available")
+
+            pipeline = create_nl2sql_pipeline_from_plugin(plugin)
+
+            # Build enhanced question with RAG context if available
+            enhanced_question = message
             if rag_context and rag_context.has_context:
-                # Add RAG context as a system message for the LLM
-                rag_system_message = {
-                    "role": "system",
-                    "content": (
-                        "The following context from event documents may be relevant:\n\n"
-                        f"{rag_context.text}\n\n"
-                        "Use this context when relevant to answer the user's question. "
-                        "If citing information from documents, mention the source."
-                    )
-                }
-                enhanced_context.insert(0, rag_system_message)
-            
-            # Process the query
-            result = service.process_query(
-                question=message,
-                conversation_context=enhanced_context,
-                event_id=event_id
+                enhanced_question = (
+                    f"{message}\n\n"
+                    "The following context from event documents may be relevant:\n\n"
+                    f"{rag_context.text}\n\n"
+                    "Use this context when relevant to answer the user's question. "
+                    "If citing information from documents, mention the source."
+                )
+
+            logger.debug(
+                "Executing NL2SQL pipeline",
+                extra={"event_id": event_id, "user_id": user_id}
             )
-            
+
+            result = pipeline.process(
+                question=enhanced_question,
+                user_id=user_id or 0,
+                event_ids=[event_id] if event_id else None,
+            )
+
+            response_text = result.answer or ""
+            if not result.success:
+                response_text = (
+                    result.error.user_message
+                    if result.error
+                    else "Unable to process your query"
+                )
+
             # Build response with citations if RAG was used
-            response_text = result.response
             if rag_sources:
-                # Format citations for the response
                 from indico_assistant.services.vector_search.rag import RAGService
                 citations = RAGService._format_citations_static(rag_sources)
                 if citations:
                     response_text = f"{response_text}\n\n{citations}"
-            
+
+            error_payload = None
+            if result.error:
+                error_payload = (
+                    result.error.model_dump()
+                    if hasattr(result.error, "model_dump")
+                    else result.error.dict()
+                )
+
             metadata.update({
-                "sql_generated": result.sql if hasattr(result, 'sql') else None,
-                "confidence": result.confidence if hasattr(result, 'confidence') else None,
-                "data_sources": result.data_sources if hasattr(result, 'data_sources') else [],
+                "sql_generated": result.generated_sql,
+                "confidence": result.confidence,
+                "data_sources": result.tables_accessed,
+                "pipeline_success": result.success,
+                "pipeline_error": error_payload,
             })
-            
+
             return response_text, metadata
-            
+
         except ImportError:
             # NL2SQL service not available, return mock response
             logger.warning("NL2SQL service not available, returning mock response")

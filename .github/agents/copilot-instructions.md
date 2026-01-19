@@ -19,6 +19,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - sessionStorage (client-side thread persistence via Chainlit), PostgreSQL (existing) (008-chat-widget)
 - Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode) (009-chat-widget-styling)
 - N/A (static configuration files only) (009-chat-widget-styling)
+- Python 3.11+ + Flask (Indico), Chainlit 2.9.5, Instructor, httpx (for async HTTP client) (010-chat-pipeline-integration)
+- PostgreSQL (Indico's db via SQLAlchemy) (010-chat-pipeline-integration)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -38,9 +40,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 010-chat-pipeline-integration: Added Python 3.11+ + Flask (Indico), Chainlit 2.9.5, Instructor, httpx (for async HTTP client)
 - 009-chat-widget-styling: Added Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode)
 - 009-chat-widget-styling: Added Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode)
-- 008-chat-widget: Added Python 3.11+ (plugin), JavaScript ES6 (widget injection) + Chainlit Copilot widget, Flask (via Indico), Indico plugin system
 
 
 <!-- MANUAL ADDITIONS START -->

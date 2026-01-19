@@ -111,6 +111,18 @@ class LLMResponse(BaseModel, Generic[T]):
             retries=retries
         )
 
+    @property
+    def data(self) -> T | None:
+        """Backward-compatible alias for result.
+
+        Some pipeline components expect `data` instead of `result`.
+        """
+        return self.result
+
+    @data.setter
+    def data(self, value: T | None) -> None:
+        self.result = value
+
 
 class HealthStatus(BaseModel):
     """Health check result for LLM provider.

@@ -10,6 +10,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 export CHAINLIT_AUTH_SECRET=<shared-hex-secret>  # must match Indico plugin setting
+export INDICO_API_URL=http://127.0.0.1:8000  # base URL for Indico API
 chainlit run app_chnlit.py --host 127.0.0.1 --port 8001
 ```
 
@@ -26,7 +27,7 @@ In Indico Admin → Plugins → Assistant set:
 ## Notes
 
 - Auth: JWT from the plugin is validated in `app_chnlit.py` via `header_auth_callback`.
-- Handler: `on_message` currently echoes input; replace with real assistant logic when ready.
+- Handler: `on_message` forwards messages to `/api/assistant/chat` on the Indico server.
 
 ## Customization
 

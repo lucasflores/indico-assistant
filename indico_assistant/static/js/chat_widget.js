@@ -712,7 +712,7 @@
       const widgetConfig = {
         chainlitServer: IndicoAssistant.chainlitUrl,
         theme: resolvedTheme,
-        authType: "header",
+        authType: IndicoAssistant.authToken ? "jwt" : "header",
       };
 
       // Force Authorization header for all Chainlit requests when we have a token
@@ -734,6 +734,34 @@
             return originalFetch(input, { ...init, headers });
           }
           return originalFetch(input, init);
+        };
+      }
+
+      if (IndicoAssistant.authToken && !window.__assistantXhrPatched) {
+        window.__assistantXhrPatched = true;
+        const chainlitOrigin = (() => {
+          try {
+            return new URL(IndicoAssistant.chainlitUrl).origin;
+          } catch (err) {
+            return null;
+          }
+        })();
+        const originalOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+          this.__assistantUrl = url;
+          return originalOpen.call(this, method, url, ...rest);
+        };
+        const originalSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function (...args) {
+          try {
+            const url = this.__assistantUrl;
+            if (chainlitOrigin && url && url.startsWith(chainlitOrigin)) {
+              this.setRequestHeader("Authorization", `Bearer ${IndicoAssistant.authToken}`);
+            }
+          } catch (err) {
+            // ignore
+          }
+          return originalSend.apply(this, args);
         };
       }
 

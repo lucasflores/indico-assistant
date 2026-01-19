@@ -18,6 +18,23 @@ from indico_assistant.services.llm.errors import LLMError, ErrorType
 logger = logging.getLogger(__name__)
 
 
+def _normalize_openai_base_url(base_url: str | None, default: str) -> str:
+    """Normalize OpenAI-compatible base URLs to include /v1 suffix.
+
+    Args:
+        base_url: Provided base URL (may be None or missing /v1).
+        default: Default base URL to use when base_url is not provided.
+
+    Returns:
+        Normalized base URL ending with /v1.
+    """
+    effective_base_url = base_url or default
+    normalized = effective_base_url.rstrip("/")
+    if not normalized.endswith("/v1"):
+        normalized = f"{normalized}/v1"
+    return normalized
+
+
 def create_instructor_client(
     provider: str,
     model: str,
@@ -93,11 +110,9 @@ def _create_ollama_client(
     Returns:
         Configured Instructor client for Ollama.
     """
-    effective_base_url = base_url or "http://localhost:11434"
-    
-    # Ensure /v1 suffix for OpenAI compatibility
-    if not effective_base_url.endswith("/v1"):
-        effective_base_url = effective_base_url.rstrip("/") + "/v1"
+    effective_base_url = _normalize_openai_base_url(
+        base_url, "http://localhost:11434"
+    )
     
     openai_client = OpenAI(
         base_url=effective_base_url,
@@ -133,7 +148,9 @@ def _create_huggingface_client(
     if not api_key:
         raise ValueError("HuggingFace provider requires an API key (llm_api_key setting)")
     
-    effective_base_url = base_url or "https://api-inference.huggingface.co/v1/"
+    effective_base_url = _normalize_openai_base_url(
+        base_url, "https://router.huggingface.co"
+    )
     
     openai_client = OpenAI(
         base_url=effective_base_url,
@@ -169,7 +186,7 @@ def _create_openai_client(
     
     client_kwargs: dict[str, Any] = {}
     if base_url:
-        client_kwargs["base_url"] = base_url
+        client_kwargs["base_url"] = _normalize_openai_base_url(base_url, base_url)
     if api_key:
         client_kwargs["api_key"] = api_key
     else:
