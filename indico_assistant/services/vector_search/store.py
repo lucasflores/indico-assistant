@@ -165,6 +165,57 @@ class VectorStore:
         
         return doc.content_hash if doc else None
     
+    def check_duplicate_by_hash(
+        self, 
+        event_id: int, 
+        content_hash: str
+    ) -> Optional[dict[str, Any]]:
+        """Check if document with given hash already exists for event.
+        
+        Feature: 011-realtime-attachment-indexing
+        Task: T009
+        
+        Args:
+            event_id: Indico event ID to scope search.
+            content_hash: SHA256 hash of document content (64 hex chars).
+            
+        Returns:
+            Dictionary with existing document info if duplicate found:
+                - attachment_id: Existing attachment ID
+                - chunk_count: Number of chunks for this document
+                - content_hash: The matching hash
+            None if no duplicate found.
+            
+        Example:
+            >>> store = VectorStore()
+            >>> result = store.check_duplicate_by_hash(123, "abc123...")
+            >>> if result:
+            ...     print(f"Duplicate: {result['chunk_count']} chunks")
+            
+        Contract:
+            See contracts/indexing_task.yaml step 3_check_duplicate
+        """
+        # Query for any chunk with matching event_id and content_hash
+        doc = ExtractedDocument.query.filter_by(
+            event_id=event_id,
+            content_hash=content_hash
+        ).first()
+        
+        if not doc:
+            return None
+        
+        # Count total chunks for this attachment
+        chunk_count = ExtractedDocument.query.filter_by(
+            event_id=event_id,
+            attachment_id=doc.attachment_id
+        ).count()
+        
+        return {
+            "attachment_id": doc.attachment_id,
+            "chunk_count": chunk_count,
+            "content_hash": content_hash
+        }
+    
     def get_chunk_count(
         self, 
         event_id: Optional[int] = None,
@@ -243,29 +294,29 @@ class VectorStore:
         # Build event filter
         event_filter = ""
         params: dict[str, Any] = {
-            "query_embedding": "[" + ",".join(str(x) for x in query_embedding) + "]",
             "top_k": top_k,
             "threshold": threshold
         }
         
+        # Convert embedding to PostgreSQL vector format
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        
         if event_id is not None:
-            event_filter = "AND event_id = :event_id"
-            params["event_id"] = event_id
+            event_filter = f"AND event_id = {event_id}"
         elif event_ids is not None and event_ids:
-            event_filter = "AND event_id = ANY(:event_ids)"
-            params["event_ids"] = event_ids
+            event_filter = f"AND event_id = ANY(ARRAY{event_ids})"
         
         query = text(f"""
             SELECT 
                 id, event_id, attachment_id, chunk_index,
                 content_text, metadata_json,
-                1 - (embedding <=> :query_embedding::vector) as similarity
+                1 - (embedding <=> '{embedding_str}'::vector) as similarity
             FROM plugin_assistant.extracted_documents
             WHERE extraction_status = 'completed'
             AND embedding IS NOT NULL
             {event_filter}
-            AND 1 - (embedding <=> :query_embedding::vector) >= :threshold
-            ORDER BY embedding <=> :query_embedding::vector
+            AND 1 - (embedding <=> '{embedding_str}'::vector) >= :threshold
+            ORDER BY embedding <=> '{embedding_str}'::vector
             LIMIT :top_k
         """)
         

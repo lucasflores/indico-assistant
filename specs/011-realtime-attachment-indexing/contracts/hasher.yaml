@@ -1,0 +1,242 @@
+# Content Hash Computation Contract
+
+**Feature**: 011-realtime-attachment-indexing  
+**Component**: Content Hasher  
+**File**: `indico_assistant/services/document/hasher.py`
+
+## Interface
+
+### Function Signature
+
+```python
+def compute_content_hash(file_obj: BinaryIO) -> str:
+    """Compute SHA256 hash of file content using streaming approach.
+    
+    Args:
+        file_obj: Binary file-like object opened for reading
+        
+    Returns:
+        Hexadecimal string representation of SHA256 hash (64 characters)
+        
+    Performance:
+        - Memory efficient: Uses 8KB chunk streaming
+        - ~100ms for 10MB file
+        - O(n) time complexity where n = file size
+        
+    Example:
+        >>> with open('document.pdf', 'rb') as f:
+        ...     hash_value = compute_content_hash(f)
+        >>> hash_value
+        'abc123def456...'  # 64 hex characters
+    """
+```
+
+## Input Contract
+
+```yaml
+file_obj:
+  type: BinaryIO
+  description: File-like object supporting read() method
+  requirements:
+    - Must be opened in binary mode ('rb')
+    - Must support seek(0) to reset position
+    - Must support read(size) with variable size
+  examples:
+    - io.BytesIO(b'content')
+    - open('file.pdf', 'rb')
+    - attachment.file.open()  # Indico attachment file object
+```
+
+## Output Contract
+
+```yaml
+return_value:
+  type: str
+  format: hexadecimal
+  length: 64
+  pattern: "^[a-f0-9]{64}$"
+  description: SHA256 hash as lowercase hex string
+  examples:
+    - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # empty file
+    - "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"  # "foo"
+```
+
+## Implementation Requirements
+
+### Algorithm
+
+```yaml
+algorithm: SHA256
+library: hashlib.sha256()
+chunk_size: 8192 bytes  # 8KB chunks
+reason: Balance between memory efficiency and I/O performance
+```
+
+### Streaming Approach
+
+```python
+# Pseudo-code for streaming hash computation
+import hashlib
+
+def compute_content_hash(file_obj: BinaryIO) -> str:
+    hasher = hashlib.sha256()
+    
+    # Reset file position to beginning
+    file_obj.seek(0)
+    
+    # Read in 8KB chunks
+    while chunk := file_obj.read(8192):
+        hasher.update(chunk)
+    
+    # Return hex digest
+    return hasher.hexdigest()
+```
+
+### Memory Constraints
+
+```yaml
+max_memory_usage: 8KB + hash state (~256 bytes)
+reason: Streaming approach prevents loading entire file into memory
+scalability: Can handle multi-GB files without OOM errors
+```
+
+## Performance Contract
+
+```yaml
+performance_targets:
+  small_files:
+    size: "<1MB"
+    time: "<10ms"
+    
+  medium_files:
+    size: "1-10MB"
+    time: "<100ms"
+    
+  large_files:
+    size: "10-50MB"
+    time: "<500ms"
+    
+  measurement_method: "time.perf_counter() around function call"
+```
+
+## Error Handling
+
+```yaml
+exceptions:
+  IOError:
+    when: File cannot be read (permission denied, file deleted)
+    action: Propagate exception to caller
+    
+  OSError:
+    when: Disk read error, network filesystem issue
+    action: Propagate exception to caller
+    
+  ValueError:
+    when: file_obj is None or not a file-like object
+    action: Raise with clear message "file_obj must be a file-like object"
+
+error_policy:
+  - Never return None (always return 64-char hex string or raise)
+  - Reset file position with seek(0) before reading
+  - Close file_obj is caller's responsibility (don't close in function)
+```
+
+## Testing Requirements
+
+### Unit Tests
+
+```yaml
+test_cases:
+  test_empty_file:
+    input: BytesIO(b'')
+    expected: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    
+  test_known_content:
+    input: BytesIO(b'The quick brown fox')
+    expected: Known SHA256 hash (from external tool)
+    
+  test_large_file:
+    input: 50MB random data
+    verify: Hash is deterministic (same on repeated calls)
+    
+  test_file_position_reset:
+    setup: Read file partially before hashing
+    verify: Function resets position to 0 before computing
+    
+  test_invalid_input:
+    input: None, "string", 123
+    expected: ValueError raised
+```
+
+### Performance Tests
+
+```yaml
+test_10mb_file:
+  size: 10 * 1024 * 1024 bytes
+  assert: execution_time < 100ms
+  percentile: 95th
+  
+test_memory_usage:
+  size: 100MB file
+  assert: memory_increase < 10MB
+  reason: Verify streaming works (doesn't load entire file)
+```
+
+## Integration Points
+
+### Used By
+
+- `tasks/indexing.py:index_attachment_task()` - Step 2: Hash computation
+- Future: Manual sync API for on-demand hashing
+
+### Dependencies
+
+- `hashlib` (Python standard library)
+- No external dependencies
+
+## Example Usage
+
+```python
+# In indexing task
+from indico_assistant.services.document.hasher import compute_content_hash
+
+def index_attachment_task(attachment_id, event_id):
+    # Step 1: Fetch attachment
+    attachment = Attachment.query.get(attachment_id)
+    
+    # Step 2: Compute hash
+    with attachment.file.open() as f:
+        content_hash = compute_content_hash(f)
+    
+    # Step 3: Check duplicate
+    existing = ExtractedDocument.query.filter_by(
+        event_id=event_id,
+        content_hash=content_hash
+    ).first()
+    
+    if existing:
+        return {'status': 'skipped', 'content_hash': content_hash}
+```
+
+## Security Considerations
+
+```yaml
+hash_collision_probability:
+  algorithm: SHA256
+  probability: 2^-256 (negligible)
+  mitigation: Not needed (astronomically unlikely)
+  
+content_validation:
+  purpose: Duplicate detection only
+  not_for: Cryptographic verification, digital signatures
+  
+side_channel_attacks:
+  timing: Not constant-time (not a security requirement)
+  reason: Hash computation time reveals file size (acceptable)
+```
+
+## Version History
+
+- 2026-01-18: Initial contract definition
+- Algorithm: SHA256 (64-char hex output)
+- Chunk size: 8KB for streaming efficiency

@@ -32,6 +32,17 @@ class SyncStatus(str, Enum):
     FAILED = "failed"
 
 
+class ProcessingTier(str, Enum):
+    """File size tier for indexing priority.
+    
+    Feature: 011-realtime-attachment-indexing
+    Task: T002
+    """
+    FAST = "fast"                    # <10MB - high priority, <30s guarantee
+    BEST_EFFORT = "best_effort"      # 10-50MB - low priority, no time guarantee
+    REJECTED = "rejected"            # >50MB - too large to index
+
+
 class ExtractedDocument(db.Model):
     """Represents a document chunk with vector embedding.
     

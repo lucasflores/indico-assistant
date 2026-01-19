@@ -1,0 +1,352 @@
+# Indexing Task Contract
+
+**Feature**: 011-realtime-attachment-indexing  
+**Component**: Celery Task  
+**File**: `indico_assistant/tasks/indexing.py`
+
+## Task Signature
+
+```python
+@celery.task(bind=True, max_retries=3)
+def index_attachment_task(
+    self,
+    attachment_id: int,
+    event_id: int,
+    force: bool = False
+) -> dict:
+    """Index attachment for vector search asynchronously.
+    
+    Args:
+        attachment_id: Primary key of attachment to index
+        event_id: Event ID for permission checking
+        force: Force re-index even if hash matches (default: False)
+        
+    Returns:
+        IndexingTaskResult as dict
+        
+    Raises:
+        Retry after delays: [60s, 300s, 900s] for transient failures
+        Exception after 3 failures for permanent errors
+    """
+```
+
+## Input Schema
+
+```yaml
+parameters:
+  attachment_id:
+    type: integer
+    required: true
+    description: Primary key in attachments.attachments table
+    example: 12345
+    validation:
+      - must_exist_in_database
+      - must_have_file_attached
+    
+  event_id:
+    type: integer
+    required: true
+    description: Event ID for permission validation
+    example: 789
+    validation:
+      - must_exist_in_database
+      - must_be_accessible_by_system
+    
+  force:
+    type: boolean
+    required: false
+    default: false
+    description: Override duplicate detection, re-index even if hash matches
+```
+
+## Output Schema
+
+```yaml
+return_value:
+  type: object
+  properties:
+    success:
+      type: boolean
+      description: Overall success/failure status
+      example: true
+      
+    attachment_id:
+      type: integer
+      description: Processed attachment ID
+      example: 12345
+      
+    event_id:
+      type: integer
+      description: Event context
+      example: 789
+      
+    chunks_created:
+      type: integer
+      description: Number of new chunks inserted
+      example: 15
+      min: 0
+      
+    chunks_skipped:
+      type: integer
+      description: Number of duplicate chunks skipped
+      example: 0
+      min: 0
+      
+    processing_time_ms:
+      type: integer
+      description: Total processing time in milliseconds
+      example: 3450
+      min: 0
+      
+    content_hash:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+      description: SHA256 hash of document content
+      example: "abc123...def"
+      
+    status:
+      type: string
+      enum:
+        - indexed  # New document successfully indexed
+        - skipped  # Duplicate detected, no action taken
+        - failed   # Indexing failed after retries
+        - rejected # File rejected (size/format)
+      description: Processing outcome
+      
+    error:
+      type: string | null
+      description: Error message if failed
+      example: "Extraction failed: corrupted PDF"
+      
+    file_size_bytes:
+      type: integer
+      description: File size for metrics
+      example: 5242880
+      min: 0
+      
+    retry_count:
+      type: integer
+      description: Number of retry attempts
+      example: 1
+      min: 0
+      max: 3
+```
+
+## Processing Steps
+
+```yaml
+workflow:
+  1_fetch_attachment:
+    description: Load attachment from database
+    error_handling: Return {success: false, error: "Attachment not found"}
+    
+  2_compute_hash:
+    description: SHA256 hash via streaming (8KB chunks)
+    performance: ~100ms for 10MB file
+    error_handling: Retry on IOError, fail on other exceptions
+    
+  3_check_duplicate:
+    description: Query by (event_id, content_hash)
+    query: "SELECT * FROM extracted_documents WHERE event_id=? AND content_hash=?"
+    if_found: Return {success: true, status: "skipped", chunks_skipped: N}
+    if_not_found: Continue to extraction
+    if_force_true: Skip check, proceed to extraction
+    
+  4_extract_text:
+    description: Use DocumentExtractor.extract()
+    input: attachment.file
+    output: str (full text)
+    error_handling: Retry on transient errors, log and fail on corrupted files
+    
+  5_chunk_text:
+    description: Use DocumentChunker.chunk_text()
+    input: extracted text
+    output: List[str] (chunks with overlap)
+    error_handling: Fail fast on chunking errors (rare)
+    
+  6_generate_embeddings:
+    description: Use EmbeddingService.embed_batch()
+    input: List[str] (chunks)
+    output: List[Vector] (384-dim embeddings)
+    error_handling: Retry on network errors, fail on model errors
+    
+  7_store_chunks:
+    description: Insert into extracted_documents table
+    idempotency: try/except IntegrityError for duplicate chunks
+    transaction: Commit after all chunks inserted
+    error_handling: Rollback on failure, safe to retry
+    
+  8_return_result:
+    description: Construct IndexingTaskResult
+    include: All metrics (time, chunks, hash)
+```
+
+## Retry Policy
+
+```yaml
+retry_configuration:
+  max_retries: 3
+  delays: [60, 300, 900]  # 1min, 5min, 15min
+  
+retry_logic:
+  attempt_1:
+    delay_seconds: 60
+    on_failure: Log warning, retry
+    
+  attempt_2:
+    delay_seconds: 300
+    on_failure: Log error, retry
+    
+  attempt_3:
+    delay_seconds: 900
+    on_failure: Log critical, fail permanently
+    
+retryable_errors:
+  - IOError (file read failures)
+  - NetworkError (embedding service unavailable)
+  - DatabaseError (connection timeouts)
+  
+non_retryable_errors:
+  - UnsupportedFileTypeError (wrong format)
+  - CorruptedFileError (cannot extract)
+  - AttachmentNotFoundError (deleted)
+```
+
+## Error Scenarios
+
+```yaml
+attachment_deleted:
+  condition: Attachment.query.get(attachment_id) returns None
+  action: Return {success: false, status: "rejected", error: "Attachment deleted"}
+  retry: false
+  log_level: info
+  
+file_corrupted:
+  condition: DocumentExtractor.extract() raises ExtractionError
+  action: Return {success: false, status: "failed", error: "Corrupted file"}
+  retry: false (permanent failure)
+  log_level: error
+  
+network_timeout:
+  condition: EmbeddingService.embed_batch() raises TimeoutError
+  action: Retry with exponential backoff
+  retry: true
+  log_level: warning
+  
+database_error:
+  condition: db.session.commit() raises OperationalError
+  action: Rollback, retry with exponential backoff
+  retry: true
+  log_level: warning
+  
+integrity_error:
+  condition: INSERT raises IntegrityError (duplicate chunk)
+  action: Rollback, continue (idempotent)
+  retry: false (not needed)
+  log_level: debug
+```
+
+## Performance Requirements
+
+```yaml
+timing_by_file_size:
+  small_files:
+    size_range: "<10MB"
+    sla: 30000ms  # 30 seconds
+    percentile: 90th
+    typical: 3000-5000ms
+    
+  medium_files:
+    size_range: "10-50MB"
+    sla: null  # Best effort, no guarantee
+    typical: 10000-20000ms
+    
+  large_files:
+    size_range: ">50MB"
+    behavior: Rejected before task creation
+    
+step_timing:
+  hash: 100ms (10MB), 500ms (50MB)
+  extract: 1000ms (10MB), 5000ms (50MB)
+  chunk: 200ms (10MB), 1000ms (50MB)
+  embed: 2000ms (10MB), 10000ms (50MB)
+  store: 200ms (10MB), 1000ms (50MB)
+```
+
+## Testing Contract
+
+```yaml
+unit_tests:
+  - test_indexes_new_document_successfully
+  - test_skips_duplicate_by_hash
+  - test_force_reindexes_duplicate
+  - test_retries_on_network_error
+  - test_fails_permanently_after_3_retries
+  - test_handles_attachment_not_found
+  - test_handles_corrupted_file
+  - test_handles_database_integrity_error
+  - test_timing_under_30s_for_10mb_file
+  - test_computes_sha256_hash_correctly
+  
+integration_tests:
+  - test_end_to_end_pdf_indexing
+  - test_end_to_end_docx_indexing
+  - test_concurrent_indexing_same_file
+  - test_retry_completes_after_transient_failure
+```
+
+## Example Usage
+
+```python
+# Manual task invocation
+result = index_attachment_task.apply_async(
+    args=[attachment_id, event_id],
+    priority=5  # 0-9, lower = higher priority
+)
+
+# Wait for result
+task_result = result.get(timeout=60)
+
+# Expected result structure
+{
+    'success': True,
+    'attachment_id': 12345,
+    'event_id': 789,
+    'chunks_created': 15,
+    'chunks_skipped': 0,
+    'processing_time_ms': 3450,
+    'content_hash': 'abc123...def',
+    'status': 'indexed',
+    'error': None,
+    'file_size_bytes': 5242880,
+    'retry_count': 0
+}
+```
+
+## Idempotency Guarantee
+
+```yaml
+idempotency:
+  description: Task can be safely executed multiple times with same result
+  
+  mechanisms:
+    - Content hash prevents re-processing identical files
+    - Database UNIQUE constraint prevents duplicate chunks
+    - try/except IntegrityError makes inserts safe
+    
+  scenarios:
+    duplicate_task_execution:
+      cause: Worker restarts, task requeued
+      result: Second execution returns "skipped" status
+      side_effects: None
+      
+    partial_completion:
+      cause: Task crashes after inserting 5/10 chunks
+      result: Retry inserts all 10, first 5 hit IntegrityError
+      side_effects: All 10 chunks present after retry
+      
+    concurrent_execution:
+      cause: Two workers pick up duplicate tasks
+      result: First completes, second sees duplicates
+      side_effects: Single set of chunks in database
+```
