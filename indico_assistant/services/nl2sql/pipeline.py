@@ -150,6 +150,7 @@ class NL2SQLPipeline:
         user_email: Optional[str] = None,
         session_id: Optional[str] = None,
         ip_address: Optional[str] = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> PipelineResult:
         """
         Process a natural language question through the pipeline.
@@ -173,6 +174,9 @@ class NL2SQLPipeline:
             user_email: Optional user email for audit logging.
             session_id: Optional session ID for grouping queries.
             ip_address: Optional client IP for security audit.
+            conversation_history: Optional conversation history for context.
+                Feature 012: Enable follow-up questions and co-references.
+                List of message dicts with 'role' and 'content' keys.
 
         Returns:
             PipelineResult with the answer or error information.
@@ -259,7 +263,10 @@ class NL2SQLPipeline:
             gen_start = time.time()
             with self._span("sql_generation") as gen_span:
                 sql_response = self._generator.generate(
-                    question, classification, allowed_event_ids
+                    question, 
+                    classification, 
+                    allowed_event_ids,
+                    conversation_history=conversation_history  # Feature 012: T007
                 )
                 generation_time = int((time.time() - gen_start) * 1000)
                 

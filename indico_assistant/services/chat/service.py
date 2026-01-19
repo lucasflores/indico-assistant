@@ -337,6 +337,7 @@ class ChatService:
                 question=enhanced_question,
                 user_id=user_id or 0,
                 event_ids=[event_id] if event_id else None,
+                conversation_history=context,  # Feature 012: T006
             )
 
             response_text = result.answer or ""

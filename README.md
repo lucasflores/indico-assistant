@@ -5,6 +5,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 ## Features
 
 - **Natural Language Queries**: Ask questions about event data using natural language
+- **Conversation History**: Multi-turn conversations with context awareness - ask follow-up questions using pronouns ("the first one", "that meeting") and contextual references
 - **Multiple LLM Providers**: Support for Ollama (local), HuggingFace Router, and OpenAI-compatible APIs
 - **Per-Event Configuration**: Customize assistant behavior for specific events
 - **Health Monitoring**: Built-in health check endpoint for monitoring

@@ -665,3 +665,157 @@ class TestSQLGeneratorJoinHintsIntegration:
         call_args = mock_llm_service.generate.call_args
         prompt = call_args[1]["prompt"]
         assert "JOIN" in prompt.upper()
+
+
+# Feature 012: Conversation History Tests
+class TestConversationHistoryFormatting:
+    """Test conversation history formatting (Feature 012, T012-T014, T029-T032)."""
+
+    def test_format_conversation_history_with_coreferences(
+        self, generator: SQLGenerator
+    ) -> None:
+        """T012: Test formatting with co-reference examples."""
+        history = [
+            {"role": "user", "content": "What events are happening this week?"},
+            {"role": "assistant", "content": "Found 3 events: Meeting A, Conference B, Workshop C"},
+            {"role": "user", "content": "Tell me more about the first one"},
+        ]
+
+        result = generator._format_conversation_history(history)
+
+        assert "CONVERSATION HISTORY:" in result
+        assert "1. User: What events are happening this week?" in result
+        assert "2. Assistant: Found 3 events: Meeting A, Conference B, Workshop C" in result
+        assert "3. User: Tell me more about the first one" in result
+
+    def test_truncate_message_at_1500_chars(self, generator: SQLGenerator) -> None:
+        """T013: Test message truncation at 1500 characters."""
+        long_message = "A" * 2000
+
+        result = generator._truncate_message(long_message)
+
+        assert len(result) == 1503  # 1500 + "..."
+        assert result.endswith("...")
+        assert result[:1500] == "A" * 1500
+
+    def test_truncate_message_preserves_short_content(
+        self, generator: SQLGenerator
+    ) -> None:
+        """T013: Test short messages are not truncated."""
+        short_message = "Short message"
+
+        result = generator._truncate_message(short_message)
+
+        assert result == short_message
+        assert not result.endswith("...")
+
+    def test_empty_history_produces_empty_string(
+        self, generator: SQLGenerator
+    ) -> None:
+        """T014: Test empty history returns empty string."""
+        assert generator._format_conversation_history(None) == ""
+        assert generator._format_conversation_history([]) == ""
+
+    def test_none_history_produces_empty_string(
+        self, generator: SQLGenerator
+    ) -> None:
+        """T030: Test None history parameter."""
+        result = generator._format_conversation_history(None)
+        assert result == ""
+
+    def test_ten_pair_limit_enforcement(self, generator: SQLGenerator) -> None:
+        """T031: Test 10-pair (20 message) limit enforcement."""
+        # Create 25 messages (12.5 pairs)
+        history = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"Message {i}"}
+            for i in range(25)
+        ]
+
+        result = generator._format_conversation_history(history)
+
+        # Should only include last 20 messages
+        assert "Message 4" not in result  # First 5 messages dropped
+        assert "Message 5" in result  # Message 5 should be first included
+        assert "Message 24" in result  # Last message included
+
+    def test_message_truncation_with_ellipsis(self, generator: SQLGenerator) -> None:
+        """T032: Test 1500-char truncation adds ellipsis."""
+        long_content = "X" * 2000
+        history = [{"role": "user", "content": long_content}]
+
+        result = generator._format_conversation_history(history)
+
+        assert "X" * 1500 in result
+        assert "..." in result
+        # Should not contain all 2000 X's
+        assert "X" * 1501 not in result
+
+
+class TestConversationHistoryIntegration:
+    """Test conversation history integration into generation (T010-T011)."""
+
+    def test_generate_with_conversation_history(
+        self,
+        generator: SQLGenerator,
+        mock_classification: MagicMock,
+        mock_llm_service: MagicMock,
+    ) -> None:
+        """T010: Test conditional history inclusion in generate() method."""
+        history = [
+            {"role": "user", "content": "What events are happening?"},
+            {"role": "assistant", "content": "Found 3 events"},
+        ]
+
+        generator.generate(
+            "Tell me about the first one",
+            mock_classification,
+            conversation_history=history,
+        )
+
+        # Verify LLM was called with history in prompt
+        call_args = mock_llm_service.generate.call_args
+        prompt = call_args[1]["prompt"]
+        assert "CONVERSATION HISTORY:" in prompt
+        assert "1. User: What events are happening?" in prompt
+        assert "2. Assistant: Found 3 events" in prompt
+
+    def test_generate_without_history(
+        self,
+        generator: SQLGenerator,
+        mock_classification: MagicMock,
+        mock_llm_service: MagicMock,
+    ) -> None:
+        """T014: Test generate works without conversation history."""
+        generator.generate("How many events?", mock_classification)
+
+        # Verify LLM was called without history section
+        call_args = mock_llm_service.generate.call_args
+        prompt = call_args[1]["prompt"]
+        assert "CONVERSATION HISTORY:" not in prompt
+
+    def test_history_positioned_after_schema_before_question(
+        self,
+        generator: SQLGenerator,
+        mock_classification: MagicMock,
+        mock_llm_service: MagicMock,
+    ) -> None:
+        """T011: Test history positioning in prompt."""
+        history = [{"role": "user", "content": "Previous question"}]
+
+        generator.generate(
+            "Current question",
+            mock_classification,
+            conversation_history=history,
+        )
+
+        call_args = mock_llm_service.generate.call_args
+        prompt = call_args[1]["prompt"]
+
+        # Find positions
+        schema_pos = prompt.find("TABLES:")
+        history_pos = prompt.find("CONVERSATION HISTORY:")
+        question_pos = prompt.find("USER QUESTION:")
+
+        assert schema_pos < history_pos < question_pos, (
+            "History should be positioned after schema and before question"
+        )

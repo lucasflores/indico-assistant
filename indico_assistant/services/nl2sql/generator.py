@@ -22,6 +22,7 @@ from indico_assistant.services.nl2sql.schema import SchemaContext
 
 
 # SQL generation prompt template (T041-T042: enhanced for multi-table queries)
+# Feature 012: conversation history placeholder added (T005)
 SQL_GENERATION_PROMPT = """You are a SQL query generator for the Indico event management system.
 Generate a PostgreSQL SELECT query to answer the user's question.
 
@@ -40,6 +41,8 @@ STRICT RULES:
     avoid exact timestamp equality unless the user asked for a specific moment.
 
 {schema_context}
+
+{conversation_history}
 
 USER QUESTION: {question}
 
@@ -91,6 +94,7 @@ class SQLGenerator:
         question: str,
         classification: QueryClassification,
         allowed_event_ids: list[int] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> LLMResponse[SQLGeneration]:
         """
         Generate SQL from a classified question.
@@ -101,6 +105,9 @@ class SQLGenerator:
             allowed_event_ids: Optional list of event IDs the user can access.
                 If provided, the generated SQL will be filtered to only
                 these events.
+            conversation_history: Optional conversation history for context.
+                List of message dicts with 'role' and 'content' keys.
+                Limited to last 10 message pairs (20 messages).
 
         Returns:
             LLMResponse containing SQLGeneration with generated SQL.
@@ -133,9 +140,13 @@ class SQLGenerator:
         # Format filters for prompt
         filters_str = str(classification.filters) if classification.filters else "None"
 
+        # Format conversation history (Feature 012: T003)
+        history_prompt = self._format_conversation_history(conversation_history)
+
         # Build the full prompt
         prompt = SQL_GENERATION_PROMPT.format(
             schema_context=schema_prompt,
+            conversation_history=history_prompt,
             question=question,
             intent=classification.intent,
             time_range=time_range_str,
@@ -207,3 +218,55 @@ class SQLGenerator:
     def schema_context(self) -> SchemaContext:
         """Get the schema context."""
         return self._schema_context
+
+    def _truncate_message(self, content: str, max_chars: int = 1500) -> str:
+        """Truncate message content to maximum length with ellipsis.
+        
+        Feature 012: Prevent token overflow in conversation history (T004, FR-012).
+        
+        Args:
+            content: Original message content
+            max_chars: Maximum characters (default 1500)
+            
+        Returns:
+            Original content if under limit, or truncated with "..."
+        """
+        if len(content) <= max_chars:
+            return content
+        return content[:max_chars] + "..."
+
+    def _format_conversation_history(
+        self,
+        conversation_history: list[dict[str, str]] | None
+    ) -> str:
+        """Format conversation history for prompt inclusion.
+        
+        Feature 012: Enable co-reference resolution and contextual queries (T003, FR-013).
+        Formats history as numbered messages in chronological order.
+        
+        Args:
+            conversation_history: List of messages with 'role' and 'content' keys.
+                Expected format: [{"role": "user", "content": "..."}, ...]
+                
+        Returns:
+            Formatted string with numbered messages, or empty string if no history.
+            
+        Example output:
+            CONVERSATION HISTORY:
+            1. User: What events are happening this week?
+            2. Assistant: Found 3 events: Meeting A, Conference B, Workshop C
+            3. User: Tell me more about the first one
+        """
+        if not conversation_history:
+            return ""
+        
+        # Enforce 10-pair (20 message) limit (FR-006)
+        recent_history = conversation_history[-20:]
+        
+        formatted = ["CONVERSATION HISTORY:"]
+        for idx, msg in enumerate(recent_history, start=1):
+            role = msg["role"].capitalize()  # "User" or "Assistant"
+            content = self._truncate_message(msg["content"])
+            formatted.append(f"{idx}. {role}: {content}")
+        
+        return "\n".join(formatted)
