@@ -19,44 +19,86 @@ from indico_assistant.services.llm.models import LLMResponse, QueryClassificatio
 
 
 # Classification prompt template (T039: extended for multi-entity queries)
-CLASSIFICATION_PROMPT = """You are a query classifier for an event management system (Indico).
+CLASSIFICATION_PROMPT = """You are a query classifier for the Indico event management system.
 Analyze the user's question and classify it into one of these intents:
 
-INTENTS:
-- event_query: Questions about events, conferences, meetings (count, list, search, basic info)
-- registration_query: Questions about event registrations, participants, check-ins
-- contribution_query: Questions about talks, presentations, contributions, papers
-- speaker_query: Questions about speakers, presenters, authors of contributions
-- session_query: Questions about conference sessions, tracks, time blocks
-- attendee_query: Questions about who attended events or registrations with person details
-- schedule_query: Questions about event schedules, timetables, timing of contributions
-- attachment_query: Questions about files, materials, documents attached to events
-- general_info: General questions about the system or unclear queries
-- out_of_scope: Questions not related to events/registrations/contributions
+## INTENTS
 
-CLASSIFICATION HINTS:
-- Use speaker_query if asking about WHO is presenting or authored something
-- Use session_query if asking about tracks, session blocks, or session times
-- Use attendee_query if asking about WHO attended or registered with personal details
-- Use schedule_query if asking about WHEN things happen or timetable entries
-- Use contribution_query for questions about talks/papers without speaker focus
+- **event_query**: Questions about events, conferences, meetings (count, list, search, basic info, meeting minutes, notes)
+- **registration_query**: Questions about event registrations, participants, check-ins
+- **contribution_query**: Questions about talks, presentations, contributions, papers
+- **speaker_query**: Questions about speakers, presenters, authors of contributions
+- **session_query**: Questions about conference sessions, tracks, time blocks
+- **attendee_query**: Questions about who attended events or registrations with personal details
+- **schedule_query**: Questions about event schedules, timetables, timing of contributions
+- **attachment_query**: Questions about file metadata (filenames, types, storage locations)
+- **document_content_query**: Questions about the CONTENT within files (what slides say, paper contents)
+- **general_info**: General questions about the system or unclear queries
+- **out_of_scope**: Questions not related to events/registrations/contributions/documents
 
-Extract any entities (event names, person names, dates, categories) and time constraints.
+## CLASSIFICATION HINTS
 
-TIME REFERENCE DEFAULTS (when user says):
+### Intent Selection Rules
+
+1. Use **event_query** for questions about meeting minutes, notes, summaries (stored in events.notes)
+2. Use **speaker_query** if asking about WHO is presenting or authored something
+3. Use **session_query** if asking about tracks, session blocks, or session times
+4. Use **attendee_query** if asking about WHO attended or registered with personal details
+5. Use **schedule_query** if asking about WHEN things happen or timetable entries
+6. Use **contribution_query** for questions about talks/papers without speaker focus
+
+### attachment_query vs document_content_query (IMPORTANT)
+
+- Use **attachment_query** for FILE METADATA questions:
+    - "What files are attached to event X?"
+    - "List the PDFs uploaded to this meeting"
+    - "How many attachments does this contribution have?"
+
+- Use **document_content_query** for CONTENT questions:
+    - "What does the presentation say about machine learning?"
+    - "According to the paper, what is the main conclusion?"
+    - "What topics are discussed in the slides?"
+    - "Find documents that mention quantum computing"
+
+**Key Indicators for document_content_query**:
+- "says", "mentions", "according to", "talks about", "discusses"
+- "what does the [file] say about"
+- "content of", "written in", "stated in"
+- "find documents about", "search files for"
+
+### Hybrid Queries (metadata + content)
+
+- If the question requests BOTH file metadata and content, classify as **document_content_query** and include file metadata entities when possible.
+
+## TIME REFERENCE DEFAULTS
+
+When the user says:
 - "recently", "lately" → last 7 days
-- "soon", "upcoming" → next 7 days  
+- "soon", "upcoming" → next 7 days
 - "a while ago", "some time ago" → last 30 days
 - "this week" → current week (Monday to Sunday)
 - "this month" → current calendar month
+- "this year" → year-to-date
+- "last year" → previous calendar year
 - "last week" → previous week
 - "next week" → coming week
+
+## EXTRACTION RULES
+
+Extract the following from the question:
+1. **Entities**: Event names, person names, file types, categories
+2. **Time constraints**: Date ranges, relative time references
+3. **Filters**: Any specific criteria (e.g., "only physics events", "speakers from CERN")
+
+## INPUT
 
 USER QUESTION: {question}
 
 TODAY'S DATE: {today}
 
-Respond with the classification in the exact format expected."""
+## OUTPUT
+
+Respond with the classification in the exact format expected by the Pydantic model."""
 
 
 class QueryClassifier:
@@ -126,6 +168,21 @@ class QueryClassifier:
         """
         question_lower = question.lower()
         today = datetime.now()
+
+        # Explicit year references
+        if "last year" in question_lower:
+            start_date = today.replace(year=today.year - 1, month=1, day=1).strftime("%Y-%m-%d")
+            end_date = today.replace(year=today.year - 1, month=12, day=31).strftime("%Y-%m-%d")
+            if classification.time_range is None:
+                classification.time_range = TimeRange(start=start_date, end=end_date)
+            return classification
+
+        if "this year" in question_lower:
+            start_date = today.replace(month=1, day=1).strftime("%Y-%m-%d")
+            end_date = today.strftime("%Y-%m-%d")
+            if classification.time_range is None:
+                classification.time_range = TimeRange(start=start_date, end=end_date)
+            return classification
 
         # Check if any time reference keywords are in the question
         for keyword, days in self.TIME_REFERENCE_DEFAULTS.items():

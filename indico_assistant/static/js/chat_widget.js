@@ -725,6 +725,7 @@
             return null;
           }
         })();
+        
         const originalFetch = window.fetch.bind(window);
         window.fetch = async (input, init = {}) => {
           const url = typeof input === "string" ? input : input && input.url;
@@ -746,6 +747,7 @@
             return null;
           }
         })();
+        
         const originalOpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function (method, url, ...rest) {
           this.__assistantUrl = url;

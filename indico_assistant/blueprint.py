@@ -46,8 +46,22 @@ def widget_static_css(filename):
 @blueprint.route("/widget/config.js")
 def widget_config():
     """Serve dynamic configuration as JS (defines window.IndicoAssistant)."""
+    from flask import request
+    import re
+    
     plugin = plugin_engine.get_plugin("assistant")
-    config = plugin.get_vars_js() if plugin else {}
+    
+    # Extract event_id from Referer header (Feature 013: event context)
+    event_id = None
+    referer = request.headers.get("Referer", "")
+    if referer:
+        # Match /event/123/ in URL
+        match = re.search(r'/event/(\d+)/', referer)
+        if match:
+            event_id = int(match.group(1))
+    
+    # Pass event_id to get_vars_js
+    config = plugin.get_vars_js(event_id=event_id) if plugin else {}
     payload = f"window.IndicoAssistant = {json.dumps(config)};"
     return current_app.response_class(payload, mimetype="application/javascript")
 

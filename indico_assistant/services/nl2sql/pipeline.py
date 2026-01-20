@@ -50,6 +50,7 @@ from indico_assistant.services.nl2sql.validator import SQLValidator
 
 if TYPE_CHECKING:
     from indico_assistant.services.observability.tracer import Tracer
+    from indico_assistant.services.embedding.service import EmbeddingService
 
 
 class NL2SQLPipeline:
@@ -76,8 +77,10 @@ class NL2SQLPipeline:
         max_rows: int = 1000,
         timeout_seconds: int = 30,
         max_correction_attempts: int = 3,
+        max_validation_retries: int = 2,
         allowed_tables: list[str] | None = None,
         audit_enabled: bool = True,
+        embedding_service: "EmbeddingService | None" = None,
     ) -> None:
         """
         Initialize the NL2SQL pipeline.
@@ -106,7 +109,10 @@ class NL2SQLPipeline:
         self._generator = SQLGenerator(llm_service, schema_context)
         self._validator = SQLValidator(schema_context, allowed_tables)
         self._executor = QueryExecutor(
-            db_session_factory, max_rows, timeout_seconds
+            db_session_factory,
+            max_rows,
+            timeout_seconds,
+            embedding_service=embedding_service,
         )
         self._corrector = ErrorCorrector(
             llm_service, schema_context, max_correction_attempts
@@ -262,11 +268,17 @@ class NL2SQLPipeline:
             # Step 3: Generate SQL (T026)
             gen_start = time.time()
             with self._span("sql_generation") as gen_span:
+                event_id_param = None
+                if event_ids and len(event_ids) == 1:
+                    event_id_param = event_ids[0]
+
                 sql_response = self._generator.generate(
                     question, 
                     classification, 
                     allowed_event_ids,
-                    conversation_history=conversation_history  # Feature 012: T007
+                    conversation_history=conversation_history,  # Feature 012: T007
+                    user_id=user_id,
+                    event_id=event_id_param,
                 )
                 generation_time = int((time.time() - gen_start) * 1000)
                 
@@ -308,16 +320,67 @@ class NL2SQLPipeline:
             # Log generated SQL
             log_generation(audit_log, generated_sql)
 
-            # Step 4: Validate SQL
+            # Step 4: Validate SQL with retry mechanism
             validation_result = self._validator.validate(generated_sql)
+            validation_attempts = 0
 
-            if not validation_result.valid:
-                # T052: Log validation rejection with reason
+            # Retry if validation fails, providing violations as feedback
+            while not validation_result.valid and validation_attempts < self._max_validation_retries:
+                validation_attempts += 1
                 rejection_reason = "; ".join(validation_result.violations)
-                log_validation_rejection(audit_log, rejection_reason)
+                log_validation_rejection(audit_log, f"Attempt {validation_attempts}: {rejection_reason}")
+
+                # Regenerate SQL with validation feedback
+                gen_start = time.time()
+                with self._span(f"sql_regeneration_{validation_attempts}") as regen_span:
+                    feedback = (
+                        f"The generated SQL has validation errors:\n"
+                        f"{chr(10).join('- ' + v for v in validation_result.violations)}\n\n"
+                        f"Please regenerate the SQL query addressing these issues. "
+                        f"Remember: Use JOINs instead of subqueries, no CTEs, no window functions."
+                    )
+                    
+                    sql_response = self._generator.generate(
+                        question,
+                        classification,
+                        allowed_event_ids,
+                        conversation_history=conversation_history,
+                        user_id=user_id,
+                        event_id=event_id_param,
+                        validation_feedback=feedback,
+                    )
+                    generation_time += int((time.time() - gen_start) * 1000)
+                    
+                    if regen_span is not None:
+                        if sql_response.success and sql_response.data:
+                            regen_span.update(
+                                output="regenerated",
+                                status="success",
+                                metadata={"attempt": validation_attempts}
+                            )
+                        else:
+                            regen_span.error(
+                                Exception(sql_response.error or "Regeneration failed"),
+                                include_trace=False
+                            )
+
+                if not sql_response.success or not sql_response.data:
+                    break  # Give up if regeneration fails
+
+                generated_sql = sql_response.data.query
+                tables_used = sql_response.data.tables_used
+                log_generation(audit_log, f"Regenerated (attempt {validation_attempts}): {generated_sql}")
+                
+                # Re-validate the regenerated SQL
+                validation_result = self._validator.validate(generated_sql)
+
+            # If still invalid after retries, return error
+            if not validation_result.valid:
+                rejection_reason = "; ".join(validation_result.violations)
+                log_validation_rejection(audit_log, f"Final rejection: {rejection_reason}")
                 return self._error_result(
                     PipelineErrorType.VALIDATION_FAILED,
-                    f"Validation failed: {validation_result.violations}",
+                    f"Validation failed after {validation_attempts} retries: {validation_result.violations}",
                     "I generated a query that doesn't meet our safety requirements. "
                     "Please try a simpler question.",
                     total_time_ms=int((time.time() - start_time) * 1000),
@@ -344,7 +407,26 @@ class NL2SQLPipeline:
             # Step 5: Execute query (T027)
             exec_start = time.time()
             with self._span("sql_execution") as exec_span:
-                exec_result = self._executor.execute(generated_sql)
+                exec_params: dict[str, Any] | None = None
+                
+                # Inject :user_id parameter if referenced in SQL
+                if ":user_id" in generated_sql:
+                    exec_params = {"user_id": user_id}
+                
+                # Inject :event_id parameter if referenced in SQL
+                if ":event_id" in generated_sql:
+                    if exec_params is None:
+                        exec_params = {}
+                    if event_ids and len(event_ids) == 1:
+                        exec_params["event_id"] = event_ids[0]
+                    else:
+                        # SQL references :event_id but no event context available
+                        # Set to None to avoid SQL execution error
+                        exec_params["event_id"] = None
+
+                exec_result = self._executor.execute(
+                    generated_sql, params=exec_params, question=question
+                )
                 execution_time = int((time.time() - exec_start) * 1000)
                 
                 # Update span with result (T030)
@@ -400,7 +482,18 @@ class NL2SQLPipeline:
 
                     if validation_result.valid:
                         # Re-execute with corrected SQL
-                        exec_result = self._executor.execute(corrected_sql)
+                        exec_params = None
+                        if ":user_id" in corrected_sql:
+                            exec_params = {"user_id": user_id}
+                        if ":event_id" in corrected_sql:
+                            if exec_params is None:
+                                exec_params = {}
+                            if event_ids and len(event_ids) == 1:
+                                exec_params["event_id"] = event_ids[0]
+
+                        exec_result = self._executor.execute(
+                            corrected_sql, params=exec_params, question=question
+                        )
                         if exec_result.success:
                             generated_sql = corrected_sql
                             corrected = True

@@ -13,12 +13,19 @@ permission enforcement and row limits.
 """
 
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from indico_assistant.services.nl2sql.models import ExecutionResult
+
+if TYPE_CHECKING:
+    from indico_assistant.services.embedding.service import EmbeddingService
+
+
+class ExecutionError(Exception):
+    """Execution error raised for invalid execution preconditions."""
 
 
 class QueryExecutor:
@@ -29,6 +36,7 @@ class QueryExecutor:
         db_session_factory: Callable[[], Any],
         max_rows: int = 1000,
         timeout_seconds: int = 30,
+        embedding_service: "EmbeddingService | None" = None,
     ) -> None:
         """
         Initialize the executor.
@@ -41,11 +49,13 @@ class QueryExecutor:
         self._db_session_factory = db_session_factory
         self._max_rows = max_rows
         self._timeout_seconds = timeout_seconds
+        self._embedding_service = embedding_service
 
     def execute(
         self,
         sql: str,
         params: dict[str, Any] | None = None,
+        question: str | None = None,
     ) -> ExecutionResult:
         """
         Execute a validated SQL query.
@@ -67,25 +77,35 @@ class QueryExecutor:
         try:
             session = self._db_session_factory()
 
-            # Add LIMIT if not present (FR-024)
-            sql_with_limit = self._ensure_limit(sql)
+            # Use nested transaction (SAVEPOINT) to isolate query execution
+            # from parent transaction. This prevents rollback from affecting
+            # chat session/message persistence.
+            # Feature 013: Fix transaction isolation for error handling
+            with session.begin_nested():
+                # Add LIMIT if not present (FR-024)
+                sql_with_limit = self._ensure_limit(sql)
 
-            # Set statement timeout (FR-025)
-            timeout_ms = self._timeout_seconds * 1000
-            session.execute(
-                text(f"SET LOCAL statement_timeout = {timeout_ms}")
-            )
+                # Prepare vector params if needed
+                params = self._prepare_vector_params(
+                    sql_with_limit, question, params
+                )
 
-            # Execute the query
-            result = session.execute(text(sql_with_limit), params)
+                # Set statement timeout (FR-025)
+                timeout_ms = self._timeout_seconds * 1000
+                session.execute(
+                    text(f"SET LOCAL statement_timeout = {timeout_ms}")
+                )
 
-            # Get column names
-            columns = list(result.keys())
+                # Execute the query
+                result = session.execute(text(sql_with_limit), params)
 
-            # Fetch results
-            raw_rows = result.fetchall()
+                # Get column names
+                columns = list(result.keys())
 
-            # Check if truncated
+                # Fetch results
+                raw_rows = result.fetchall()
+
+            # Check if truncated (outside nested transaction)
             truncated = len(raw_rows) >= self._max_rows
 
             # Convert to list of dicts
@@ -107,7 +127,20 @@ class QueryExecutor:
                 truncated=truncated,
             )
 
+        except ExecutionError as e:
+            execution_time = int((time.time() - start_time) * 1000)
+            return ExecutionResult(
+                success=False,
+                rows=[],
+                row_count=0,
+                columns=[],
+                execution_time_ms=execution_time,
+                error_message=str(e),
+            )
+
         except SQLAlchemyError as e:
+            # Nested transaction automatically rolls back to SAVEPOINT
+            # No need to call rollback() - prevents affecting parent transaction
             execution_time = int((time.time() - start_time) * 1000)
             error_msg = str(e)
 
@@ -127,6 +160,7 @@ class QueryExecutor:
             )
 
         except Exception as e:
+            # Nested transaction automatically rolls back to SAVEPOINT
             execution_time = int((time.time() - start_time) * 1000)
             return ExecutionResult(
                 success=False,
@@ -136,6 +170,37 @@ class QueryExecutor:
                 execution_time_ms=execution_time,
                 error_message=f"Unexpected error: {str(e)}",
             )
+
+    def _contains_vector_placeholder(self, sql: str) -> bool:
+        """Check if SQL contains :query_vector parameter placeholder."""
+        return ":query_vector" in sql
+
+    def _prepare_vector_params(
+        self,
+        sql: str,
+        question: str | None,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Prepare parameters with query vector if needed."""
+        if not self._contains_vector_placeholder(sql):
+            return params
+
+        if self._embedding_service is None:
+            raise ExecutionError(
+                "Vector search requested but embedding service not available"
+            )
+
+        if not question:
+            raise ExecutionError(
+                "Vector search requested but no question provided for embedding"
+            )
+
+        embedding = self._embedding_service.embed_text(question)
+        vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
+
+        updated_params = dict(params) if params else {}
+        updated_params["query_vector"] = vector_str
+        return updated_params
 
     def _ensure_limit(self, sql: str) -> str:
         """

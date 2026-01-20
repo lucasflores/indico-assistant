@@ -264,48 +264,6 @@ class ChatService:
         """
         # Initialize metadata
         metadata: dict[str, Any] = {}
-        rag_context = None
-        rag_sources = []
-        
-        # Try to get RAG context if available (Feature 006)
-        try:
-            from indico_assistant.services.vector_search.rag import RAGService
-            from indico_assistant.services.vector_search.search import create_search_service
-            from indico_assistant.plugin import AssistantPlugin
-            
-            # Get plugin instance for settings
-            plugin = AssistantPlugin.instance
-            if plugin and plugin.settings.get("vector_search_enabled", True):
-                from indico_assistant.services.vector_search.rag import create_rag_service
-                
-                rag_service = create_rag_service(plugin)
-                rag_result = rag_service.get_context(
-                    query=message,
-                    event_id=event_id,
-                    user_id=user_id
-                )
-                
-                if rag_result.should_use_rag and rag_result.context:
-                    rag_context = rag_result.context
-                    rag_sources = rag_result.context.sources
-                    metadata["rag_enabled"] = True
-                    metadata["rag_sources"] = rag_sources
-                    metadata["query_type"] = rag_result.query_type
-                    logger.debug(
-                        f"RAG context retrieved: {len(rag_sources)} sources, "
-                        f"query_type={rag_result.query_type}"
-                    )
-                else:
-                    metadata["rag_enabled"] = False
-                    metadata["query_type"] = rag_result.query_type
-                    
-        except ImportError:
-            logger.debug("RAG services not available")
-            metadata["rag_enabled"] = False
-        except Exception as e:
-            logger.warning(f"RAG context retrieval failed: {e}")
-            metadata["rag_enabled"] = False
-            metadata["rag_error"] = str(e)
         
         try:
             from indico_assistant.plugin import AssistantPlugin
@@ -317,24 +275,13 @@ class ChatService:
 
             pipeline = create_nl2sql_pipeline_from_plugin(plugin)
 
-            # Build enhanced question with RAG context if available
-            enhanced_question = message
-            if rag_context and rag_context.has_context:
-                enhanced_question = (
-                    f"{message}\n\n"
-                    "The following context from event documents may be relevant:\n\n"
-                    f"{rag_context.text}\n\n"
-                    "Use this context when relevant to answer the user's question. "
-                    "If citing information from documents, mention the source."
-                )
-
             logger.debug(
                 "Executing NL2SQL pipeline",
                 extra={"event_id": event_id, "user_id": user_id}
             )
 
             result = pipeline.process(
-                question=enhanced_question,
+                question=message,
                 user_id=user_id or 0,
                 event_ids=[event_id] if event_id else None,
                 conversation_history=context,  # Feature 012: T006
@@ -347,13 +294,6 @@ class ChatService:
                     if result.error
                     else "Unable to process your query"
                 )
-
-            # Build response with citations if RAG was used
-            if rag_sources:
-                from indico_assistant.services.vector_search.rag import RAGService
-                citations = RAGService._format_citations_static(rag_sources)
-                if citations:
-                    response_text = f"{response_text}\n\n{citations}"
 
             error_payload = None
             if result.error:
@@ -380,13 +320,6 @@ class ChatService:
                 f"I received your message: '{message}'. "
                 "The NL2SQL pipeline is not configured."
             )
-            
-            # Still include RAG context if available
-            if rag_context and rag_context.has_context:
-                response = (
-                    f"Based on the event documents:\n\n{rag_context.text}\n\n"
-                    f"(NL2SQL pipeline not configured for additional queries)"
-                )
             
             metadata["mock_response"] = True
             return response, metadata

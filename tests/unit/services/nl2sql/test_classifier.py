@@ -93,6 +93,16 @@ class TestQueryClassifierBasicClassification:
         call_args = mock_llm_service.generate.call_args
         assert "response_model" in call_args[1]
 
+    def test_classify_prompt_includes_document_content_intent(
+        self, classifier: QueryClassifier, mock_llm_service: MagicMock
+    ) -> None:
+        """Prompt should include document_content_query intent."""
+        classifier.classify("What does the presentation say about physics?")
+
+        call_args = mock_llm_service.generate.call_args
+        prompt = call_args[1]["prompt"]
+        assert "document_content_query" in prompt
+
 
 class TestQueryClassifierTimeReferenceDefaults:
     """Test time reference resolution (FR-003, FR-040)."""
@@ -247,6 +257,26 @@ class TestQueryClassifierTimeReferenceDefaults:
         assert result.data.time_range is not None
         today = datetime.now()
         expected_end = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        assert result.data.time_range.end == expected_end
+
+    def test_last_year_resolves_to_previous_calendar_year(
+        self,
+        mock_llm_service: MagicMock,
+        mock_classification: MagicMock,
+        mock_llm_response: MagicMock,
+    ) -> None:
+        """'last year' should resolve to previous calendar year."""
+        mock_classification.time_range = None
+        mock_llm_service.generate.return_value = mock_llm_response
+        classifier = QueryClassifier(llm_service=mock_llm_service)
+
+        result = classifier.classify("What did Bob present last year?")
+
+        assert result.data.time_range is not None
+        today = datetime.now()
+        expected_start = today.replace(year=today.year - 1, month=1, day=1).strftime("%Y-%m-%d")
+        expected_end = today.replace(year=today.year - 1, month=12, day=31).strftime("%Y-%m-%d")
+        assert result.data.time_range.start == expected_start
         assert result.data.time_range.end == expected_end
 
 

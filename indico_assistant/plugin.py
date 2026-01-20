@@ -101,7 +101,7 @@ class AssistantPlugin(IndicoPlugin):
 
         return blueprint
 
-    def get_vars_js(self):
+    def get_vars_js(self, event_id=None):
         """Expose configuration to JavaScript as IndicoAssistant global.
 
         Returns a dictionary that will be available in JavaScript as:
@@ -109,6 +109,9 @@ class AssistantPlugin(IndicoPlugin):
         - IndicoAssistant.chainlitUrl: URL of the Chainlit server
         - IndicoAssistant.authToken: JWT token for authenticated users (null if not logged in)
         - IndicoAssistant.theme: Current theme preference ('light', 'dark', or 'auto')
+
+        Args:
+            event_id: Optional event ID from request context (Feature 013: event context)
 
         Returns:
             dict: Widget configuration for JavaScript.
@@ -142,7 +145,7 @@ class AssistantPlugin(IndicoPlugin):
                 from indico_assistant.services.jwt_service import create_chainlit_token
 
                 try:
-                    config["authToken"] = create_chainlit_token(user, secret)
+                    config["authToken"] = create_chainlit_token(user, secret, event_id=event_id)
                 except Exception:
                     # Graceful degradation - widget will work without auth
                     self.logger.warning("Failed to generate Chainlit token", exc_info=True)

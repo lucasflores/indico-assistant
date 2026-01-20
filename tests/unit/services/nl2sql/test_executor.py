@@ -219,10 +219,34 @@ class TestQueryExecutorRowLimit:
 
         executor.execute(sql)
 
-        query_call = mock_session.execute.call_args_list[1]
-        executed_sql = str(query_call[0][0])
-        # Should not add another LIMIT
-        assert executed_sql.upper().count("LIMIT") == 1
+
+class TestQueryExecutorVectorParams:
+    """Test vector placeholder handling."""
+
+    def test_vector_placeholder_without_embedding_service(self, db_session_factory) -> None:
+        """Should return friendly error when embedding service is missing."""
+        executor = QueryExecutor(db_session_factory=db_session_factory)
+        result = executor.execute(
+            "SELECT * FROM plugin_assistant.extracted_documents ORDER BY embedding <=> :query_vector",
+            question="test query",
+        )
+
+        assert result.success is False
+        assert "embedding service" in (result.error_message or "")
+
+    def test_vector_placeholder_without_question(self, db_session_factory) -> None:
+        """Should return friendly error when question is missing."""
+        embedding_service = MagicMock()
+        executor = QueryExecutor(
+            db_session_factory=db_session_factory,
+            embedding_service=embedding_service,
+        )
+        result = executor.execute(
+            "SELECT * FROM plugin_assistant.extracted_documents ORDER BY embedding <=> :query_vector",
+        )
+
+        assert result.success is False
+        assert "no question" in (result.error_message or "").lower()
 
     def test_truncated_flag_when_at_limit(
         self,

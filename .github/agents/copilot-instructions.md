@@ -23,6 +23,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - PostgreSQL (Indico's db via SQLAlchemy) (010-chat-pipeline-integration)
 - Python 3.11+ (matching Indico requirements) (011-realtime-attachment-indexing)
 - PostgreSQL (`extracted_documents` table with event_id, attachment_id, content_hash, embeddings) (011-realtime-attachment-indexing)
+- Python 3.11+ + Instructor (LLM), SQLAlchemy, pgvector, sentence-transformers (013-nl2sql-prompt-optimization)
+- PostgreSQL 14+ with pgvector extension, `plugin_assistant` schema (013-nl2sql-prompt-optimization)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -42,9 +44,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 013-nl2sql-prompt-optimization: Added Python 3.11+ + Instructor (LLM), SQLAlchemy, pgvector, sentence-transformers
 - 011-realtime-attachment-indexing: Added Python 3.11+ (matching Indico requirements)
 - 010-chat-pipeline-integration: Added Python 3.11+ + Flask (Indico), Chainlit 2.9.5, Instructor, httpx (for async HTTP client)
-- 009-chat-widget-styling: Added Python 3.11+ (Chainlit app), CSS, JSON + Chainlit 2.9.x (copilot widget mode)
 
 
 <!-- MANUAL ADDITIONS START -->

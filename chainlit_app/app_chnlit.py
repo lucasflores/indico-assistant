@@ -125,6 +125,16 @@ async def _get_http_client(base_url: str) -> httpx.AsyncClient:
 @cl.on_chat_start
 async def on_chat_start():
     cl.user_session.set("indico_session_id", None)
+    
+    # Store event_id from user metadata in session for easy access
+    # User object is returned by header_auth_callback
+    user = cl.user_session.get("user")
+    
+    if user and isinstance(user, cl.User) and hasattr(user, "metadata"):
+        event_id = user.metadata.get("event_id")
+        if event_id:
+            cl.user_session.set("indico_event_id", event_id)
+    
     _get_auth_token()
 
 
@@ -138,14 +148,13 @@ def header_auth_callback(headers: dict) -> cl.User | None:
 
     auth_header = headers.get("Authorization") or headers.get("authorization", "")
     cookie_header = headers.get("Cookie") or headers.get("cookie", "")
-    logger.info(
-        "Auth callback headers received (has_authorization=%s, has_cookie=%s, header_keys=%s)",
-        bool(auth_header),
-        bool(cookie_header),
-        list(headers.keys()),
-    )
+    
     token = None
     if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ")
+        token = auth_header.removeprefix("Bearer ")
+        token = auth_header.removeprefix("Bearer ")
+        token = auth_header.removeprefix("Bearer ")
         token = auth_header.removeprefix("Bearer ")
     elif cookie_header:
         for part in cookie_header.split(";"):
@@ -166,6 +175,7 @@ def header_auth_callback(headers: dict) -> cl.User | None:
                 "authenticated": False,
                 "source": "indico",
                 "auth_token": token,
+                "event_id": event_id,
             },
         )
 
@@ -179,6 +189,9 @@ def header_auth_callback(headers: dict) -> cl.User | None:
     identifier = payload.get("identifier", "unknown")
     meta = payload.get("metadata", {}) or {}
 
+    # Extract event_id from JWT metadata (Feature 013: event context)
+    event_id = meta.get("event_id")
+
     cl.user_session.set("auth_token", token)
     user = cl.User(
         identifier=identifier,
@@ -188,6 +201,7 @@ def header_auth_callback(headers: dict) -> cl.User | None:
             "authenticated": True,
             "source": "indico",
             "auth_token": token,
+            "event_id": event_id,
         },
     )
     return user
@@ -220,10 +234,18 @@ async def on_message(message: cl.Message):
     session_id = cl.user_session.get("indico_session_id")
     if session_id:
         payload["session_id"] = session_id
+    
+    # Get event_id from user session (extracted during auth from Referer header)
+    # Feature 013: Event context for scoped queries
+    event_id = cl.user_session.get("indico_event_id")
+    print(f"[MESSAGE] event_id from session: {event_id}", flush=True)
+    if event_id:
+        payload["event_id"] = event_id
+        print(f"[MESSAGE] Including event_id={event_id} in payload", flush=True)
 
     logger.info(
         "Sending request to Indico assistant API",
-        extra={"url": f"{indico_api_url}/api/assistant/chat"}
+        extra={"url": f"{indico_api_url}/api/assistant/chat", "has_event_id": bool(event_id)}
     )
     try:
         response = await client.post(

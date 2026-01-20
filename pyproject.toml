@@ -90,6 +90,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --basetemp=/tmp/pytest"
+markers = [
+    "contract: contract-level tests for prompts and schemas",
+    "integration: integration tests requiring external services",
+]
 
 [tool.coverage.run]
 source = ["indico_assistant"]

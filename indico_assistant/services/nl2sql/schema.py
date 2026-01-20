@@ -28,6 +28,7 @@ class SchemaContext:
         # Basic queries - single table focus
         "event_query": [
             "events.events",
+            "events.notes",
             "categories.categories",
         ],
         "registration_query": [
@@ -39,6 +40,7 @@ class SchemaContext:
         "contribution_query": [
             "events.events",
             "events.contributions",
+            "events.notes",
             "events.persons",
             "events.contribution_person_links",
             "events.sessions",
@@ -52,6 +54,7 @@ class SchemaContext:
         "session_query": [
             "events.events",
             "events.sessions",
+            "events.notes",
             "events.contributions",
             "events.session_blocks",
         ],
@@ -65,7 +68,12 @@ class SchemaContext:
             "attachments.folders",
             "events.events",
             "events.contributions",
+        ],
+        "document_content_query": [
             "plugin_assistant.extracted_documents",
+            "attachments.attachments",
+            "attachments.files",
+            "events.events",
         ],
         "schedule_query": [
             "events.events",
@@ -85,12 +93,14 @@ class SchemaContext:
             "events.contributions": "e.id = c.event_id",
             "events.registrations": "e.id = r.event_id",
             "events.sessions": "e.id = s.event_id",
+            "events.notes": "e.id = n.event_id",
             "events.timetable_entries": "e.id = te.event_id",
             "categories.categories": "e.category_id = cat.id",
         },
         "events.contributions": {
             "events.contribution_person_links": "c.id = cpl.contribution_id",
             "events.sessions": "c.session_id = s.id",
+            "events.notes": "c.id = n.contribution_id",
         },
         "events.contribution_person_links": {
             "events.persons": "cpl.person_id = p.id",
@@ -261,6 +271,27 @@ class SchemaContext:
                 "Note: Detailed schema not available. "
                 "Use standard SQL SELECT syntax.\n"
             )
+
+        common_sections: list[str] = []
+        if "events.events" in tables:
+            common_sections.append(
+                "- events.events: description, venue_name, room_name, address, type"
+            )
+        if "events.contributions" in tables:
+            common_sections.append(
+                "- events.contributions: title, description, duration"
+            )
+        if "events.persons" in tables:
+            common_sections.append(
+                "- events.persons: first_name, last_name, affiliation, email"
+            )
+
+        if common_sections:
+            prompt_parts.append("## Commonly Useful Columns\n")
+            prompt_parts.append("Include these columns when relevant for context:\n")
+            for line in common_sections:
+                prompt_parts.append(f"{line}\n")
+            prompt_parts.append("\n")
 
         return "".join(prompt_parts)
 

@@ -85,37 +85,49 @@ class SQLValidator:
 
         # Rule 1: Must start with SELECT (FR-012)
         if not sql_upper.startswith("SELECT"):
-            violations.append("Only SELECT queries are allowed")
+            violations.append(
+                "Only SELECT queries are allowed; please ask for read-only data"
+            )
 
         # Rule 2: No DDL keywords (FR-013)
         for keyword in self.FORBIDDEN_KEYWORDS["ddl"]:
             if self._has_keyword(sql_upper, keyword):
-                violations.append(f"DDL statement '{keyword}' not allowed")
+                violations.append(
+                    f"DDL statement '{keyword}' not allowed; use read-only queries"
+                )
 
         # Rule 3: No DML keywords (FR-014)
         for keyword in self.FORBIDDEN_KEYWORDS["dml"]:
             if self._has_keyword(sql_upper, keyword):
-                violations.append(f"DML statement '{keyword}' not allowed")
+                violations.append(
+                    f"DML statement '{keyword}' not allowed; use read-only queries"
+                )
 
         # Rule 4: No transaction keywords
         for keyword in self.FORBIDDEN_KEYWORDS["transaction"]:
             if self._has_keyword(sql_upper, keyword):
                 violations.append(
-                    f"Transaction statement '{keyword}' not allowed"
+                    f"Transaction statement '{keyword}' not allowed in read-only queries"
                 )
 
         # Rule 5: No CTEs (WITH clause) (FR-015)
         for keyword in self.FORBIDDEN_KEYWORDS["advanced"]:
             if self._has_keyword(sql_upper, keyword):
-                violations.append(f"'{keyword}' clause (CTEs) not supported")
+                violations.append(
+                    f"'{keyword}' clause (CTEs) not supported; use JOINs instead"
+                )
 
         # Rule 6: No subqueries (FR-016)
         if self.SUBQUERY_PATTERN.search(sql):
-            violations.append("Subqueries (nested SELECT) not supported")
+            violations.append(
+                "Subqueries (nested SELECT) not supported; use JOINs instead"
+            )
 
         # Rule 7: No window functions (FR-017)
         if self.WINDOW_PATTERN.search(sql):
-            violations.append("Window functions (OVER clause) not supported")
+            violations.append(
+                "Window functions (OVER clause) not supported; use ORDER BY + LIMIT instead"
+            )
 
         # Extract tables from SQL
         tables = self._extract_tables(sql)
@@ -123,7 +135,9 @@ class SQLValidator:
         # Rule 8: All tables must be in allowlist (FR-018)
         disallowed_tables = self._check_table_allowlist(tables)
         for table in disallowed_tables:
-            violations.append(f"Table '{table}' not in allowed list")
+            violations.append(
+                f"Table '{table}' not in allowed list; choose from approved event data"
+            )
 
         return ValidationResult(
             valid=len(violations) == 0,

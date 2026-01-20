@@ -1,6 +1,6 @@
 # Vector Search Setup Guide
 
-This guide explains how to set up and configure vector search capabilities for the Indico Assistant plugin, enabling RAG (Retrieval-Augmented Generation) over event documents.
+This guide explains how to set up and configure vector search capabilities for the Indico Assistant plugin, enabling vector similarity search over event documents.
 
 ## Prerequisites
 
@@ -188,9 +188,9 @@ Response:
 }
 ```
 
-### Chat with RAG
+### Chat with Document Search
 
-When using the chat endpoint, RAG is automatically applied:
+When using the chat endpoint, document content queries are handled by NL2SQL-generated SQL using pgvector similarity (`:query_vector`) instead of a separate RAG step:
 
 ```bash
 curl -X POST "https://your-indico/api/assistant/chat" \

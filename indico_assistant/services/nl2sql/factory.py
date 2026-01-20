@@ -17,6 +17,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable
 
 from indico_assistant.services.llm import LLMService
+from indico_assistant.services.embedding.service import (
+    EmbeddingService,
+    create_embedding_service,
+)
 from indico_assistant.services.nl2sql.cache import QueryCache
 from indico_assistant.services.nl2sql.pipeline import NL2SQLPipeline
 from indico_assistant.services.nl2sql.schema import SchemaContext
@@ -37,6 +41,7 @@ def create_nl2sql_pipeline(
     timeout_seconds: int = 30,
     max_correction_attempts: int = 3,
     allowed_tables: list[str] | None = None,
+    embedding_service: EmbeddingService | None = None,
 ) -> NL2SQLPipeline:
     """
     Create and configure an NL2SQL pipeline instance.
@@ -60,6 +65,7 @@ def create_nl2sql_pipeline(
         timeout_seconds: Query timeout (default: 30).
         max_correction_attempts: Max error corrections (default: 3).
         allowed_tables: Optional explicit table allowlist.
+        embedding_service: Optional embedding service for vector search.
 
     Returns:
         Configured NL2SQLPipeline instance.
@@ -93,6 +99,7 @@ def create_nl2sql_pipeline(
         timeout_seconds=timeout_seconds,
         max_correction_attempts=max_correction_attempts,
         allowed_tables=allowed_tables,
+        embedding_service=embedding_service,
     )
 
 
@@ -128,6 +135,8 @@ def create_nl2sql_pipeline_from_plugin(
     cache_ttl = settings.get("nl2sql_cache_ttl", 600)
     allowed_tables = settings.get("nl2sql_allowed_tables")
 
+    embedding_service = create_embedding_service(plugin)
+
     return create_nl2sql_pipeline(
         llm_service=llm_service,
         enable_cache=cache_ttl > 0,
@@ -136,4 +145,5 @@ def create_nl2sql_pipeline_from_plugin(
         timeout_seconds=timeout,
         max_correction_attempts=max_corrections,
         allowed_tables=allowed_tables,
+        embedding_service=embedding_service,
     )

@@ -34,6 +34,7 @@ Generate a natural, conversational response that:
 3. Is concise but complete
 4. If no results were found, explains that politely
 5. Does NOT mention SQL, databases, or technical details
+6. If a contributors field is present and already aggregated, present it clearly without duplicating entries
 
 Respond with a confidence score based on:
 - 0.9-1.0: Results directly answer the question
@@ -47,6 +48,9 @@ class ResultFormatter:
 
     # Maximum number of result rows to include in the prompt
     MAX_PREVIEW_ROWS = 20
+    
+    # Maximum length for string values (increased to show full descriptions)
+    MAX_STRING_LENGTH = 5000
 
     def __init__(self, llm_service: LLMService) -> None:
         """
@@ -120,13 +124,13 @@ class ResultFormatter:
 
         # Format as JSON for clarity
         try:
-            # Truncate long string values
+            # Truncate excessively long string values (but allow full descriptions)
             truncated_rows = []
             for row in preview_rows:
                 truncated_row = {}
                 for key, value in row.items():
-                    if isinstance(value, str) and len(value) > 100:
-                        truncated_row[key] = value[:100] + "..."
+                    if isinstance(value, str) and len(value) > self.MAX_STRING_LENGTH:
+                        truncated_row[key] = value[:self.MAX_STRING_LENGTH] + "..."
                     else:
                         truncated_row[key] = value
                 truncated_rows.append(truncated_row)

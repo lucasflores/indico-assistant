@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from indico.modules.users import User
 
 
-def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24) -> str:
+def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24, event_id: int | None = None) -> str:
     """Create a JWT token for Chainlit authentication.
 
     Generates a JWT token containing user identity information that can be
@@ -27,6 +27,7 @@ def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24) -> 
         user: The Indico User object to create a token for.
         secret: The shared secret for JWT signing (must match CHAINLIT_AUTH_SECRET).
         expiry_hours: Token validity duration in hours (default: 24).
+        event_id: Optional event ID to include in metadata for context-aware queries.
 
     Returns:
         The encoded JWT token string.
@@ -35,18 +36,22 @@ def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24) -> 
         ValueError: If secret is empty or None.
 
     Example:
-        >>> token = create_chainlit_token(current_user, "my-secret-key")
+        >>> token = create_chainlit_token(current_user, "my-secret-key", event_id=123)
         >>> # Token can be passed to Chainlit widget via accessToken parameter
     """
     if not secret:
         raise ValueError("JWT secret cannot be empty")
 
+    metadata = {
+        "name": user.full_name or user.email,
+        "email": user.email,
+    }
+    if event_id is not None:
+        metadata["event_id"] = event_id
+
     payload = {
         "identifier": str(user.id),
-        "metadata": {
-            "name": user.full_name or user.email,
-            "email": user.email,
-        },
+        "metadata": metadata,
         "exp": datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
         "iat": datetime.now(timezone.utc),
     }
