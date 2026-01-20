@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "indico-plugin-assistant"
+name = "indico-assistant"
 version = "0.1.0"
 description = "AI-powered assistant plugin for Indico"
 readme = "README.md"

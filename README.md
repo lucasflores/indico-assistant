@@ -74,17 +74,28 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ## Installation
 
-```bash
-pip install indico-plugin-assistant
-```
-
-Or for development:
+### From Source (Recommended)
 
 ```bash
-git clone https://github.com/your-org/indico-plugin-assistant.git
-cd indico-plugin-assistant
+# Clone the repository
+git clone https://github.com/lucasflores/indico-assistant.git
+cd indico-assistant
+
+# Install in production mode
+pip install .
+
+# Or install in development mode (editable)
 pip install -e ".[dev]"
 ```
+
+### From Git Repository
+
+```bash
+# Install directly from git (requires git to be installed)
+pip install git+https://github.com/lucasflores/indico-assistant.git
+```
+
+**Note**: This plugin is not yet published to PyPI. Use one of the methods above to install from source.
 
 ## Configuration
 
