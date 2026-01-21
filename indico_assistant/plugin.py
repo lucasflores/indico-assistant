@@ -131,11 +131,16 @@ class AssistantPlugin(IndicoPlugin):
         }
 
         # Generate auth token for authenticated users
-        user = (
-            getattr(session, "user", None)
-            or getattr(g, "user", None)
-            or (current_user if current_user is not None else None)
-        )
+        session_user = getattr(session, "user", None)
+        g_user = getattr(g, "user", None)
+        
+        # Try to get current_user safely
+        try:
+            cu = current_user if current_user and not getattr(current_user, 'is_anonymous', True) else None
+        except (AttributeError, RuntimeError):
+            cu = None
+        
+        user = session_user or g_user or cu
 
         # Indico does not expose Flask-Login's current_user; use session.user instead
         if user and not getattr(user, "is_anonymous", False):

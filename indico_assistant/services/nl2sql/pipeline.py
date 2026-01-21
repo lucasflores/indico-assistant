@@ -150,7 +150,7 @@ class NL2SQLPipeline:
     def process(
         self,
         question: str,
-        user_id: int,
+        user_id: int | None,
         event_ids: list[int] | None = None,
         user: Any = None,  # Indico User object for permission checks
         user_email: Optional[str] = None,
@@ -175,6 +175,7 @@ class NL2SQLPipeline:
         Args:
             question: The user's natural language question.
             user_id: The user's ID for permission filtering and audit.
+                Feature 016 (T010): Now accepts None for unauthenticated users.
             event_ids: Optional list of event IDs to restrict queries to.
             user: Optional Indico User object for permission verification.
             user_email: Optional user email for audit logging.

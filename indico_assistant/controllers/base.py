@@ -2,6 +2,7 @@
 
 Feature: 004-chat-api
 Feature: 006-vector-search-rag
+Feature: 016-user-id-passthrough (T007, T008, T031)
 Task: T011
 """
 
@@ -34,26 +35,45 @@ class RHAssistantBase(RH):
     def _check_access(self):
         """Enforce authentication for all Assistant API endpoints.
         
+        Feature 016 (T008): Always set self._user when user is available,
+        regardless of source (session or JWT), so that the user property
+        returns the correct value.
+        
         Raises:
             Unauthorized: If user is not authenticated
             Forbidden: If ADMIN_ONLY and user is not admin
         """
         auth_header = request.headers.get("Authorization", "")
+        # Feature 016 (T007): Debug logging for tracing auth flow
+        logger.debug(
+            "Assistant auth: _check_access called, auth_header_present=%s",
+            bool(auth_header)
+        )
         print(
             f"[assistant auth] _check_access called auth_header_present={bool(auth_header)}",
             flush=True,
         )
 
         user = session.user
-        if user is None:
+        # Feature 016 (T008): Set _user from session if available
+        if user is not None:
+            logger.debug("Assistant auth: user found in session, user_id=%s", user.id)
+            self._user = user
+        else:
+            # Try JWT auth
             user = self._get_user_from_bearer_token()
             if user is not None:
+                logger.debug("Assistant auth: user found from JWT, user_id=%s", user.id)
                 self._user = user
-        if user is None:
-            print("[assistant auth] session user missing", flush=True)
-            raise Unauthorized("Authentication required")
+            else:
+                logger.debug("Assistant auth: no user found from session or JWT")
+                self._user = None
         
-        if self.ADMIN_ONLY and not user.is_admin:
+        # Feature 016: Allow unauthenticated access - subclasses can enforce if needed
+        if user is None:
+            print("[assistant auth] no authenticated user found (unauthenticated access)", flush=True)
+        
+        if self.ADMIN_ONLY and (user is None or not user.is_admin):
             raise Forbidden("Admin access required")
 
     def _get_user_from_bearer_token(self):
@@ -99,10 +119,22 @@ class RHAssistantBase(RH):
             print("[assistant auth] JWT validation failed")
             return None
 
+        # Feature 016 (T007): Log JWT payload fields for debugging
+        logger.debug(
+            "Assistant auth: JWT payload fields=%s",
+            list(payload.keys()) if payload else []
+        )
+        
         user_id = payload.get("identifier") or payload.get("id")
         if not user_id:
-            current_app.logger.warning("Assistant JWT missing identifier")
+            # Feature 016 (T031): Handle JWT with no identifier field
+            current_app.logger.warning(
+                "Assistant JWT missing identifier, available fields: %s",
+                list(payload.keys())
+            )
             print("[assistant auth] JWT missing identifier")
+            # Return None - identity will be 'unknown' but auth continues
+            # if we're in a permissive endpoint
             return None
 
         try:

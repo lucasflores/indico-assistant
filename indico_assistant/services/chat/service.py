@@ -5,6 +5,7 @@ NL2SQL processing, and response generation.
 
 Feature: 004-chat-api
 Feature: 006-vector-search-rag (RAG integration T039, T040)
+Feature: 016-user-id-passthrough (T009, T012, T019, T020)
 Task: T015
 """
 
@@ -107,21 +108,24 @@ class ChatService:
 
     def process_message(
         self,
-        user_id: int,
+        user_id: Optional[int],
         message: str,
         session_id: Optional[UUID] = None,
         event_id: Optional[int] = None
     ) -> ChatResult:
         """Process a user chat message.
         
+        Feature 016 (T019, T020): Integrates identity resolution for personal queries.
+        
         1. Get or create session
-        2. Validate ownership and event access
-        3. Build conversation context
-        4. Process through NL2SQL pipeline
-        5. Save messages and return result
+        2. Resolve user identity (if needed for personal queries)
+        3. Validate ownership and event access
+        4. Build conversation context
+        5. Process through NL2SQL pipeline (or return prompting message)
+        6. Save messages and return result
         
         Args:
-            user_id: Authenticated user ID
+            user_id: Authenticated user ID (can be None for unauthenticated users)
             message: User's message text
             session_id: Existing session UUID (optional)
             event_id: Event scope (optional)
@@ -135,15 +139,79 @@ class ChatService:
             EventAccessDeniedError: If user can't access the event
             QueryProcessingError: If NL2SQL processing fails
         """
+        from indico_assistant.services.chat.identity import (
+            get_identity_service,
+            IDENTITY_DISCLAIMER,
+        )
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        
         try:
-            # Get or create session
+            # Feature 016 (T019): Initialize identity service
+            identity_service = get_identity_service()
+            
+            # Get or create session (use 0 for user_id if None - session requires int)
             session, created = self._get_or_create_session(
-                session_id, user_id, event_id
+                session_id, user_id or 0, event_id
             )
             
+            # Feature 016 (T019): Resolve identity
+            identity = identity_service.resolve_identity(
+                user_id=user_id,
+                message=message,
+                session=session
+            )
+            
+            # Feature 016 (T020): Check if this is a personal query needing identity
+            needs_identity = is_personal_query(message)
+            
+            # If personal query and identity unknown, return prompting message
+            if needs_identity and identity.user_id is None:
+                # Save user message first
+                user_msg = self._session_manager.add_user_message(session, message)
+                
+                # Return identity prompt as response
+                prompt_message = identity.prompt_message or (
+                    "I can't seem to identify who you are right now. "
+                    "Could you please provide your name, email, or user ID?"
+                )
+                
+                metadata = {
+                    "identity_status": {
+                        "source": "unknown",
+                        "disclaimer": None
+                    },
+                    "identity_prompt": True,
+                    "needs_clarification": identity.needs_clarification,
+                    "match_count": identity.match_count,
+                }
+                
+                # Save assistant response
+                assistant_msg = self._session_manager.add_assistant_message(
+                    session, prompt_message, metadata
+                )
+                self._session_manager.commit()
+                
+                return ChatResult(
+                    response=prompt_message,
+                    session_id=session.id,
+                    message_id=assistant_msg.id,
+                    metadata=metadata,
+                    created_session=created
+                )
+            
+            # Feature 016 (T021): Save resolved identity to session if user-provided
+            if (identity.source == 'user_provided' and 
+                identity.user_id is not None and
+                session.resolved_user_id != identity.user_id):
+                session.resolved_user_id = identity.user_id
+                session.identity_source = 'user_provided'
+            
+            # Use resolved user_id for processing
+            effective_user_id = identity.user_id
+            
             # Validate event access for event-scoped sessions
-            if session.event_id:
-                self._validate_event_access(user_id, session.event_id)
+            if session.event_id and effective_user_id:
+                self._validate_event_access(effective_user_id, session.event_id)
             
             # Save user message
             user_msg = self._session_manager.add_user_message(session, message)
@@ -153,8 +221,18 @@ class ChatService:
             
             # Process through NL2SQL pipeline (with RAG enhancement)
             response_text, metadata = self._process_with_nl2sql(
-                message, context, session.event_id, user_id=user_id
+                message, context, session.event_id, user_id=effective_user_id
             )
+            
+            # Feature 016 (T012, T025): Add identity status to metadata
+            metadata["identity_status"] = {
+                "source": identity.source,
+                "disclaimer": identity.disclaimer
+            }
+            
+            # Feature 016 (T025): Append disclaimer to response if user_provided
+            if identity.source == 'user_provided' and identity.disclaimer:
+                response_text = f"{response_text}\n\n*{identity.disclaimer}*"
             
             # Save assistant response
             assistant_msg = self._session_manager.add_assistant_message(
@@ -230,6 +308,9 @@ class ChatService:
         Raises:
             EventAccessDeniedError: If user can't access event
         """
+        if event_id is None:
+            return  # No event scoping, no validation needed
+            
         try:
             from indico.modules.events import Event
             from flask import session as flask_session
@@ -403,9 +484,11 @@ class ChatService:
                 extra={"event_id": event_id, "user_id": user_id}
             )
 
+            # Feature 016 (T009): Pass user_id as-is (can be None)
+            # The pipeline now accepts user_id: int | None (T010)
             result = pipeline.process(
                 question=message,
-                user_id=user_id or 0,
+                user_id=user_id,
                 event_ids=[event_id] if event_id else None,
                 conversation_history=context,  # Feature 012: T006
             )

@@ -10,8 +10,11 @@ Query classifier component for NL2SQL pipeline.
 
 Classifies natural language questions into query intents and extracts
 relevant entities using the LLM service.
+
+Feature: 016-user-id-passthrough (T004)
 """
 
+import re
 from datetime import datetime, timedelta
 
 from indico_assistant.services.llm import LLMService
@@ -72,6 +75,9 @@ Analyze the user's question and classify it into one of these intents:
 
 ## TIME REFERENCE DEFAULTS
 
+**CRITICAL**: Only extract time_range if the user EXPLICITLY mentions time/date keywords. 
+If NO time reference is mentioned, leave time_range as null.
+
 When the user says:
 - "recently", "lately" → last 7 days
 - "soon", "upcoming" → next 7 days
@@ -83,11 +89,13 @@ When the user says:
 - "last week" → previous week
 - "next week" → coming week
 
+**DO NOT assume a default time range if none is mentioned.**
+
 ## EXTRACTION RULES
 
 Extract the following from the question:
 1. **Entities**: Event names, person names, file types, categories
-2. **Time constraints**: Date ranges, relative time references
+2. **Time constraints**: Date ranges, relative time references (ONLY if explicitly mentioned)
 3. **Filters**: Any specific criteria (e.g., "only physics events", "speakers from CERN")
 
 ## INPUT
@@ -234,3 +242,71 @@ class QueryClassifier:
             True if the query is out of scope.
         """
         return classification.intent == "out_of_scope"
+
+
+# Feature 016: Personal query detection (T004)
+# Regex patterns for detecting personal queries that require user identity
+PERSONAL_PRONOUNS_PATTERN = re.compile(
+    r'\b(I|me|my|mine|myself)\b',
+    re.IGNORECASE
+)
+
+PERSONAL_QUERY_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE) for pattern in [
+        r'\bmy\s+(meetings?|events?|contributions?|registrations?|talks?|sessions?)\b',
+        r'\bam\s+I\s+(registered|attending|speaking|presenting)\b',
+        r'\bwhat\s+.*\s+do\s+I\s+have\b',
+        r'\bshow\s+me\s+my\b',
+        r'\bwhat\s+am\s+I\b',
+        r'\bwhere\s+am\s+I\b',
+        r'\bwhen\s+do\s+I\b',
+        r"\bI'?m\s+(registered|attending|speaking|presenting)\b",
+        r'\bfor\s+me\b',
+        r'\bmy\s+schedule\b',
+        r'\bmy\s+upcoming\b',
+    ]
+]
+
+
+def is_personal_query(question: str) -> bool:
+    """Check if a question is a personal query requiring user identity.
+    
+    Personal queries reference the user themselves using pronouns like
+    "I", "me", "my" in contexts that require knowing who the user is.
+    
+    Args:
+        question: The user's natural language question
+        
+    Returns:
+        True if the question is a personal query
+        
+    Feature: 016-user-id-passthrough
+    Task: T004
+    """
+    # Check for personal pronouns first
+    if not PERSONAL_PRONOUNS_PATTERN.search(question):
+        return False
+    
+    # Check against specific personal query patterns
+    for pattern in PERSONAL_QUERY_PATTERNS:
+        if pattern.search(question):
+            return True
+    
+    # If contains personal pronouns and is likely a query context
+    # (not just conversational use of "I think" or "I believe")
+    conversational_patterns = [
+        r'\bI\s+(think|believe|guess|suppose|wonder|hope|wish)\b',
+        r"\bI'?d\s+(like|prefer|want)\s+to\s+know\b",
+        r'\bcan\s+you\s+tell\s+me\b',
+        r'\bI\s+have\s+a\s+question\b',
+    ]
+    
+    for pattern in conversational_patterns:
+        if re.search(pattern, question, re.IGNORECASE):
+            # These are conversational, not personal data queries
+            return False
+    
+    # If it has personal pronouns and doesn't match conversational patterns,
+    # it's likely a personal query
+    return bool(PERSONAL_PRONOUNS_PATTERN.search(question))
+

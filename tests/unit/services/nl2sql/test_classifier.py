@@ -540,3 +540,100 @@ class TestQueryClassifierMultiEntityIntents:
         prompt = call_args[1]["prompt"]
         # Should include hints about when to use which intent
         assert "HINT" in prompt.upper() or "hint" in prompt.lower()
+
+
+# Feature 016: Tests for is_personal_query (T027)
+class TestIsPersonalQuery:
+    """Test is_personal_query helper function.
+    
+    Feature: 016-user-id-passthrough
+    Task: T027
+    """
+
+    def test_my_meetings_is_personal(self) -> None:
+        """'What meetings do I have?' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("What meetings do I have?") is True
+
+    def test_my_events_is_personal(self) -> None:
+        """'Show me my events' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Show me my events") is True
+
+    def test_am_i_registered_is_personal(self) -> None:
+        """'Am I registered for the conference?' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Am I registered for the conference?") is True
+
+    def test_my_schedule_is_personal(self) -> None:
+        """'What's my schedule for this week?' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("What's my schedule for this week?") is True
+
+    def test_my_contributions_is_personal(self) -> None:
+        """'What contributions do I have?' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("What contributions do I have?") is True
+
+    def test_for_me_is_personal(self) -> None:
+        """'Show upcoming events for me' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Show upcoming events for me") is True
+
+    def test_general_event_query_not_personal(self) -> None:
+        """'How many events are there?' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("How many events are there?") is False
+
+    def test_list_all_events_not_personal(self) -> None:
+        """'List all events' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("List all events") is False
+
+    def test_who_is_speaking_not_personal(self) -> None:
+        """'Who is speaking at the conference?' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Who is speaking at the conference?") is False
+
+    def test_i_think_not_personal(self) -> None:
+        """'I think there might be a bug' should NOT be personal (conversational)."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        # Conversational usage of "I" is not a personal data query
+        assert is_personal_query("I think there might be a bug") is False
+
+    def test_i_believe_not_personal(self) -> None:
+        """'I believe the event starts at 9am' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("I believe the event starts at 9am") is False
+
+    def test_can_you_tell_me_not_personal(self) -> None:
+        """'Can you tell me about the event?' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Can you tell me about the event?") is False
+
+    def test_i_want_to_know_not_personal(self) -> None:
+        """'I'd like to know about upcoming meetings' should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        # This is conversational, asking about events in general
+        assert is_personal_query("I'd like to know about upcoming meetings") is False
+
+    def test_im_presenting_is_personal(self) -> None:
+        """'When am I presenting?' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("When am I presenting?") is True
+
+    def test_my_upcoming_is_personal(self) -> None:
+        """'Show my upcoming talks' should be detected as personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("Show my upcoming talks") is True
+
+    def test_empty_string_not_personal(self) -> None:
+        """Empty string should NOT be personal."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("") is False
+
+    def test_case_insensitive_my(self) -> None:
+        """Personal pronouns should be case-insensitive."""
+        from indico_assistant.services.nl2sql.classifier import is_personal_query
+        assert is_personal_query("What are MY meetings?") is True
+        assert is_personal_query("show ME my events") is True

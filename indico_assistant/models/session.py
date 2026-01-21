@@ -1,6 +1,7 @@
 """ChatSession model for conversation persistence.
 
 Feature: 004-chat-api
+Feature: 016-user-id-passthrough (T002)
 Task: T006
 """
 
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 from indico.core.db import db
-from sqlalchemy import Column, DateTime, Integer
+from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -30,6 +31,8 @@ class ChatSession(db.Model):
         id: Unique session identifier (UUID)
         user_id: Indico user ID who owns the session
         event_id: Optional event scope (NULL = global)
+        resolved_user_id: User ID resolved from user-provided identity (Feature 016)
+        identity_source: How identity was determined ('authenticated', 'user_provided', null)
         created_at: Session creation timestamp
         updated_at: Last activity timestamp (used for 90-day cleanup)
         messages: Relationship to ChatMessage instances
@@ -45,6 +48,9 @@ class ChatSession(db.Model):
     )
     user_id = Column(Integer, nullable=False, index=True)
     event_id = Column(Integer, nullable=True, index=True)
+    # Feature 016: Identity resolution columns (T002)
+    resolved_user_id = Column(Integer, nullable=True, index=True)
+    identity_source = Column(String(20), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

@@ -29,6 +29,7 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - PostgreSQL (Indico's database with plugin_assistant schema) (014-readme-framework-review)
 - Python 3.11+ (match Indico minimum) (015-chat-source-citations)
 - PostgreSQL with plugin_assistant schema (existing) (015-chat-source-citations)
+- Python 3.11+ + Flask, SQLAlchemy, Indico framework, Instructor (LLM) (016-user-id-passthrough)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -48,9 +49,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 016-user-id-passthrough: Added Python 3.11+ + Flask, SQLAlchemy, Indico framework, Instructor (LLM)
 - 015-chat-source-citations: Added Python 3.11+ (match Indico minimum)
 - 014-readme-framework-review: Added Python 3.11+ (Indico Assistant Plugin) + Indico 3.3+, instructor, openai, ollama, langfuse, sentence-transformers, PyPDF2, python-docx, pgvector, PyJWT
-- 013-nl2sql-prompt-optimization: Added Python 3.11+ + Instructor (LLM), SQLAlchemy, pgvector, sentence-transformers
 
 
 <!-- MANUAL ADDITIONS START -->

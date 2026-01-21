@@ -3,6 +3,7 @@
 Handles POST /chat requests for conversational queries.
 
 Feature: 004-chat-api
+Feature: 016-user-id-passthrough (T024)
 Task: T017
 """
 
@@ -39,16 +40,21 @@ class RHChat(RHChatBase):
     """
 
     def _check_access(self) -> None:
-        """Verify user authentication and rate limits."""
+        """Verify user authentication and rate limits.
+        
+        Feature 016: Allow unauthenticated access for identity prompting flow.
+        Rate limiting only applies to authenticated users.
+        """
         super()._check_access()
         
-        # Check rate limit for chat requests
-        rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "chat")
-        
-        if not rate_result.allowed:
-            from indico_assistant.schemas.errors import ErrorCode
-            raise self._rate_limit_error(rate_result.retry_after)
+        # Check rate limit only for authenticated users
+        if self.user is not None:
+            rate_limiter = get_rate_limiter()
+            rate_result = rate_limiter.check_rate(self.user.id, "chat")
+            
+            if not rate_result.allowed:
+                from indico_assistant.schemas.errors import ErrorCode
+                raise self._rate_limit_error(rate_result.retry_after)
 
     def _process(self):
         """Process the chat request.
@@ -83,25 +89,31 @@ class RHChat(RHChatBase):
         # Process the message
         try:
             chat_service = get_chat_service()
+            # Feature 016: Pass user ID (may be None after auth changes)
+            # The service handles identity resolution internally
+            user_id = self.user.id if self.user else None
             result = chat_service.process_message(
-                user_id=self.user.id,
+                user_id=user_id,
                 message=chat_request.message,
                 session_id=session_id,
                 event_id=chat_request.event_id
             )
             
-            # Build response
+            # Build response - Feature 016 (T024): Include identity_status
+            response_metadata = {
+                k: v for k, v in {
+                    "sql_generated": result.metadata.get("sql_generated"),
+                    "confidence": result.metadata.get("confidence"),
+                    "data_sources": result.metadata.get("data_sources", []),
+                    "identity_status": result.metadata.get("identity_status"),  # Feature 016
+                }.items() if v is not None
+            }
+            
             response = ChatResponse(
                 session_id=str(result.session_id),
                 message_id=str(result.message_id),
                 response=result.response,
-                metadata={
-                    k: v for k, v in {
-                        "sql_generated": result.metadata.get("sql_generated"),
-                        "confidence": result.metadata.get("confidence"),
-                        "data_sources": result.metadata.get("data_sources", [])
-                    }.items() if v is not None
-                }
+                metadata=response_metadata
             )
             
             status_code = 201 if result.created_session else 200
