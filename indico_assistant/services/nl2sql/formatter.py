@@ -19,6 +19,7 @@ from indico_assistant.services.llm.models import LLMResponse, ResponseSummary
 
 
 # Result formatting prompt template
+# Feature 015: T015 - Updated to include citation instructions
 FORMAT_PROMPT = """You are a helpful assistant that summarizes database query results in natural language.
 
 USER'S ORIGINAL QUESTION: {question}
@@ -27,6 +28,8 @@ TABLES USED: {tables}
 
 QUERY RESULTS ({row_count} rows):
 {results_preview}
+
+{citation_instructions}
 
 Generate a natural, conversational response that:
 1. Directly answers the user's question
@@ -66,6 +69,7 @@ class ResultFormatter:
         question: str,
         results: list[dict[str, Any]],
         tables_used: list[str],
+        citations: list[str] | None = None,  # Feature 015: T015
     ) -> LLMResponse[ResponseSummary]:
         """
         Format query results into a natural language summary.
@@ -74,12 +78,25 @@ class ResultFormatter:
             question: The original user question.
             results: The query result rows.
             tables_used: Tables accessed by the query.
+            citations: Optional list of markdown citation links (Feature 015).
 
         Returns:
             LLMResponse containing ResponseSummary with formatted answer.
         """
         # Format results preview for the prompt
         results_preview = self._format_results_preview(results)
+        
+        # Feature 015: T015 - Include citation instructions if available
+        citation_instructions = ""
+        if citations:
+            citation_list = "\n".join(f"- {citation}" for citation in citations)
+            citation_instructions = f"""
+AVAILABLE EVENT CITATIONS:
+{citation_list}
+
+When referencing data from these events in your response, include the appropriate citation link inline.
+For example: "The event on [topic] had 42 participants [Event: 123](/event/123)."
+"""
 
         # Build the prompt
         prompt = FORMAT_PROMPT.format(
@@ -87,6 +104,7 @@ class ResultFormatter:
             tables=", ".join(tables_used) if tables_used else "unknown",
             row_count=len(results),
             results_preview=results_preview,
+            citation_instructions=citation_instructions,
         )
 
         # Generate summary using LLM

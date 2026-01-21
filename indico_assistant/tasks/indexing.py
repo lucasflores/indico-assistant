@@ -113,6 +113,26 @@ def index_attachment_task(
         
         logger.debug("Fetched attachment: %s (size=%d bytes)", attachment.file.filename, attachment.file.size)
         
+        # Extract URL components for citation building (Feature 015)
+        # Attachment belongs to a folder, which belongs to an object (event/contribution/subcontribution)
+        metadata = {
+            "filename": attachment.file.filename,
+        }
+        
+        # Get contribution_id and file_id if attachment is on a contribution
+        if hasattr(attachment.folder, 'object') and attachment.folder.object:
+            folder_object = attachment.folder.object
+            # Check if this is a contribution
+            if hasattr(folder_object, 'id') and hasattr(folder_object, 'event_id'):
+                # This is a contribution - store its ID
+                metadata["contribution_id"] = folder_object.id
+        
+        # File ID is the attachment's file ID
+        if hasattr(attachment.file, 'id'):
+            metadata["file_id"] = attachment.file.id
+        
+        logger.debug("Extracted metadata for citations: %s", metadata)
+        
         # Step 2: Compute content hash (T021)
         with attachment.file.open() as f:
             content_hash = compute_content_hash(f)
@@ -196,14 +216,21 @@ def index_attachment_task(
         logger.debug("Generated %d embeddings", len(embeddings))
         
         # Step 7: Store embeddings in vector database (T026)
+        # Prepare chunks in format expected by VectorStore.insert_chunks
+        chunks_data = []
+        for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+            chunks_data.append({
+                "event_id": event_id,
+                "attachment_id": attachment_id,
+                "chunk_index": idx,
+                "content_text": chunk_text,
+                "content_hash": content_hash,
+                "embedding": embedding,
+                "metadata": metadata  # Includes filename, contribution_id, file_id (Feature 015)
+            })
+        
         try:
-            chunk_count = vector_store.insert_chunks(
-                event_id=event_id,
-                attachment_id=attachment_id,
-                chunks=chunks,
-                embeddings=embeddings,
-                content_hash=content_hash
-            )
+            chunk_count = vector_store.insert_chunks(chunks_data)
         except IntegrityError as e:
             # Handle race condition: another task may have indexed this document
             # This can happen if duplicate detection check passes but insertion conflicts

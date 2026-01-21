@@ -322,7 +322,15 @@ async def on_message(message: cl.Message):
         if confidence is not None:
             debug_lines.append(f"Confidence: {confidence}")
         if data_sources:
-            debug_lines.append(f"Sources: {', '.join(data_sources)}")
+            # Feature 015: Handle new dict format for citations
+            if isinstance(data_sources, list) and len(data_sources) > 0:
+                if isinstance(data_sources[0], dict):
+                    # New format: list of citation dicts
+                    source_descriptions = [s.get('description', s.get('url', 'source')) for s in data_sources]
+                    debug_lines.append(f"Sources: {', '.join(source_descriptions)}")
+                else:
+                    # Old format: list of strings (table names)
+                    debug_lines.append(f"Sources: {', '.join(data_sources)}")
         if debug_lines:
             reply = f"{reply}\n\n" + "\n".join(debug_lines)
     await cl.Message(content=reply).send()

@@ -47,10 +47,12 @@ class RAGResult:
         should_use_rag: Whether RAG context should be used.
         context: Document context if available.
         query_type: Detected query type (document, sql, hybrid).
+        search_results: Original search results for citation extraction (Feature 015: T022).
     """
     should_use_rag: bool
     context: Optional[DocumentContext]
     query_type: str
+    search_results: list[Any] = field(default_factory=list)  # Feature 015: T022
 
 
 class RAGService:
@@ -215,7 +217,8 @@ class RAGService:
         return RAGResult(
             should_use_rag=True,
             context=context,
-            query_type=query_type
+            query_type=query_type,
+            search_results=search_response.results  # Feature 015: T022
         )
     
     def _build_context(self, chunks: list[SearchResult]) -> DocumentContext:

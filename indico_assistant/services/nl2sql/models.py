@@ -71,6 +71,10 @@ class PipelineResult(BaseModel):
         default_factory=list, description="Tables accessed by the query"
     )
     row_count: int = Field(default=0, description="Number of rows returned")
+    source_event_ids: list[int] = Field(
+        default_factory=list,
+        description="Event IDs that contributed to the result (Feature 015: citations)"
+    )
 
     # Performance metrics
     total_time_ms: int = Field(

@@ -62,7 +62,11 @@ class ChatResponse(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional metadata (sql_generated, confidence, data_sources)"
+        description=(
+            "Additional metadata (sql_generated, confidence, data_sources). "
+            "Feature 015: data_sources changed from list[str] to list[dict] "
+            "containing citation objects with type, url, description fields."
+        )
     )
 
     model_config = {"from_attributes": True}

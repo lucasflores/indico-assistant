@@ -27,6 +27,10 @@ from indico_assistant.services.chat.session_manager import (
     SessionManager,
     get_session_manager,
 )
+from indico_assistant.services.chat.citations import (
+    CitationBuilder,
+    SourceCitation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +248,125 @@ class ChatService:
             # If Indico modules not available (testing), skip validation
             logger.warning("Indico event module not available, skipping access check")
 
+    def _get_base_url(self) -> str:
+        """Get base URL for citation links from Indico config.
+        
+        Feature: 015-chat-source-citations
+        Task: T012
+        
+        Returns:
+            Base URL from Indico config (e.g., 'http://127.0.0.1:8000')
+        """
+        try:
+            # Get from Indico's config (the actual instance URL)
+            from indico.core.config import config
+            if hasattr(config, 'BASE_URL') and config.BASE_URL:
+                return config.BASE_URL.rstrip('/')
+        except (ImportError, AttributeError):
+            pass
+        
+        try:
+            # Fallback to plugin setting if configured
+            from indico_assistant.plugin import AssistantPlugin
+            plugin = AssistantPlugin.instance
+            if plugin and hasattr(plugin, 'settings'):
+                base_url = plugin.settings.get('base_url')
+                if base_url:
+                    return base_url.rstrip('/')
+        except (ImportError, AttributeError, RuntimeError):
+            pass
+        
+        return 'http://localhost:8000'
+
+    def _generate_event_citations(self, event_ids: list[int]) -> list[str]:
+        """Generate markdown citation links for event IDs.
+        
+        Feature: 015-chat-source-citations
+        Task: T014
+        
+        Args:
+            event_ids: List of event IDs to cite
+            
+        Returns:
+            List of markdown citation links
+        """
+        if not event_ids:
+            return []
+        
+        base_url = self._get_base_url()
+        builder = CitationBuilder(base_url=base_url)
+        
+        citations = []
+        for event_id in event_ids:
+            citation = builder.build_event_citation(event_id)
+            citations.append(citation)
+        
+        return citations
+
+    def _extract_document_citations(self, search_results: list) -> list[dict]:
+        """Extract document citation metadata from RAG search results.
+        
+        Feature: 015-chat-source-citations
+        Task: T023
+        
+        Args:
+            search_results: List of SearchResult objects from vector search
+            
+        Returns:
+            List of citation metadata dicts with type, IDs, URL, description
+        """
+        if not search_results:
+            return []
+        
+        base_url = self._get_base_url()
+        builder = CitationBuilder(base_url=base_url)
+        
+        citations = []
+        seen_files = set()  # Dedup by file_id
+        
+        for result in search_results:
+            # Extract metadata (Feature 011: T004 ensures these are present)
+            metadata = getattr(result, 'metadata', {}) or {}
+            contribution_id = metadata.get('contribution_id')
+            file_id = metadata.get('file_id')
+            filename = metadata.get('filename', 'document')
+            
+            # Skip if missing required IDs or already seen
+            if not contribution_id or not file_id or file_id in seen_files:
+                continue
+            
+            seen_files.add(file_id)
+            
+            # Extract event_id and attachment_id
+            event_id = getattr(result, 'event_id', None)
+            attachment_id = metadata.get('attachment_id')
+            
+            # Skip if missing core identifiers
+            if not event_id or not attachment_id:
+                continue
+            
+            # Build citation URL
+            citation_url = builder.build_document_url(
+                event_id=event_id,
+                contribution_id=contribution_id,
+                attachment_id=attachment_id,
+                file_id=file_id,
+                filename=filename
+            )
+            
+            citations.append({
+                "type": "document",
+                "event_id": event_id,
+                "contribution_id": contribution_id,
+                "attachment_id": attachment_id,
+                "file_id": file_id,
+                "filename": filename,
+                "url": citation_url,
+                "description": f"Document: {filename}"  # Feature 015: T030 - type-specific prefix
+            })
+        
+        return citations
+
     def _process_with_nl2sql(
         self,
         message: str,
@@ -303,10 +426,32 @@ class ChatService:
                     else result.error.dict()
                 )
 
+            # Feature 015: Extract event IDs and generate citations (T013, T014)
+            source_event_ids = getattr(result, 'source_event_ids', [])
+            data_sources = []
+            
+            # Build citation metadata for event sources
+            if source_event_ids:
+                base_url = self._get_base_url()
+                builder = CitationBuilder(base_url=base_url)
+                
+                for event_id in source_event_ids:
+                    citation_url = builder.build_event_url(event_id)
+                    data_sources.append({
+                        "type": "event",
+                        "event_id": event_id,
+                        "url": citation_url,
+                        "description": f"Event: {event_id}"  # Feature 015: T030 - type-specific prefix
+                    })
+            
+            # Legacy fallback: include table names if no event sources
+            if not data_sources and result.tables_accessed:
+                data_sources = result.tables_accessed
+            
             metadata.update({
                 "sql_generated": result.generated_sql,
                 "confidence": result.confidence,
-                "data_sources": result.tables_accessed,
+                "data_sources": data_sources,  # Feature 015: New dict format
                 "pipeline_success": result.success,
                 "pipeline_error": error_payload,
             })

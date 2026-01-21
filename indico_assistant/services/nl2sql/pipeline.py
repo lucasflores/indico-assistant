@@ -531,13 +531,42 @@ class NL2SQLPipeline:
                     exec_result.rows, user, event_id_key="event_id"
                 )
 
+            # Feature 015: Extract event IDs for citations BEFORE formatting (T015)
+            source_event_ids = self._extract_event_ids_from_results(
+                filtered_results, event_ids
+            )
+            
+            # Feature 015: Generate citation links if event sources exist
+            citations: list[str] | None = None
+            if source_event_ids:
+                # Import here to avoid circular dependency
+                from indico_assistant.services.chat.citations import CitationBuilder
+                
+                # Get base URL from Indico config first, then fallback to plugin settings
+                base_url = 'http://localhost:8000'
+                try:
+                    from indico.core.config import config
+                    if hasattr(config, 'BASE_URL') and config.BASE_URL:
+                        base_url = config.BASE_URL.rstrip('/')
+                except (ImportError, AttributeError):
+                    try:
+                        from indico_assistant.plugin import AssistantPlugin
+                        plugin = AssistantPlugin.instance
+                        if plugin:
+                            base_url = plugin.settings.get('base_url', base_url)
+                    except (ImportError, AttributeError, RuntimeError):
+                        pass
+                
+                builder = CitationBuilder(base_url=base_url)
+                citations = [builder.build_event_citation(eid) for eid in source_event_ids]
+
             # Step 7: Format results (T029 - response_summarization span)
             with self._span("response_summarization") as format_span:
                 if not filtered_results:
                     summary = self._formatter.format_empty_response(question)
                 else:
                     format_response = self._formatter.format(
-                        question, filtered_results, tables_used
+                        question, filtered_results, tables_used, citations=citations  # Feature 015: T015
                     )
                     if format_response.success and format_response.data:
                         summary = format_response.data
@@ -571,6 +600,7 @@ class NL2SQLPipeline:
                 generated_sql=generated_sql,
                 tables_accessed=tables_used,
                 row_count=len(filtered_results),
+                source_event_ids=source_event_ids,  # Feature 015: citations (already extracted above)
                 total_time_ms=total_time,
                 classification_time_ms=classification_time,
                 generation_time_ms=generation_time,
@@ -590,6 +620,40 @@ class NL2SQLPipeline:
         finally:
             # T051: Always commit audit log on exit
             audit_logger.commit()
+
+    def _extract_event_ids_from_results(
+        self,
+        results: list[dict[str, Any]],
+        context_event_ids: list[int] | None
+    ) -> list[int]:
+        """Extract event IDs from query results for citation purposes.
+        
+        Feature: 015-chat-source-citations
+        Task: T005
+        
+        Args:
+            results: Query result rows
+            context_event_ids: Event IDs from query context (if provided)
+            
+        Returns:
+            List of unique event IDs that contributed to the results
+        """
+        event_ids = set()
+        
+        # Strategy 1: Use context event IDs if explicitly provided
+        if context_event_ids:
+            event_ids.update(context_event_ids)
+        
+        # Strategy 2: Extract from result rows (look for event_id column)
+        for row in results:
+            if "event_id" in row and row["event_id"] is not None:
+                event_ids.add(int(row["event_id"]))
+            # Also check for id column if querying events table directly
+            elif "id" in row and isinstance(row.get("id"), int):
+                # This might be an event ID if table is events
+                event_ids.add(row["id"])
+        
+        return sorted(list(event_ids))
 
     def _error_result(
         self,
