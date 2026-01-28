@@ -62,6 +62,10 @@ class PipelineResult(BaseModel):
         le=1.0,
         description="Confidence score for the answer",
     )
+    suggested_followups: list[str] = Field(
+        default_factory=list,
+        description="Suggested follow-up questions for the user"
+    )
 
     # Query details
     generated_sql: str | None = Field(

@@ -29,6 +29,7 @@ class SyncStatus(str, Enum):
     """Status of document synchronization job."""
     RUNNING = "running"
     COMPLETED = "completed"
+    PARTIAL = "partial"  # Some documents succeeded, some failed
     FAILED = "failed"
 
 

@@ -11,6 +11,7 @@ Result formatter component for NL2SQL pipeline.
 Formats query results into natural language summaries using LLM.
 """
 
+from datetime import datetime
 import json
 from typing import Any
 
@@ -22,6 +23,8 @@ from indico_assistant.services.llm.models import LLMResponse, ResponseSummary
 # Feature 015: T015 - Updated to include citation instructions
 FORMAT_PROMPT = """You are a helpful assistant that summarizes database query results in natural language.
 
+{context_section}
+
 USER'S ORIGINAL QUESTION: {question}
 
 TABLES USED: {tables}
@@ -32,28 +35,49 @@ QUERY RESULTS ({row_count} rows):
 {citation_instructions}
 
 Generate a natural, conversational response that:
-1. Directly answers the user's question
-2. Includes specific numbers, names, or dates from the results
-3. Is concise but complete
-4. If no results were found, explains that politely
-5. Does NOT mention SQL, databases, or technical details
-6. If a contributors field is present and already aggregated, present it clearly without duplicating entries
+1. Directly answers the user's question with COMPREHENSIVE detail
+2. Includes specific numbers, names, dates, and ALL relevant information from the results
+3. Is THOROUGH and COMPLETE - provide rich detail rather than brief summaries
+4. Presents information in an engaging, narrative style when appropriate
+5. If multiple items exist, describe each one with sufficient detail
+6. If no results were found, explains that politely
+7. Does NOT mention SQL, databases, or technical details
+8. If a contributors field is present and already aggregated, present it clearly without duplicating entries
+
+**IMPORTANT**: Provide detailed, informative responses. Users prefer comprehensive answers over brief summaries.
 
 Respond with a confidence score based on:
 - 0.9-1.0: Results directly answer the question
 - 0.7-0.9: Results partially answer the question
 - 0.5-0.7: Results may be relevant but don't fully answer
-- Below 0.5: Results don't seem to answer the question"""
+- Below 0.5: Results don't seem to answer the question
+
+**REQUIRED**: You MUST suggest exactly 2-3 relevant follow-up actions that:
+- Offer specific ways you can help the user explore further
+- Build on the information provided in your answer
+- Are phrased as helpful actions YOU can perform (active voice, first person)
+- Use natural, conversational language (e.g., "getting you...", "showing you...", "summarizing...")
+- Are actionable and specific (not vague like "tell me more")
+- Consider the context (current event, user, available data)
+
+Example follow-up offers (note the active, helpful tone):
+- "showing you who's presenting at this event"
+- "summarizing the documents that were shared"
+- "getting you the full agenda and schedule"
+- "detailing any notes or minutes from the meeting"
+- "finding similar events you might be interested in"
+
+This is a REQUIRED field - you must always provide 2-3 follow-up action offers."""
 
 
 class ResultFormatter:
     """Formats query results with natural language summaries."""
 
     # Maximum number of result rows to include in the prompt
-    MAX_PREVIEW_ROWS = 20
+    MAX_PREVIEW_ROWS = 50
     
     # Maximum length for string values (increased to show full descriptions)
-    MAX_STRING_LENGTH = 5000
+    MAX_STRING_LENGTH = 10000
 
     def __init__(self, llm_service: LLMService) -> None:
         """
@@ -70,6 +94,8 @@ class ResultFormatter:
         results: list[dict[str, Any]],
         tables_used: list[str],
         citations: list[str] | None = None,  # Feature 015: T015
+        user_id: int | None = None,
+        event_id: int | None = None,
     ) -> LLMResponse[ResponseSummary]:
         """
         Format query results into a natural language summary.
@@ -79,6 +105,8 @@ class ResultFormatter:
             results: The query result rows.
             tables_used: Tables accessed by the query.
             citations: Optional list of markdown citation links (Feature 015).
+            user_id: Optional user ID for context.
+            event_id: Optional event ID for context.
 
         Returns:
             LLMResponse containing ResponseSummary with formatted answer.
@@ -86,21 +114,30 @@ class ResultFormatter:
         # Format results preview for the prompt
         results_preview = self._format_results_preview(results)
         
+        # Build context section with available metadata
+        context_lines = [f"TODAY'S DATE: {datetime.now().strftime('%Y-%m-%d')}"]
+        if user_id is not None:
+            context_lines.append(f"CURRENT USER ID: {user_id}")
+        if event_id is not None:
+            context_lines.append(f"CURRENT EVENT ID: {event_id}")
+        context_section = "\n".join(context_lines)
+        
         # Feature 015: T015 - Include citation instructions if available
         citation_instructions = ""
         if citations:
             citation_list = "\n".join(f"- {citation}" for citation in citations)
             citation_instructions = f"""
-AVAILABLE EVENT CITATIONS:
-{citation_list}
-
-When referencing data from these events in your response, include the appropriate citation link inline.
-For example: "The event on [topic] had 42 participants [Event: 123](/event/123)."
-"""
-
+            AVAILABLE EVENT CITATIONS:
+            {citation_list}
+            
+            When referencing data from these events in your response, include the appropriate citation link inline.
+            For example: "The event on [topic] had 42 participants [Event: 123](/event/123)."
+            """
+        
         # Build the prompt
         prompt = FORMAT_PROMPT.format(
             question=question,
+            context_section=context_section,
             tables=", ".join(tables_used) if tables_used else "unknown",
             row_count=len(results),
             results_preview=results_preview,

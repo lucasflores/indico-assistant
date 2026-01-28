@@ -19,12 +19,17 @@ class ResponseSummary(BaseModel):
         answer: Natural language response to the user.
         confidence: Confidence score (0.0-1.0) in the answer.
         sources: Data sources used to generate the answer.
+        suggested_followups: Optional list of suggested follow-up questions/commands.
     
     Example:
         >>> summary = ResponseSummary(
         ...     answer="There are 5 workshops scheduled for next week in Room A.",
         ...     confidence=0.92,
-        ...     sources=["events.events", "events.contributions"]
+        ...     sources=["events.events", "events.contributions"],
+        ...     suggested_followups=[
+        ...         "Who is presenting at the first workshop?",
+        ...         "What topics are covered in these workshops?"
+        ...     ]
         ... )
     """
     answer: str = Field(
@@ -39,4 +44,9 @@ class ResponseSummary(BaseModel):
     sources: list[str] = Field(
         default_factory=list,
         description="Data sources used"
+    )
+    suggested_followups: list[str] = Field(
+        default_factory=list,
+        max_items=3,
+        description="2-3 contextual follow-up questions the user can ask next"
     )

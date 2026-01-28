@@ -567,7 +567,12 @@ class NL2SQLPipeline:
                     summary = self._formatter.format_empty_response(question)
                 else:
                     format_response = self._formatter.format(
-                        question, filtered_results, tables_used, citations=citations  # Feature 015: T015
+                        question, 
+                        filtered_results, 
+                        tables_used, 
+                        citations=citations,  # Feature 015: T015
+                        user_id=user_id,
+                        event_id=event_ids[0] if event_ids and len(event_ids) == 1 else None,
                     )
                     if format_response.success and format_response.data:
                         summary = format_response.data
@@ -598,6 +603,7 @@ class NL2SQLPipeline:
                 success=True,
                 answer=summary.answer,
                 confidence=summary.confidence,
+                suggested_followups=summary.suggested_followups,
                 generated_sql=generated_sql,
                 tables_accessed=tables_used,
                 row_count=len(filtered_results),

@@ -109,9 +109,10 @@ class VectorStore:
         # Convert embedding to PostgreSQL array string format
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
         
+        # Use CAST() instead of :: to avoid parameter binding conflicts
         db.session.execute(text("""
             UPDATE plugin_assistant.extracted_documents 
-            SET embedding = :embedding::vector 
+            SET embedding = CAST(:embedding AS vector)
             WHERE id = :id
         """), {"embedding": embedding_str, "id": str(doc_id)})
     

@@ -95,26 +95,41 @@ def sync_event_documents(
     db.session.commit()
     
     try:
+        # Get plugin instance
+        from indico.core.plugins import plugin_engine
+        plugin = plugin_engine.get_plugin('assistant')
+        if not plugin:
+            raise RuntimeError("Assistant plugin not loaded")
+        
         # Initialize services
-        embedding_service = EmbeddingService()
+        embedding_service = EmbeddingService(plugin)
         vector_store = VectorStore()
         document_processor = DocumentProcessor(
             embedding_service=embedding_service,
             vector_store=vector_store
         )
         
-        # Get attachments
+        # Get attachments and extract IDs upfront to avoid stale SQLAlchemy objects after rollback
         attachments = _get_event_attachments(event)
+        attachment_ids = [att.id for att in attachments]
         
         processed = 0
         errors = 0
         error_messages = []
         
-        for attachment in attachments:
+        for attachment_id in attachment_ids:
             try:
+                # Re-fetch attachment to avoid stale state after previous rollback
+                attachment = Attachment.query.get(attachment_id)
+                if not attachment:
+                    logger.warning(f"Attachment {attachment_id} not found, skipping")
+                    errors += 1
+                    error_messages.append(f"Attachment {attachment_id}: Not found")
+                    continue
+                
                 # Check if already processed (unless force)
                 if not force and _is_attachment_current(attachment):
-                    logger.debug(f"Attachment {attachment.id} already current, skipping")
+                    logger.debug(f"Attachment {attachment_id} already current, skipping")
                     continue
                 
                 # Process attachment
@@ -129,7 +144,7 @@ def sync_event_documents(
                 else:
                     errors += 1
                     error_messages.append(
-                        f"Attachment {attachment.id}: {result.get('error')}"
+                        f"Attachment {attachment_id}: {result.get('error')}"
                     )
                 
                 # Rate limiting delay between documents (T051)
@@ -137,9 +152,15 @@ def sync_event_documents(
                     time.sleep(rate_limit_delay)
                     
             except Exception as e:
-                logger.exception(f"Error processing attachment {attachment.id}")
+                # Roll back to clear failed transaction state
+                db.session.rollback()
+                logger.exception(f"Error processing attachment {attachment_id}")
                 errors += 1
-                error_messages.append(f"Attachment {attachment.id}: {str(e)}")
+                error_messages.append(f"Attachment {attachment_id}: {str(e)}")
+        
+        # Roll back if there were errors to clear failed transaction state
+        if errors > 0:
+            db.session.rollback()
         
         # Update sync log
         sync_log.status = SyncStatus.COMPLETED if errors == 0 else SyncStatus.PARTIAL
@@ -213,9 +234,12 @@ def sync_all_documents(
         }
     
     # Get all events with attachments
-    # Using subquery to find events with at least one attachment
+    # Attachments are accessed through folder.event, so we need to join through folders
+    from indico.modules.attachments.models.folders import AttachmentFolder
     events_with_attachments = db.session.query(Event.id).join(
-        Attachment, Attachment.event_id == Event.id
+        AttachmentFolder, AttachmentFolder.event_id == Event.id
+    ).join(
+        Attachment, Attachment.folder_id == AttachmentFolder.id
     ).distinct().all()
     
     event_ids = [e.id for e in events_with_attachments]

@@ -106,6 +106,7 @@ class RHChat(RHChatBase):
                     "confidence": result.metadata.get("confidence"),
                     "data_sources": result.metadata.get("data_sources", []),
                     "identity_status": result.metadata.get("identity_status"),  # Feature 016
+                    "suggested_followups": result.metadata.get("suggested_followups", []),
                 }.items() if v is not None
             }
             

@@ -43,31 +43,38 @@ Analyze the user's question and classify it into one of these intents:
 
 ### Intent Selection Rules
 
-1. Use **event_query** for questions about meeting minutes, notes, summaries (stored in events.notes)
-2. Use **speaker_query** if asking about WHO is presenting or authored something
-3. Use **session_query** if asking about tracks, session blocks, or session times
-4. Use **attendee_query** if asking about WHO attended or registered with personal details
-5. Use **schedule_query** if asking about WHEN things happen or timetable entries
-6. Use **contribution_query** for questions about talks/papers without speaker focus
+1. **event_query**: Questions about event details, titles, descriptions, venues, dates
+   - "What event is this?", "Tell me about this meeting", "Event details"
+2. **speaker_query**: WHO is presenting (names only) **WITHOUT content questions**
+3. **session_query**: Questions about tracks, session blocks, session times
+4. **attendee_query**: WHO attended or registered with personal details
+5. **schedule_query**: WHEN things happen, timetables, timing
+6. **contribution_query**: Questions about talk titles/abstracts without speaker focus
 
-### attachment_query vs document_content_query (IMPORTANT)
+### CRITICAL: document_content_query Priority
 
-- Use **attachment_query** for FILE METADATA questions:
-    - "What files are attached to event X?"
-    - "List the PDFs uploaded to this meeting"
-    - "How many attachments does this contribution have?"
+**Use document_content_query** when the question asks about CONTENT within documents (slides, papers, presentations).
 
-- Use **document_content_query** for CONTENT questions:
-    - "What does the presentation say about machine learning?"
-    - "According to the paper, what is the main conclusion?"
-    - "What topics are discussed in the slides?"
-    - "Find documents that mention quantum computing"
+**Key indicators for document_content_query**:
+- **Presentation content**: "what did [person] present/discuss/say", "summarize presentation", "what was presented"
+- **Topics/discussions**: "what topics were covered", "what was discussed"
+- **Analysis**: "main points", "key findings", "conclusions"
+- **Content keywords**: "says", "mentions", "according to", "talks about", "discusses"
 
-**Key Indicators for document_content_query**:
-- "says", "mentions", "according to", "talks about", "discusses"
-- "what does the [file] say about"
-- "content of", "written in", "stated in"
-- "find documents about", "search files for"
+**Do NOT use document_content_query for**:
+- Basic event info: "what event is this?", "event details" → **event_query**
+- Speaker names: "who presented?" → **speaker_query**
+- Talk titles: "what talks are there?" → **contribution_query**
+
+### attachment_query vs document_content_query
+
+- Use **attachment_query** for FILE METADATA only:
+    - "What files are attached?"
+    - "List the PDFs"
+
+- Use **document_content_query** for CONTENT ACCESS:
+    - "What does the presentation say?"
+    - "Topics in slides?"
 
 ### Hybrid Queries (metadata + content)
 
@@ -90,6 +97,32 @@ When the user says:
 - "next week" → coming week
 
 **DO NOT assume a default time range if none is mentioned.**
+
+## CLASSIFICATION EXAMPLES
+
+**event_query** (basic event info):
+- "What event is this?"
+- "Tell me about this meeting"
+- "Event details"
+- "What's the event title?"
+
+**document_content_query** (search document content):
+- "Can you summarize what Lucas presented on?"
+- "What did the speaker discuss?"
+- "What topics were covered in the talks?"
+- "What does the paper say about X?"
+- "Main conclusions from presentations?"
+
+**speaker_query** (names/titles only):
+- "Who presented at this event?"
+- "List all speakers"
+- "How many presenters?"
+
+**contribution_query** (talk titles/abstracts):
+- "What talks are at this event?"
+- "List all contributions"
+
+**CRITICAL**: "What did X present?" = **document_content_query** (content), NOT speaker_query (metadata)
 
 ## EXTRACTION RULES
 

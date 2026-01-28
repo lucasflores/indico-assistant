@@ -206,6 +206,21 @@ def header_auth_callback(headers: dict) -> cl.User | None:
     )
     return user
 
+@cl.set_starters
+async def starters():
+    return [
+        cl.Starter(
+            label="Monday week starter refresh",
+            message="Summarize the previous week's meetings and tasks, and provide a list of potential priorities for the week ahead.",
+            icon="/public/weather-color-sun-cloud-svgrepo-com.svg",
+            ),
+        cl.Starter(
+            label="Upcoming meetings",
+            message="Detail any upcoming meetings from now until the end of the work week, and provide a summary of the agenda for each meeting.",
+            icon="/public/crystal-ball-svgrepo-com.svg",
+            )
+    ]
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -311,8 +326,10 @@ async def on_message(message: cl.Message):
     if new_session_id:
         cl.user_session.set("indico_session_id", new_session_id)
     reply = data.get("response") or "No response returned from assistant."
-    if os.environ.get("CHAINLIT_DEBUG_SQL"):
-        metadata = data.get("metadata") or {}
+    metadata = data.get("metadata") or {}
+    
+    # Debug mode: show SQL and metadata
+    if os.environ.get("CHAINLIT_DEBUG_SQL") == "1":
         sql_generated = metadata.get("sql_generated")
         confidence = metadata.get("confidence")
         data_sources = metadata.get("data_sources")
@@ -333,6 +350,18 @@ async def on_message(message: cl.Message):
                     debug_lines.append(f"Sources: {', '.join(data_sources)}")
         if debug_lines:
             reply = f"{reply}\n\n" + "\n".join(debug_lines)
+    
+    # Append follow-up suggestions to the main response if available
+    suggested_followups = metadata.get("suggested_followups", [])
+    if suggested_followups:
+        # Format as a natural continuation with active, helpful tone
+        followup_text = "\n\n---\n\nI could also help with:\n" + "\n".join(
+            f"- {suggestion}" for suggestion in suggested_followups
+        )
+        followup_text += "\n\nJust say the word!"
+        reply += followup_text
+    
+    # Send complete response with suggestions inline
     await cl.Message(content=reply).send()
 
 

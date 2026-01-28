@@ -10,7 +10,7 @@ DEFAULT_SETTINGS = {
     "llm_base_url": "http://localhost:11434",
     "llm_api_key": None,
     "timeout_seconds": 30,
-    "max_tokens": 2048,
+    "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)
     "nl2sql_enabled": True,
     "nl2sql_timeout": 30,

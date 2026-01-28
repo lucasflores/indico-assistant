@@ -201,6 +201,7 @@ class LLMService:
                         response_model=response_model,
                         max_retries=effective_max_retries,
                         timeout=effective_timeout,
+                        max_tokens=settings["max_tokens"],
                     )
                     
                     latency_ms = int((time.time() - start_time) * 1000)
@@ -219,6 +220,7 @@ class LLMService:
                     response_model=response_model,
                     max_retries=effective_max_retries,
                     timeout=effective_timeout,
+                    max_tokens=settings["max_tokens"],
                 )
                 latency_ms = int((time.time() - start_time) * 1000)
             

@@ -14,6 +14,11 @@
 /* Widget container - ensure full opacity */
 [data-radix-popper-content-wrapper] {
   background: var(--cl-widget-background, #ffffff) !important;
+  width: 120vw !important;    /* Default is ~400px; adjust width here */
+  height: 85vh !important;    /* Default is ~600px; adjust height here */
+  max-width: 95vw !important; /* Ensure it stays within mobile viewports */
+  max-height: 900px !important;
+  z-index: 9999 !important;   /* Ensure it stays above other page elements */
 }
 
 /* Chat container styling */
@@ -23,6 +28,8 @@
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
   border-radius: 0.75rem;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* Message area background */
@@ -42,3 +49,5 @@
 [class*="header"] {
   background: var(--cl-widget-background, #ffffff);
 }
+
+

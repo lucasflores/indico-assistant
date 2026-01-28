@@ -46,6 +46,11 @@ Use the chat history to understand context or references to previous queries. Th
 9. Do NOT generate multiple SQL queries - always output a single SQL block
 10. NEVER include markdown, comments, or explanations - just return the SQL
 
+**IMPORTANT**: 
+   - Only add date/time filters if explicitly requested by the user (e.g., "last week", "upcoming", "in January").
+{context_section}
+
+
 ## TEXT MATCHING RULES
 
 - Avoid exact equality for names/titles unless the user explicitly requests an exact match
@@ -120,8 +125,6 @@ FROM events.events e
 LEFT JOIN events.notes n ON e.id = n.event_id AND n.is_deleted = false
 WHERE e.is_deleted = false
 ```
-
-**IMPORTANT**: Only add date/time filters if explicitly requested by the user (e.g., "last week", "upcoming", "in January").
 
 ### Template 2: Contributor/Speaker Queries
 
@@ -208,17 +211,6 @@ These restrictions minimize risk and keep queries safe and efficient.
 
 {question}
 
-## CLASSIFICATION
-
-- Intent: {intent}
-- Time Range: {time_range}
-- Entities: {entities}
-- Filters: {filters}
-
-## CONTEXT
-
-{context_section}
-
 {permission_filter}
 
 Generate a single SQL query that:
@@ -229,6 +221,13 @@ Generate a single SQL query that:
 5. Uses JOINs (not subqueries) when combining tables
 6. If a Time Range is provided, use it exactly in a BETWEEN filter
 7. Is safe and efficient"""
+
+### CLASSIFICATION
+#
+#- Intent: {intent}
+#- Time Range: {time_range}
+#- Entities: {entities}
+#- Filters: {filters}
 
 
 class SQLGenerator:
@@ -319,12 +318,12 @@ class SQLGenerator:
         user_id_str = str(user_id) if user_id is not None else "unknown"
         
         context_lines = [
-            f"- TODAY'S DATE: {today_str}",
-            f"- CURRENT USER ID: {user_id_str}",
+            f"   - TODAY'S DATE: {today_str}",
+            f"   - CURRENT USER ID: {user_id_str}",
         ]
         
         if event_id is not None:
-            context_lines.append(f"- CURRENT EVENT ID: {event_id}")
+            context_lines.append(f"   - CURRENT EVENT ID: {event_id}")
         
         context_section = "\n".join(context_lines)
 
@@ -418,7 +417,7 @@ class SQLGenerator:
         """Get the schema context."""
         return self._schema_context
 
-    def _truncate_message(self, content: str, max_chars: int = 1500) -> str:
+    def _truncate_message(self, content: str, max_chars: int = 15000) -> str:
         """Truncate message content to maximum length with ellipsis.
         
         Feature 012: Prevent token overflow in conversation history (T004, FR-012).

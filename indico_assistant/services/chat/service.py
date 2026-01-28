@@ -537,6 +537,7 @@ class ChatService:
                 "data_sources": data_sources,  # Feature 015: New dict format
                 "pipeline_success": result.success,
                 "pipeline_error": error_payload,
+                "suggested_followups": getattr(result, 'suggested_followups', []),
             })
 
             return response_text, metadata

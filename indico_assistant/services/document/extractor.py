@@ -16,6 +16,22 @@ from typing import BinaryIO, Optional, Union
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove NULL bytes and non-printable characters from text.
+    
+    PostgreSQL cannot store NULL bytes (0x00) in text fields.
+    This function removes them along with other non-printable characters.
+    
+    Args:
+        text: Raw extracted text.
+        
+    Returns:
+        Sanitized text safe for database storage.
+    """
+    # Use isprintable() to filter out non-printable characters including NULL bytes
+    return ''.join(char for char in text if char.isprintable())
+
+
 class ExtractionError(Exception):
     """Raised when document extraction fails."""
     pass
@@ -95,13 +111,16 @@ class DocumentExtractor:
         
         try:
             if ext == '.pdf':
-                return self._extract_pdf(path)
+                text = self._extract_pdf(path)
             elif ext in {'.docx', '.doc'}:
-                return self._extract_docx(path)
+                text = self._extract_docx(path)
             elif ext in {'.txt', '.md'}:
-                return self._extract_text(path)
+                text = self._extract_text(path)
             else:
                 raise UnsupportedFileTypeError(f"No extractor for: {ext}")
+            
+            # Sanitize text to remove NULL bytes and problematic characters
+            return _sanitize_text(text)
         except (UnsupportedFileTypeError, FileNotFoundError):
             raise
         except Exception as e:

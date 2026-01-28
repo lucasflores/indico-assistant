@@ -13,4 +13,8 @@ check_indico_version()
 
 from indico_assistant.plugin import AssistantPlugin
 
+# Import tasks to register them with Celery
+# This ensures Celery workers can discover and execute these tasks
+from indico_assistant.tasks import cleanup, indexing, sync  # noqa: F401
+
 __all__ = ["AssistantPlugin", "__version__"]
