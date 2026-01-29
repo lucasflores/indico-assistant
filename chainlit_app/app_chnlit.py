@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+import asyncio
+import re
 import chainlit as cl
 import httpx
 import jwt
@@ -244,6 +246,10 @@ async def on_message(message: cl.Message):
         ).send()
         return
 
+    # Feature 017: Create loading message to show processing state
+    # Create message but don't set content yet - this should show loading
+    loading_msg = cl.Message(content="")
+    
     client = await _get_http_client(indico_api_url)
     payload: dict[str, object] = {"message": message.content}
     session_id = cl.user_session.get("indico_session_id")
@@ -270,9 +276,8 @@ async def on_message(message: cl.Message):
         )
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
-        await cl.Message(
-            content="Unable to reach the assistant service. Please try again later."
-        ).send()
+        loading_msg.content = "Unable to reach the assistant service. Please try again later."
+        await loading_msg.send()
         return
 
     logger.info(
@@ -282,20 +287,17 @@ async def on_message(message: cl.Message):
 
     if response.status_code == 401:
         logger.info("Indico auth error response: %s", response.text)
-        await cl.Message(
-            content="Authentication failed. Please sign in again."
-        ).send()
+        loading_msg.content = "Authentication failed. Please sign in again."
+        await loading_msg.send()
         return
     if response.status_code == 403:
-        await cl.Message(
-            content="You do not have permission to access this resource."
-        ).send()
+        loading_msg.content = "You do not have permission to access this resource."
+        await loading_msg.send()
         return
     if response.status_code in (400, 422):
         logger.info("Indico validation error response: %s", response.text)
-        await cl.Message(
-            content="Your request could not be validated. Please rephrase and try again."
-        ).send()
+        loading_msg.content = "Your request could not be validated. Please rephrase and try again."
+        await loading_msg.send()
         return
     if response.status_code >= 500:
         logger.info("Indico server error response: %s", response.text)
@@ -313,13 +315,13 @@ async def on_message(message: cl.Message):
         except Exception:
             pass
 
-        await cl.Message(content=error_message).send()
+        loading_msg.content = error_message
+        await loading_msg.send()
         return
     if response.status_code >= 400:
         logger.info("Indico error response: %s", response.text)
-        await cl.Message(
-            content="The assistant could not process your request. Please try again."
-        ).send()
+        loading_msg.content = "The assistant could not process your request. Please try again."
+        await loading_msg.send()
         return
     data = response.json()
     new_session_id = data.get("session_id")
@@ -361,8 +363,21 @@ async def on_message(message: cl.Message):
         followup_text += "\n\nJust say the word!"
         reply += followup_text
     
-    # Send complete response with suggestions inline
-    await cl.Message(content=reply).send()
+    # Feature 017: Stream the response for better UX
+    loading_msg.content = ""
+    await loading_msg.send()
+    
+    # Stream the response token by token
+    # Split on word boundaries for more natural streaming
+    tokens = re.findall(r'\S+\s*', reply)
+    for token in tokens:
+        await loading_msg.stream_token(token)
+        # Small delay for smoother streaming effect (adjustable)
+        await asyncio.sleep(0.01)
+    
+    # Finalize the message
+    await loading_msg.update()
+    logger.info("Response streamed and finalized")
 
 
 if __name__ == "__main__":

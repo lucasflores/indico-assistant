@@ -54,3 +54,25 @@ Edit `public/theme.json` to customize colors and fonts. Uses Shadcn/Radix CSS va
 ### Custom CSS
 
 Additional styling overrides in `public/widget.css`. Referenced in `.chainlit/config.toml`.
+
+## Loading Animation (Feature 017)
+
+The chat widget displays a loading animation when processing user messages:
+
+**Behavior**:
+- Loading indicator appears immediately when you send a message (<100ms)
+- Animation persists while the assistant generates a response
+- Loading is replaced with the actual response when ready
+- Each message has independent loading state (supports rapid consecutive messages)
+
+**Technical Details**:
+- Uses Chainlit's native `cl.Message(content="").send()` → `msg.update()` pattern
+- No custom CSS needed - Chainlit provides default three-dot pulsing animation
+- Automatically respects theme (light/dark) and accessibility settings (reduced motion)
+- All error states (network, auth, server) replace loading with error message (no orphaned loaders)
+
+**Troubleshooting**:
+- **Loading never appears**: Check that Chainlit version is 2.9.5 (`pip show chainlit`)
+- **Loading doesn't disappear**: Check browser console for JavaScript errors, verify Indico API is reachable
+- **Multiple messages interfere**: This should not happen - each message has isolated state. Report as bug if observed.
+
