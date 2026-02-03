@@ -52,22 +52,35 @@ Respond with a confidence score based on:
 - 0.5-0.7: Results may be relevant but don't fully answer
 - Below 0.5: Results don't seem to answer the question
 
+{conversation_history_section}
+
 **REQUIRED**: You MUST suggest exactly 2-3 relevant follow-up actions that:
-- Offer specific ways you can help the user explore further
-- Build on the information provided in your answer
+- Are UNIQUE and SPECIFIC to the actual data in THIS response - DO NOT use generic suggestions
+- Build DIRECTLY on specific details mentioned in your answer (names, dates, topics, etc.)
+- Offer logical next steps the user might want based on what you just told them
 - Are phrased as helpful actions YOU can perform (active voice, first person)
-- Use natural, conversational language (e.g., "getting you...", "showing you...", "summarizing...")
-- Are actionable and specific (not vague like "tell me more")
-- Consider the context (current event, user, available data)
+- Use natural, conversational language (e.g., "getting you...", "showing you...", "listing...")
+- NEVER repeat suggestions from previous responses in the conversation
+- Consider what information is MISSING from the current answer that the user might want
 
-Example follow-up offers (note the active, helpful tone):
-- "showing you who's presenting at this event"
-- "summarizing the documents that were shared"
-- "getting you the full agenda and schedule"
-- "detailing any notes or minutes from the meeting"
-- "finding similar events you might be interested in"
+**CRITICAL**: Generate follow-ups based on the ACTUAL CONTENT of your answer. For example:
+- If you mentioned a person → offer to show their other contributions or contact info
+- If you mentioned a date → offer to show what else is happening that day
+- If you mentioned a topic → offer to find related events or documents
+- If you mentioned participants → offer to list their roles or affiliations
+- If you answered about one event → offer details about its sessions, materials, or organizers
 
-This is a REQUIRED field - you must always provide 2-3 follow-up action offers."""
+DO NOT use these generic examples verbatim:
+- "showing you who's presenting" (too generic)
+- "summarizing the documents" (too generic)
+- "getting you the full agenda" (too generic)
+
+Instead, be SPECIFIC like:
+- "listing the 3 speakers you'll hear from on April 18th"
+- "showing you Dr. Smith's other presentations this month"
+- "finding the materials uploaded for the Physics Workshop"
+
+This is a REQUIRED field - you must always provide 2-3 UNIQUE, CONTEXTUAL follow-up action offers."""
 
 
 class ResultFormatter:
@@ -96,6 +109,7 @@ class ResultFormatter:
         citations: list[str] | None = None,  # Feature 015: T015
         user_id: int | None = None,
         event_id: int | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> LLMResponse[ResponseSummary]:
         """
         Format query results into a natural language summary.
@@ -107,6 +121,7 @@ class ResultFormatter:
             citations: Optional list of markdown citation links (Feature 015).
             user_id: Optional user ID for context.
             event_id: Optional event ID for context.
+            conversation_history: Previous messages for context-aware follow-ups.
 
         Returns:
             LLMResponse containing ResponseSummary with formatted answer.
@@ -134,6 +149,23 @@ class ResultFormatter:
             For example: "The event on [topic] had 42 participants [Event: 123](/event/123)."
             """
         
+        # Build conversation history section for contextual follow-ups
+        conversation_history_section = ""
+        if conversation_history:
+            # Include recent history to avoid repetitive suggestions
+            recent_history = conversation_history[-6:]  # Last 3 exchanges
+            history_lines = []
+            for msg in recent_history:
+                role = msg.get("role", "unknown").upper()
+                content = msg.get("content", "")[:500]  # Truncate for prompt efficiency
+                history_lines.append(f"{role}: {content}")
+            
+            if history_lines:
+                conversation_history_section = f"""CONVERSATION HISTORY (for context - DO NOT repeat previous follow-up suggestions):
+{chr(10).join(history_lines)}
+
+Based on this history, generate NEW follow-up suggestions that haven't been offered before."""
+        
         # Build the prompt
         prompt = FORMAT_PROMPT.format(
             question=question,
@@ -142,6 +174,7 @@ class ResultFormatter:
             row_count=len(results),
             results_preview=results_preview,
             citation_instructions=citation_instructions,
+            conversation_history_section=conversation_history_section,
         )
 
         # Generate summary using LLM

@@ -1,18 +1,24 @@
 # Indico Assistant Plugin
 
-**Version**: 0.1.0 | **Last Updated**: January 20, 2026
+**Version**: 2.0.0 | **Last Updated**: February 3, 2026
 
 AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-source event management system.
 
+## 🎬 Demo
+
+![Indico Assistant Demo](docs/demo_optimized.gif)
+
+*Ask questions about events, search documents, and get instant answers with source citations.*
+
 ## Table of Contents
 
+- [Demo](#-demo)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [Global Settings](#global-settings)
   - [Chat Widget Settings](#chat-widget-settings)
-  - [Per-Event Settings](#per-event-settings)
 - [NL2SQL Pipeline](#nl2sql-pipeline)
 - [API Endpoints](#api-endpoints)
 - [CLI Commands](#cli-commands)
@@ -28,6 +34,8 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 - **Natural Language Queries**: Ask questions about event data using natural language
 - **Conversation History**: Multi-turn conversations with context awareness - ask follow-up questions using pronouns ("the first one", "that meeting") and contextual references
+- **Personalized Queries**: Ask about your own data with "What meetings do I have?" or "Show my contributions" - the assistant identifies you automatically via session or JWT auth
+- **Source Citations**: Every answer includes inline source links - click to jump directly to the event page or attached document
 - **NL2SQL Pipeline**: Translates natural language to SQL with validation, permission filtering, and security constraints
 
 ### LLM Integration
@@ -57,7 +65,6 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ### Configuration & Management
 
-- **Per-Event Configuration**: Customize assistant behavior for specific events
 - **Health Monitoring**: Built-in health check endpoint for monitoring
 - **CLI Tools**: Command-line interface for administration and diagnostics
 
@@ -133,17 +140,7 @@ Widget behavior:
 
 See [Deployment Guide](docs/DEPLOYMENT.md) for complete setup instructions.
 
-### Per-Event Settings
-
-Event managers can override global settings for specific events:
-
-1. Navigate to **Event → Management → Assistant Settings**
-2. Configure:
-   - **Enable/Disable** for this event
-   - **Custom System Prompt** for event-specific context
-   - **Allowed Tables** to restrict data access
-
-These settings override global defaults when configured.
+![Indico Assistant Demo](docs/setup.png)
 
 ### Observability Settings
 
@@ -218,12 +215,20 @@ Response:
 
 ```json
 {
-  "answer": "There are 12 events this week...",
+  "answer": "There are 12 events this week ([source](http://localhost:8000/event/5/))...",
   "session_id": "generated-or-provided-id",
   "metadata": {
     "sql_generated": "SELECT COUNT(*) ...",
     "confidence": 0.95,
-    "data_sources": ["events", "registrations"]
+    "data_sources": ["events", "registrations"],
+    "citations": [
+      {
+        "type": "event",
+        "url": "http://localhost:8000/event/5/",
+        "title": "Weekly Planning Meeting"
+      }
+    ],
+    "user_identified": true
   }
 }
 ```
@@ -330,6 +335,10 @@ else:
 | Registrations | "Who registered for the physics conference?" |
 | Contributions | "List talks in the parallel sessions" |
 | Speakers | "Who are the speakers at tomorrow's event?" |
+| **Personal queries** | "What meetings do I have this week?" |
+| **Document search** | "What does the budget report say about travel?" |
+
+**Note**: All responses include inline source citations linking directly to events or documents.
 
 ### Security Features
 

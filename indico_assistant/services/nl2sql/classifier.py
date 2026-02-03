@@ -27,6 +27,7 @@ Analyze the user's question and classify it into one of these intents:
 
 ## INTENTS
 
+- **topic_search**: BROAD search for a topic/keyword/project name across ALL content (events, notes, contributions, documents)
 - **event_query**: Questions about events, conferences, meetings (count, list, search, basic info, meeting minutes, notes)
 - **registration_query**: Questions about event registrations, participants, check-ins
 - **contribution_query**: Questions about talks, presentations, contributions, papers
@@ -43,6 +44,16 @@ Analyze the user's question and classify it into one of these intents:
 
 ### Intent Selection Rules
 
+**PRIORITY 1 - topic_search** (use when searching for a topic/keyword/project across the system):
+- User mentions a specific topic, project name, keyword, or subject they want to find
+- Questions that reference a NAMED event, meeting, or session (e.g., "Q1 planning session", "daily standup")
+- "What's the status on [X]?", "Find anything about [X]", "What do we know about [X]?"
+- "Updates on [project]", "Information about [topic]", "Anything related to [X]"
+- "What do I need to know before [named event]?" → search for that event name
+- The question is exploratory/broad, not asking for specific event metadata
+- **CRITICAL**: If user asks about a named topic/project/event (e.g., "Project Aurora", "Q1 planning session"), use topic_search
+
+**PRIORITY 2 - Specific intents** (use when the question is clearly about a specific type of data):
 1. **event_query**: Questions about event details, titles, descriptions, venues, dates
    - "What event is this?", "Tell me about this meeting", "Event details"
 2. **speaker_query**: WHO is presenting (names only) **WITHOUT content questions**
@@ -100,7 +111,17 @@ When the user says:
 
 ## CLASSIFICATION EXAMPLES
 
-**event_query** (basic event info):
+**topic_search** (broad keyword/topic search - HIGHEST PRIORITY for named topics):
+- "What's the status on Project Aurora?" → searches ALL text fields for "Project Aurora"
+- "Find anything about the budget review"
+- "What do we know about the new API design?"
+- "What do I need to know before tomorrow's Q1 planning session?" → searches for "Q1 Planning Session"
+- "Updates on the migration project"
+- "Updates on the migration project"
+- "Anything related to machine learning?"
+- "I missed 3 standups - what's happening with [topic]?"
+
+**event_query** (basic event info - use ONLY for generic event questions WITHOUT a specific topic):
 - "What event is this?"
 - "Tell me about this meeting"
 - "Event details"
@@ -127,9 +148,15 @@ When the user says:
 ## EXTRACTION RULES
 
 Extract the following from the question:
-1. **Entities**: Event names, person names, file types, categories
+1. **Entities**: 
+   - **Topic/keyword** (CRITICAL for topic_search): Project names, event names (e.g., "Q1 Planning Session"), subject keywords, concepts to search for
+   - Event names, person names, file types, categories
+   - For topic_search, extract the main search term(s) as entities (e.g., "Project Aurora" → entity, "Q1 planning session" → entity)
+   - **Named meetings/sessions**: If the user mentions a specific meeting by name (e.g., "daily standup", "Q1 planning session", "architecture review"), extract it as a topic entity
 2. **Time constraints**: Date ranges, relative time references (ONLY if explicitly mentioned)
 3. **Filters**: Any specific criteria (e.g., "only physics events", "speakers from CERN")
+
+**CRITICAL for topic_search**: Always extract the topic/keyword/project name/event name as an entity so it can be used in the search query.
 
 ## INPUT
 

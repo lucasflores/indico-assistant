@@ -127,6 +127,145 @@ class NL2SQLPipeline:
         """
         self._tracer = tracer
 
+    def _fix_topic_search_sql(self, sql: str, classification: Any) -> str:
+        """
+        Fix topic_search SQL to ensure proper broad search.
+        
+        The LLM often generates simplified topic_search queries that only search
+        the title field. This method enforces the full broad search pattern:
+        1. Adds missing JOINs to notes/contributions if absent
+        2. Expands WHERE clause to search all text fields (title, description, notes, contributions)
+        3. Adds GROUP BY if needed
+        4. Expands search terms to include variations
+        
+        Args:
+            sql: The generated SQL query
+            classification: The query classification with entities
+            
+        Returns:
+            Fixed SQL query
+        """
+        import re
+        
+        sql_upper = sql.upper()
+        
+        # Extract the search keyword from entities
+        keyword = None
+        original_keyword = None
+        if classification.entities:
+            for entity in classification.entities:
+                if entity.type in ('project', 'topic', 'keyword', 'event'):
+                    original_keyword = entity.value
+                    keyword = entity.value
+                    
+                    # For multi-word terms, extract the most distinctive word
+                    words = entity.value.split()
+                    if len(words) > 1:
+                        # Avoid generic terms - prefer the LAST meaningful word (usually the unique identifier)
+                        generic_words = {'project', 'session', 'meeting', 'review', 'standup', 'update', 'call', 'sync', 'the', 'a', 'an'}
+                        
+                        # Try from right to left (last word is usually most specific)
+                        for word in reversed(words):
+                            if word.lower() not in generic_words and len(word) > 2:
+                                keyword = word
+                                print(f"[DEBUG] Extracted distinctive keyword: '{entity.value}' -> '{keyword}'", flush=True)
+                                break
+                    break
+        
+        if not keyword:
+            return sql  # Can't fix without a keyword
+        
+        # Check if the query is missing JOINs to notes/contributions
+        has_notes_join = "JOIN EVENTS.NOTES" in sql_upper or "JOIN NOTES" in sql_upper
+        has_contrib_join = "JOIN EVENTS.CONTRIBUTIONS" in sql_upper or "JOIN CONTRIBUTIONS" in sql_upper
+        
+        # Check if WHERE clause searches all fields
+        has_title_search = f"E.TITLE ILIKE" in sql_upper
+        has_description_search = f"E.DESCRIPTION ILIKE" in sql_upper or f"DESCRIPTION ILIKE" in sql_upper
+        has_notes_search = f"N.HTML ILIKE" in sql_upper
+        has_contrib_title_search = f"C.TITLE ILIKE" in sql_upper
+        has_contrib_desc_search = f"C.DESCRIPTION ILIKE" in sql_upper
+        
+        # If query is missing broad search (notes/contributions), inject it
+        if not (has_notes_join and has_contrib_join and has_notes_search and has_contrib_title_search):
+            print("[DEBUG] topic_search query missing broad search - injecting JOINs and OR conditions", flush=True)
+            
+            # Find the FROM clause
+            from_match = re.search(r'\bFROM\s+events\.events\s+e\b', sql, re.IGNORECASE)
+            if from_match:
+                # Add JOINs after FROM clause
+                joins = ""
+                if not has_notes_join:
+                    joins += "\nLEFT JOIN events.notes n ON e.id = n.event_id AND n.is_deleted = false"
+                if not has_contrib_join:
+                    joins += "\nLEFT JOIN events.contributions c ON e.id = c.event_id AND c.is_deleted = false"
+                
+                if joins:
+                    # Insert JOINs
+                    insert_pos = from_match.end()
+                    sql = sql[:insert_pos] + joins + "\n" + sql[insert_pos:]
+                    print("[DEBUG] Added missing JOINs", flush=True)
+            
+            # Now fix the WHERE clause to search all fields
+            # Find the existing title search pattern
+            title_pattern = re.search(rf"e\.title\s+ILIKE\s+'%[^']*%'", sql, re.IGNORECASE)
+            if title_pattern:
+                # Replace simple title search with full OR clause
+                old_condition = title_pattern.group(0)
+                new_condition = f"""(
+        e.title ILIKE '%{keyword}%'
+        OR e.description ILIKE '%{keyword}%'
+        OR n.html ILIKE '%{keyword}%'
+        OR c.title ILIKE '%{keyword}%'
+        OR c.description ILIKE '%{keyword}%'
+    )"""
+                sql = sql.replace(old_condition, new_condition)
+                print("[DEBUG] Expanded WHERE clause to search all fields", flush=True)
+        
+        # Even if the LLM generated the full template, replace the original keyword with our extracted one
+        # E.g., replace '%Project Catalyst%' with '%Catalyst%' for broader matching
+        if original_keyword and keyword != original_keyword:
+            # Replace all occurrences of the original keyword with the extracted keyword
+            old_pattern = f"'%{original_keyword}%'"
+            new_pattern = f"'%{keyword}%'"
+            if old_pattern in sql:
+                sql = sql.replace(old_pattern, new_pattern)
+                print(f"[DEBUG] Replaced search term: '{original_keyword}' -> '{keyword}' for broader matching", flush=True)
+        
+        # Add GROUP BY if we have JOINs
+        if ("LEFT JOIN" in sql_upper or "JOIN" in sql_upper) and "GROUP BY" not in sql_upper:
+            order_match = re.search(r'\bORDER\s+BY\b', sql, re.IGNORECASE)
+            limit_match = re.search(r'\bLIMIT\b', sql, re.IGNORECASE)
+            
+            group_by_clause = "\nGROUP BY e.id, e.title, e.start_dt, e.timezone, e.description"
+            
+            if order_match:
+                insert_pos = order_match.start()
+                sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
+                print("[DEBUG] Added GROUP BY clause", flush=True)
+            elif limit_match:
+                insert_pos = limit_match.start()
+                sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
+                print("[DEBUG] Added GROUP BY clause", flush=True)
+        
+        # Fix single-day date ranges: BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD' excludes all times except midnight
+        # Replace with BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD 23:59:59' to include full day
+        if classification.time_range:
+            if classification.time_range.start == classification.time_range.end:
+                date_pattern = re.search(
+                    rf"e\.start_dt\s+BETWEEN\s+'({re.escape(classification.time_range.start)})'\s+AND\s+'({re.escape(classification.time_range.end)})'",
+                    sql,
+                    re.IGNORECASE
+                )
+                if date_pattern:
+                    old_condition = date_pattern.group(0)
+                    # Add time to end date to include full day
+                    new_condition = f"e.start_dt BETWEEN '{classification.time_range.start}' AND '{classification.time_range.end} 23:59:59'"
+                    sql = sql.replace(old_condition, new_condition)
+                    print(f"[DEBUG] Fixed single-day date range to include full day: {classification.time_range.start}", flush=True)
+        
+        return sql
+
     @contextmanager
     def _span(self, name: str, **kwargs: Any) -> Generator[Any, None, None]:
         """Create an optional span if tracer is configured (T024).
@@ -247,6 +386,9 @@ class NL2SQLPipeline:
 
             classification = classification_response.data
             
+            # DEBUG: Print classification result
+            print(f"[DEBUG] Classification: intent={classification.intent}, entities={classification.entities}, time_range={classification.time_range}", flush=True)
+            
             # Log classification result
             log_classification(
                 audit_log,
@@ -317,6 +459,13 @@ class NL2SQLPipeline:
 
             generated_sql = sql_response.data.query
             tables_used = sql_response.data.tables_used
+            
+            # Post-process topic_search queries to ensure GROUP BY is present
+            if classification.intent == "topic_search":
+                generated_sql = self._fix_topic_search_sql(generated_sql, classification)
+            
+            # DEBUG: Print full generated SQL
+            print(f"\n[DEBUG GENERATED SQL]\n{generated_sql}\n[/DEBUG SQL]\n", flush=True)
             
             # Log generated SQL
             log_generation(audit_log, generated_sql)
@@ -430,6 +579,20 @@ class NL2SQLPipeline:
                 )
                 execution_time = int((time.time() - exec_start) * 1000)
                 
+                # DEBUG: Print execution results
+                row_count = len(exec_result.rows) if exec_result.rows else 0
+                print(f"[DEBUG SQL Execution] Success: {exec_result.success}, Rows returned: {row_count}", flush=True)
+                if not exec_result.success:
+                    print(f"[DEBUG SQL Execution] ERROR: {exec_result.error_message}", flush=True)
+                if exec_result.rows and row_count > 0:
+                    # Print first few event titles to see what matched
+                    for i, row in enumerate(exec_result.rows[:5]):
+                        event_title = row.get('event_title', row.get('title', 'N/A'))
+                        match_loc = row.get('match_location', 'N/A')
+                        print(f"[DEBUG]   Row {i+1}: '{event_title}' (matched in: {match_loc})", flush=True)
+                    if row_count > 5:
+                        print(f"[DEBUG]   ... and {row_count - 5} more rows", flush=True)
+                
                 # Update span with result (T030)
                 if exec_span is not None:
                     if exec_result.success:
@@ -453,6 +616,7 @@ class NL2SQLPipeline:
 
             while not exec_result.success and correction_attempts < self._max_correction_attempts:
                 correction_attempts += 1
+                print(f"[DEBUG] Correction attempt {correction_attempts}: error was '{exec_result.error_message}'", flush=True)
                 # T053: Log correction attempt
                 log_correction_attempt(audit_log)
 
@@ -479,6 +643,7 @@ class NL2SQLPipeline:
                 if correction_response.success and correction_response.data:
                     # Re-validate corrected SQL
                     corrected_sql = correction_response.data.corrected_query
+                    print(f"[DEBUG] Corrected SQL: {corrected_sql[:200]}...", flush=True)
                     validation_result = self._validator.validate(corrected_sql)
 
                     if validation_result.valid:
@@ -495,6 +660,13 @@ class NL2SQLPipeline:
                         exec_result = self._executor.execute(
                             corrected_sql, params=exec_params, question=question
                         )
+                        corrected_row_count = len(exec_result.rows) if exec_result.rows else 0
+                        print(f"[DEBUG] Corrected execution: Success={exec_result.success}, Rows={corrected_row_count}", flush=True)
+                        if exec_result.success and exec_result.rows:
+                            for i, row in enumerate(exec_result.rows[:10]):
+                                event_title = row.get('event_title', row.get('title', 'N/A'))
+                                match_loc = row.get('match_location', 'N/A')
+                                print(f"[DEBUG]   Result {i+1}: '{event_title}' (matched in: {match_loc})", flush=True)
                         if exec_result.success:
                             generated_sql = corrected_sql
                             corrected = True
@@ -573,6 +745,7 @@ class NL2SQLPipeline:
                         citations=citations,  # Feature 015: T015
                         user_id=user_id,
                         event_id=event_ids[0] if event_ids and len(event_ids) == 1 else None,
+                        conversation_history=conversation_history,  # For contextual follow-ups
                     )
                     if format_response.success and format_response.data:
                         summary = format_response.data

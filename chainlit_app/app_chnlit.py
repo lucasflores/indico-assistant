@@ -373,7 +373,7 @@ async def on_message(message: cl.Message):
     for token in tokens:
         await loading_msg.stream_token(token)
         # Small delay for smoother streaming effect (adjustable)
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.02)
     
     # Finalize the message
     await loading_msg.update()

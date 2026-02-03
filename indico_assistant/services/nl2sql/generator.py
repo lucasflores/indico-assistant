@@ -97,6 +97,17 @@ Include extra columns beyond the minimum that may add context (description, venu
 
 ## SQL TEMPLATES
 
+**CRITICAL: SELECT THE CORRECT TEMPLATE BASED ON INTENT**
+
+| Intent | Template to Use |
+|--------|-----------------|
+| topic_search | **Template 5** (broad search across ALL text fields) |
+| event_query | Template 1 (basic event queries) |
+| speaker_query | Template 2 (contributor/speaker queries) |
+| contribution_query | Template 2 (contributor queries) |
+| attachment_query | Template 3 (file metadata) |
+| document_content_query | Template 4 (vector search) |
+
 ### Template 1: Event Queries
 
 Use this pattern for questions about events/meetings:
@@ -195,6 +206,57 @@ IMPORTANT for vector search:
 - ALWAYS use ORDER BY with `<=>` for similarity ranking
 - The `:query_vector` parameter will be substituted at execution time
 
+### Template 5: Topic/Keyword Search (BROAD SEARCH) - MANDATORY FOR topic_search INTENT
+
+⚠️ **MANDATORY**: If intent=topic_search, COPY THIS QUERY VERBATIM. Only replace {{KEYWORD}}, {{START_DATE}}, and {{END_DATE}}.
+
+```sql
+SELECT 
+    e.id AS event_id,
+    e.title AS event_title,
+    e.start_dt AS event_start_dt_raw,
+    to_char(e.start_dt AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
+    e.timezone AS event_timezone,
+    e.description AS event_description,
+    MAX(n.html) AS event_notes,
+    STRING_AGG(DISTINCT c.title, '; ') AS contribution_titles,
+    STRING_AGG(DISTINCT 
+        CASE 
+            WHEN e.title ILIKE '%{{KEYWORD}}%' THEN 'event_title'
+            WHEN e.description ILIKE '%{{KEYWORD}}%' THEN 'event_description'
+            WHEN n.html ILIKE '%{{KEYWORD}}%' THEN 'event_notes'
+            WHEN c.title ILIKE '%{{KEYWORD}}%' THEN 'contribution_title'
+            WHEN c.description ILIKE '%{{KEYWORD}}%' THEN 'contribution_description'
+        END, ', '
+    ) AS match_locations
+FROM events.events e
+LEFT JOIN events.notes n ON e.id = n.event_id AND n.is_deleted = false
+LEFT JOIN events.contributions c ON e.id = c.event_id AND c.is_deleted = false
+WHERE e.is_deleted = false
+    AND e.start_dt BETWEEN '{{START_DATE}}' AND '{{END_DATE}}'
+    AND (
+        e.title ILIKE '%{{KEYWORD}}%'
+        OR e.description ILIKE '%{{KEYWORD}}%'
+        OR n.html ILIKE '%{{KEYWORD}}%'
+        OR c.title ILIKE '%{{KEYWORD}}%'
+        OR c.description ILIKE '%{{KEYWORD}}%'
+    )
+GROUP BY e.id, e.title, e.start_dt, e.timezone, e.description
+ORDER BY e.start_dt DESC
+LIMIT 50
+```
+
+⚠️ **DO NOT MODIFY THIS QUERY** except to replace:
+- {{KEYWORD}} → the search term (e.g., "Project Aurora")
+- {{START_DATE}} → time range start date
+- {{END_DATE}} → time range end date
+
+⚠️ **COMMON MISTAKES TO AVOID**:
+1. DO NOT remove the parentheses around the OR conditions - they are REQUIRED
+2. DO NOT remove GROUP BY - it prevents duplicate rows
+3. DO NOT remove STRING_AGG - it aggregates contributions
+4. DO NOT move the date filter after the OR conditions
+
 ## ALTERNATIVE PATTERNS (NO CTEs/SUBQUERIES)
 
 - Use JOINs to combine tables instead of CTEs or subqueries
@@ -202,6 +264,23 @@ IMPORTANT for vector search:
 - For aggregations, use GROUP BY with aggregate functions (STRING_AGG, COUNT, SUM)
 
 These restrictions minimize risk and keep queries safe and efficient.
+
+## CLASSIFICATION
+
+**IMPORTANT: Use the Intent below to select the correct SQL template!**
+
+- Intent: {intent}
+- Time Range: {time_range}
+- Entities: {entities}
+- Filters: {filters}
+
+## ⚠️ TEMPLATE SELECTION RULES ⚠️
+
+**IF Intent = topic_search**: 
+- STOP. Copy Template 5 EXACTLY from above.
+- Only replace KEYWORD with the search term and START_DATE/END_DATE with time range.
+- Do NOT simplify or modify the template. It MUST have GROUP BY and STRING_AGG.
+- Without GROUP BY, you will get DUPLICATE ROWS.
 
 {schema_context}
 
@@ -214,13 +293,14 @@ These restrictions minimize risk and keep queries safe and efficient.
 {permission_filter}
 
 Generate a single SQL query that:
-1. Answers the user's question accurately
-2. Uses only the tables and columns from the schema above
-3. Follows the appropriate template based on query intent
-4. Includes required output columns for event queries
-5. Uses JOINs (not subqueries) when combining tables
-6. If a Time Range is provided, use it exactly in a BETWEEN filter
-7. Is safe and efficient"""
+1. **FIRST: Check the Intent above and use the matching template EXACTLY**
+2. **For topic_search intent: COPY Template 5 verbatim, only replacing KEYWORD and dates**
+3. Answers the user's question accurately
+4. Uses only the tables and columns from the schema above
+5. Includes required output columns for event queries
+6. Uses JOINs (not subqueries) when combining tables
+7. If a Time Range is provided, use it exactly in a BETWEEN filter
+8. Is safe and efficient"""
 
 ### CLASSIFICATION
 #
@@ -235,6 +315,7 @@ class SQLGenerator:
 
     # Multi-entity intent list (T041: JOINs needed)
     MULTI_ENTITY_INTENTS = {
+        "topic_search",  # Broad search across events, notes, contributions
         "contribution_query",
         "speaker_query",
         "session_query",
@@ -339,6 +420,11 @@ class SQLGenerator:
             permission_filter=permission_filter,
             context_section=context_section,
         )
+
+        # DEBUG: Print key prompt variables
+        print(f"[DEBUG SQL Generator] Intent: {classification.intent}", flush=True)
+        print(f"[DEBUG SQL Generator] Entities: {entities_str}", flush=True)
+        print(f"[DEBUG SQL Generator] Time Range: {time_range_str}", flush=True)
 
         # Append validation feedback if this is a retry
         if validation_feedback:

@@ -25,6 +25,14 @@ class SchemaContext:
     # Intent-to-tables mapping (FR-002: relevant tables only)
     # Extended for multi-entity queries (US3)
     INTENT_TABLES_MAP: dict[str, list[str]] = {
+        # Broad keyword/topic search - casts wide net across all text fields
+        "topic_search": [
+            "events.events",
+            "events.notes",
+            "events.contributions",
+            "events.sessions",
+            "plugin_assistant.extracted_documents",
+        ],
         # Basic queries - single table focus
         "event_query": [
             "events.events",

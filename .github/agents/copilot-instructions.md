@@ -32,6 +32,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - Python 3.11+ + Flask, SQLAlchemy, Indico framework, Instructor (LLM) (016-user-id-passthrough)
 - Python 3.11+ + Chainlit 2.9.5, httpx >=0.27, pyjwt >=2.8 (017-fix-loading-animation)
 - N/A (UI-only feature, no data persistence) (017-fix-loading-animation)
+- Markdown (GitHub Flavored) + ffmpeg (for GIF optimization) (018-readme-v2-update)
+- N/A (documentation only) (018-readme-v2-update)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -51,9 +53,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 018-readme-v2-update: Added Markdown (GitHub Flavored) + ffmpeg (for GIF optimization)
 - 017-fix-loading-animation: Added Python 3.11+ + Chainlit 2.9.5, httpx >=0.27, pyjwt >=2.8
 - 016-user-id-passthrough: Added Python 3.11+ + Flask, SQLAlchemy, Indico framework, Instructor (LLM)
-- 015-chat-source-citations: Added Python 3.11+ (match Indico minimum)
 
 
 <!-- MANUAL ADDITIONS START -->
