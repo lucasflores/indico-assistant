@@ -100,6 +100,7 @@ class NL2SQLPipeline:
         self._schema_context = schema_context
         self._cache = cache
         self._max_correction_attempts = max_correction_attempts
+        self._max_validation_retries = max_validation_retries
         self._db_session_factory = db_session_factory
         self._audit_enabled = audit_enabled
         self._tracer: Optional["Tracer"] = None  # Feature 005
