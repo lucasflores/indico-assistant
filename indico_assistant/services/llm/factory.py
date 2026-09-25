@@ -82,6 +82,8 @@ def create_instructor_client(
         return _create_huggingface_client(model, base_url, api_key)
     elif provider_lower in ("openai", "openai-compatible"):
         return _create_openai_client(model, base_url, api_key)
+    elif provider_lower == "ibis":
+        return _create_ibis_client(base_url, api_key)
     else:
         # Try as generic OpenAI-compatible provider
         if base_url and api_key:
@@ -200,3 +202,32 @@ def _create_openai_client(
         openai_client,
         mode=instructor.Mode.TOOLS,
     )
+
+
+def _create_ibis_client(
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> instructor.Instructor:
+    """Create an Instructor client for the ibis router.
+
+    The model setting picks the routing: ``ibis/<dial>`` (Frugal, Economy,
+    Balanced, High, Max) routes, a concrete pool model id bypasses the router.
+
+    ibis refuses ``tools``/``tool_choice`` and ``response_format`` with a 400,
+    so TOOLS and JSON modes cannot work; MD_JSON asks for JSON in the prompt
+    and parses it from the text. SDK retries are off because a retried POST is
+    a second routing decision and a second bill; instructor's validation
+    retries still apply and each attempt is recorded by LLMService.
+
+    Raises:
+        ValueError: If api_key is not provided.
+    """
+    if not api_key:
+        raise ValueError("ibis provider requires an API key (sk-ibis-...)")
+
+    openai_client = OpenAI(
+        base_url=_normalize_openai_base_url(base_url, "https://labs.aithoth.com/ibis-api"),
+        api_key=api_key,
+        max_retries=0,
+    )
+    return instructor.from_openai(openai_client, mode=instructor.Mode.MD_JSON)

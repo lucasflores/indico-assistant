@@ -27,6 +27,30 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def completion_record(stage: str, requested_model: str | None, completion: Any) -> dict[str, Any]:
+    """Summarise one raw chat completion (one HTTP call, including retries).
+
+    ``served_model`` is the model that actually answered; for the ibis router
+    ``requested_model`` is ``ibis/<dial>`` and the pick comes back in the
+    ``ibis`` extension. ``cost_usd`` is ibis's exact decimal string (the
+    provider's bill); other providers leave it None.
+    """
+    usage = getattr(completion, "usage", None)
+    usage_extra = getattr(usage, "model_extra", None) or {}
+    ibis = (getattr(completion, "model_extra", None) or {}).get("ibis") or {}
+    return {
+        "stage": stage,
+        "requested_model": requested_model,
+        "served_model": getattr(completion, "model", None),
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "cost_usd": usage_extra.get("cost_usd"),
+        "ibis_chosen": ibis.get("chosen"),
+        "ibis_dial": ibis.get("dial"),
+        "ibis_request_id": ibis.get("request_id"),
+    }
+
+
 class LLMService:
     """Main service class providing LLM interaction capabilities.
     
@@ -62,6 +86,9 @@ class LLMService:
         self._client = None
         self._logger = logger
         self._tracer: Optional["Tracer"] = None
+        # One completion_record() per HTTP call made by generate(); callers
+        # (e.g. the eval harness) read and clear it.
+        self.call_log: list[dict[str, Any]] = []
     
     def set_tracer(self, tracer: "Tracer") -> None:
         """Set tracer for observability instrumentation (T019).
@@ -186,7 +213,17 @@ class LLMService:
         # Prepare tracing context (T019)
         tracer = self._tracer
         generation_name = f"llm-{response_model.__name__}"
-        
+
+        # Record every raw completion, including instructor's validation
+        # retries and attempts that end in failure: each one is billed.
+        def _record(completion: Any) -> None:
+            self.call_log.append(
+                completion_record(response_model.__name__, settings["model"], completion)
+            )
+
+        # ponytail: hook lives on the (possibly shared) client for the call's
+        # duration; per-request LLMService instances keep it unambiguous.
+        client.on("completion:response", _record)
         try:
             # Make the LLM call with Instructor, optionally traced
             if tracer is not None:
@@ -233,9 +270,10 @@ class LLMService:
                     "latency_ms": latency_ms,
                     "retries": retries,
                     "response_model": response_model.__name__,
+                    "served_model": self.call_log[-1]["served_model"] if self.call_log else None,
                 }
             )
-            
+
             return LLMResponse.success_response(
                 result=result,
                 latency_ms=latency_ms,
@@ -281,7 +319,9 @@ class LLMService:
                 latency_ms=latency_ms,
                 retries=retries
             )
-    
+        finally:
+            client.off("completion:response", _record)
+
     def health_check(self) -> HealthStatus:
         """Test LLM provider connectivity.
         
