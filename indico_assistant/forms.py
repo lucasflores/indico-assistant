@@ -27,6 +27,7 @@ class SettingsForm(IndicoForm):
             ("ollama", "Ollama (Local)"),
             ("huggingface", "HuggingFace Router"),
             ("openai", "OpenAI-compatible API"),
+            ("ibis", "ibis router (model: ibis/<dial> or a pool model id)"),
         ],
         validators=[DataRequired()],
         description="Select the LLM provider to use for AI queries",
