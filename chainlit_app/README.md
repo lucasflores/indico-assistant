@@ -5,7 +5,7 @@ This is a minimal Chainlit app used by the Indico Assistant plugin to serve the 
 ## Run locally
 
 ```bash
-cd /Users/lucasflores/dev2/indico/plugins_lucas/indico_assistant_plugin/chainlit_app
+cd ~/indico-assistant/plugin/chainlit_app
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
