@@ -119,11 +119,14 @@ class TestChatJob:
         assert (data['status'], data['response'], data['session_id']) == ('done', 'Three events.', str(session_id))
         assert data['metadata'] == {'sql_generated': 'SELECT 1'}
 
-    def test_failed(self, request_, jobs):
-        jobs[0]['job1'] = {'status': 'failed', 'user_id': 123, 'session_id': 's', 'error': 'TIMEOUT',
+    @pytest.mark.parametrize(('error', 'expected'), [
+        ('TIMEOUT', 504), ('ACCESS_DENIED', 403), ('QUEUE_UNAVAILABLE', 503), ('INTERNAL_ERROR', 500),
+    ])
+    def test_failed(self, request_, jobs, error, expected):
+        jobs[0]['job1'] = {'status': 'failed', 'user_id': 123, 'session_id': 's', 'error': error,
                            'message': 'Too long'}
         response, status = self._get(request_)
-        assert status == 500 and response.get_json()['error'] == 'TIMEOUT'
+        assert status == expected and response.get_json()['error'] == error
 
     @pytest.mark.parametrize('job', [None, {'status': 'done', 'user_id': 999, 'session_id': 's'}])
     def test_unknown_or_someone_elses_job(self, request_, jobs, job):

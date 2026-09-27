@@ -53,7 +53,8 @@ def index_attachment(attachment, force=False, processor=None):
     store = VectorStore()
     reason = skip_reason(attachment)
     if reason:
-        if attachment is not None and reason in ('deleted', 'not a file'):
+        # anything but a switched-off feature means the current version must not be searchable
+        if attachment is not None and reason != 'vector search disabled':
             store.delete_attachment_chunks(attachment.id)
         return {'success': True, 'skipped': True, 'error': reason}
     if not store.is_available:

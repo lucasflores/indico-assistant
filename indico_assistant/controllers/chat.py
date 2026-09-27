@@ -111,7 +111,9 @@ class RHChatJob(RHChatBase):
         if job["status"] == "pending":
             return jsonify({"status": "pending", "session_id": job["session_id"]}), 202
         if job["status"] == "failed":
-            return self._error_response(job.get("error", "INTERNAL_ERROR"), job.get("message", ""), status=500)
+            error = job.get("error", "INTERNAL_ERROR")
+            status = {"ACCESS_DENIED": 403, "TIMEOUT": 504, "QUEUE_UNAVAILABLE": 503}.get(error, 500)
+            return self._error_response(error, job.get("message", ""), status=status)
         metadata = job.get("metadata") or {}
         response = ChatResponse(
             session_id=job["session_id"],

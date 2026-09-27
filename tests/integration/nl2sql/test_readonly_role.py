@@ -93,7 +93,7 @@ def test_role_cannot_kill_other_backends(owner, nobody):
 
 
 def test_visibility(owner, sign, nobody):
-    public = scalar(owner, 'SELECT count(*) FROM events.events WHERE NOT is_deleted AND protection_mode = 1')
+    public = scalar(owner, 'SELECT count(*) FROM events.events WHERE NOT is_deleted AND protection_mode = 0')  # ProtectionMode.public
     visible = {row[0] for row in ro('SELECT id FROM events.events', nobody)}
     assert len(visible) >= public
     assert not ro('SELECT 1 FROM events.events WHERE is_deleted', nobody)
