@@ -19,13 +19,14 @@ from indico_assistant.tasks.indexing import BULK_QUEUE
 
 logger = logging.getLogger(__name__)
 
-# (table, timestamp column, days kept). The audit log holds questions, emails and IP addresses.
+# (table, timestamp column, setting with the days kept; 0 = keep forever). The audit log holds questions,
+# emails and IP addresses.
 RETENTION = [
-    ('plugin_assistant.chat_sessions', 'updated_at', 90),
-    ('plugin_assistant.query_audit_log', 'created_at', 90),
-    ('plugin_assistant.observability_error_records', 'created_at', 30),
-    ('plugin_assistant.document_sync_log', 'started_at', 90),
-    ('plugin_assistant.observability_sync_log', 'started_at', 90),
+    ('plugin_assistant.chat_sessions', 'updated_at', 'retention_chat_days'),
+    ('plugin_assistant.query_audit_log', 'created_at', 'retention_audit_days'),
+    ('plugin_assistant.observability_error_records', 'created_at', 'retention_error_days'),
+    ('plugin_assistant.document_sync_log', 'started_at', 'retention_sync_log_days'),
+    ('plugin_assistant.observability_sync_log', 'started_at', 'retention_sync_log_days'),
 ]
 BATCH_SIZE = 5000
 
@@ -46,7 +47,11 @@ def purge(table, column, days, batch_size=BATCH_SIZE):
 # locked=False: idempotent and batched, and Indico's lock outlives a dead worker by 24 h
 @celery.periodic_task(name='indico_assistant.retention', run_every=crontab(minute='11', hour='3'),
                       queue=BULK_QUEUE, plugin='assistant', locked=False)
-def apply_retention():
-    result = {table: purge(table, column, days) for table, column, days in RETENTION}
+def apply_retention(settings=None):
+    from indico_assistant.plugin import AssistantPlugin
+
+    settings = settings or AssistantPlugin.settings
+    result = {table: purge(table, column, days)
+              for table, column, setting in RETENTION if (days := settings.get(setting))}
     logger.info('Retention: %s', result)
     return result
