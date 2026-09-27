@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import os
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -107,7 +110,8 @@ class DocumentProcessor:
         file_path: Union[str, Path],
         event_id: int,
         attachment_id: int,
-        force: bool = False
+        force: bool = False,
+        extra_metadata: Optional[dict] = None,
     ) -> ProcessingResult:
         """Process a document file for vector search.
         
@@ -136,6 +140,7 @@ class DocumentProcessor:
             # Extract text
             logger.debug(f"Extracting text from: {path}")
             text, metadata = self._extractor.extract_with_metadata(path)
+            metadata = {**metadata, **(extra_metadata or {})}
             
             if not text or not text.strip():
                 logger.info(f"No text content in: {path}")
@@ -149,20 +154,21 @@ class DocumentProcessor:
             # Compute content hash
             content_hash = compute_content_hash(text)
             
-            # Check if content changed (unless force reprocessing)
             if not force:
-                existing_hash = self._vector_store.get_content_hash(attachment_id)
-                if existing_hash == content_hash:
-                    logger.debug(f"Content unchanged for attachment {attachment_id}")
+                # Same text as what is indexed: only record the new file version
+                if self._vector_store.get_content_hash(attachment_id) == content_hash:
+                    self._vector_store.update_attachment_metadata(attachment_id, extra_metadata or {})
                     return ProcessingResult(
                         success=True,
                         attachment_id=attachment_id,
                         skipped=True,
                         error="Content unchanged"
                     )
-            
-            # Delete existing chunks for this attachment
-            self._vector_store.delete_attachment_chunks(attachment_id)
+                # Same text already indexed for another attachment (cloned event, re-upload): copy it
+                source = self._vector_store.find_attachment_with_hash(content_hash, attachment_id)
+                if source is not None:
+                    copied = self._vector_store.copy_chunks(source, attachment_id, event_id, extra_metadata or {})
+                    return ProcessingResult(success=True, attachment_id=attachment_id, chunks_created=copied)
             
             # Chunk text
             logger.debug(f"Chunking text ({len(text)} chars)")
@@ -203,9 +209,9 @@ class DocumentProcessor:
                     "metadata": chunk_metadata,
                 })
             
-            # Store chunks with embeddings
+            # Swap old chunks for new ones in one transaction
             logger.debug(f"Storing {len(chunk_data)} chunks")
-            self._vector_store.insert_chunks(chunk_data)
+            self._vector_store.replace_attachment_chunks(attachment_id, chunk_data)
             
             logger.info(
                 f"Processed {path.name}: {len(chunks)} chunks, "
@@ -288,47 +294,32 @@ class DocumentProcessor:
     def process_attachment(
         self,
         attachment: "Attachment",
-        event_id: int,
         force: bool = False
     ) -> dict:
-        """Process an Indico attachment for vector search.
+        """Process an Indico file attachment for vector search.
         
-        Args:
-            attachment: Indico Attachment model instance.
-            event_id: Indico event ID.
-            force: Force reprocessing even if content unchanged.
-            
-        Returns:
-            Dict with success status and details.
+        The file is read in place (``get_local_path``: no copy for local storage, one temp file for
+        remote storage). Chunk metadata records the file version (``file_id``) so a later sync can tell
+        what changed without reading any file, plus what citations need.
         """
-        from indico.modules.attachments.models.attachments import Attachment as AttachmentModel
-        
-        if not attachment.file:
-            return {
-                "success": True,
-                "skipped": True,
-                "error": "No file attached"
-            }
-        
-        # Get file content
+        folder = attachment.folder
+        extra = {
+            "filename": attachment.file.filename,
+            "file_id": attachment.file_id,
+            "contribution_id": folder.contribution_id,
+        }
         try:
-            content = attachment.file.open().read()
-            filename = attachment.file.filename
+            with attachment.file.get_local_path() as path, _named_like(path, attachment.file.filename) as path:
+                result = self.process_file(
+                    file_path=path,
+                    event_id=folder.event_id,
+                    attachment_id=attachment.id,
+                    force=force,
+                    extra_metadata=extra,
+                )
         except Exception as e:
             logger.error(f"Failed to read attachment {attachment.id}: {e}")
-            return {
-                "success": False,
-                "error": f"Failed to read file: {str(e)}"
-            }
-        
-        # Process the content
-        result = self.process_content(
-            content=content,
-            filename=filename,
-            event_id=event_id,
-            attachment_id=attachment.id,
-            force=force
-        )
+            return {"success": False, "skipped": False, "chunks_created": 0, "error": f"Failed to read file: {e}"}
         
         return {
             "success": result.success,
@@ -337,6 +328,20 @@ class DocumentProcessor:
             "error": result.error
         }
 
+
+
+@contextmanager
+def _named_like(path, filename):
+    """``path`` with ``filename``'s extension: remote storage (S3, ...) yields a ``.tmp`` file, and the
+    extractor picks the parser by extension. A symlink, not a copy."""
+    ext = Path(filename).suffix.lower()
+    if Path(path).suffix.lower() == ext:
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix='assistant-doc-') as tmpdir:
+        link = Path(tmpdir) / f'document{ext}'
+        os.symlink(path, link)
+        yield str(link)
 
 if TYPE_CHECKING:
     from indico.modules.attachments.models.attachments import Attachment

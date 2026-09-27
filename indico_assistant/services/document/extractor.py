@@ -28,8 +28,11 @@ def _sanitize_text(text: str) -> str:
     Returns:
         Sanitized text safe for database storage.
     """
-    # Use isprintable() to filter out non-printable characters including NULL bytes
-    return ''.join(char for char in text if char.isprintable())
+    # Keep line breaks and tabs: isprintable() drops them, and the chunker splits on them
+    return ''.join(char for char in text if char.isprintable() or char in '\n\t')
+
+
+MAX_PDF_PAGES = 1000
 
 
 class ExtractionError(Exception):
@@ -56,7 +59,7 @@ class DocumentExtractor:
         >>> text, metadata = extractor.extract_with_metadata("/path/to/doc.docx")
     """
     
-    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.txt', '.md'}
+    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md'}  # no .doc: python-docx cannot read it
     
     def __init__(self, supported_extensions: Optional[list[str]] = None) -> None:
         """Initialize the document extractor.
@@ -112,7 +115,7 @@ class DocumentExtractor:
         try:
             if ext == '.pdf':
                 text = self._extract_pdf(path)
-            elif ext in {'.docx', '.doc'}:
+            elif ext == '.docx':
                 text = self._extract_docx(path)
             elif ext in {'.txt', '.md'}:
                 text = self._extract_text(path)
@@ -182,9 +185,11 @@ class DocumentExtractor:
         
         try:
             reader = PdfReader(str(file_path))
+            self._pdf_page_count = len(reader.pages)  # reused by _get_pdf_metadata (no second parse)
             text_parts = []
             
-            for page_num, page in enumerate(reader.pages):
+            # ponytail: page cap bounds pathological PDFs; the task's soft time limit bounds the rest
+            for page in reader.pages[:MAX_PDF_PAGES]:
                 page_text = page.extract_text()
                 if page_text:
                     text_parts.append(page_text)
@@ -271,12 +276,11 @@ class DocumentExtractor:
         Returns:
             Dictionary with PDF metadata.
         """
-        from PyPDF2 import PdfReader
-        
-        reader = PdfReader(str(file_path))
-        return {
-            "total_pages": len(reader.pages),
-        }
+        pages = getattr(self, "_pdf_page_count", None)
+        if pages is None:
+            from PyPDF2 import PdfReader
+            pages = len(PdfReader(str(file_path)).pages)
+        return {"total_pages": pages}
 
 
 def extract_text(

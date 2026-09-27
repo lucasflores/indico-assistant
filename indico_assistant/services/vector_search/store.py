@@ -8,7 +8,9 @@ Provides storage and retrieval of document chunks with pgvector embeddings.
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import text
@@ -52,7 +54,7 @@ class VectorStore:
         """Check if vector operations are available."""
         return self._pgvector_available
     
-    def insert_chunks(self, chunks: list[dict[str, Any]]) -> int:
+    def insert_chunks(self, chunks: list[dict[str, Any]], commit: bool = True) -> int:
         """Insert document chunks with embeddings.
         
         Args:
@@ -74,62 +76,97 @@ class VectorStore:
         """
         if not chunks:
             return 0
-        
-        inserted = 0
-        
-        for chunk in chunks:
-            doc = ExtractedDocument(
-                event_id=chunk["event_id"],
-                attachment_id=chunk["attachment_id"],
-                chunk_index=chunk["chunk_index"],
-                content_text=chunk["content_text"],
-                content_hash=chunk["content_hash"],
-                metadata_json=chunk.get("metadata"),
-                extraction_status=ExtractionStatus.COMPLETED.value
-            )
-            db.session.add(doc)
-            db.session.flush()  # Get the ID
-            
-            # Set embedding via raw SQL if pgvector available
-            if self._pgvector_available and chunk.get("embedding"):
-                self._set_embedding(doc.id, chunk["embedding"])
-            
-            inserted += 1
-        
+        # One multi-row INSERT with the vector bound (it used to be INSERT + flush + UPDATE per chunk,
+        # i.e. two statements and a dead tuple for every row).
+        embedding_sql = "CAST(:embedding AS vector)" if self._pgvector_available else "NULL"
+        embedding_col = ", embedding" if self._pgvector_available else ""
+        rows = [{
+            "id": str(uuid.uuid4()),
+            "event_id": c["event_id"],
+            "attachment_id": c["attachment_id"],
+            "chunk_index": c["chunk_index"],
+            "content_text": c["content_text"],
+            "content_hash": c["content_hash"],
+            "metadata": json.dumps(c.get("metadata")),
+            "embedding": "[" + ",".join(str(float(x)) for x in c["embedding"]) + "]" if c.get("embedding") else None,
+        } for c in chunks]
+        db.session.execute(text(f"""
+            INSERT INTO plugin_assistant.extracted_documents
+                (id, event_id, attachment_id, chunk_index, content_text, content_hash, metadata_json,
+                 extraction_status, created_at, updated_at{embedding_col})
+            VALUES (CAST(:id AS uuid), :event_id, :attachment_id, :chunk_index, :content_text, :content_hash,
+                    CAST(:metadata AS jsonb), 'completed', now(), now(){', ' + embedding_sql if embedding_col else ''})
+        """), rows)
+        if commit:
+            db.session.commit()
+        logger.debug(f"Inserted {len(rows)} chunks")
+        return len(rows)
+
+    def replace_attachment_chunks(self, attachment_id: int, chunks: list[dict[str, Any]]) -> int:
+        """Swap an attachment's chunks in one transaction: search never sees it missing or half-done."""
+        self.delete_attachment_chunks(attachment_id, commit=False)
+        count = self.insert_chunks(chunks, commit=False)
         db.session.commit()
-        logger.debug(f"Inserted {inserted} chunks")
-        return inserted
-    
-    def _set_embedding(self, doc_id: str, embedding: list[float]) -> None:
-        """Set embedding for a document chunk via raw SQL.
-        
-        Args:
-            doc_id: UUID of the ExtractedDocument.
-            embedding: List of floats representing the embedding.
+        return count
+
+    def copy_chunks(self, source_attachment_id: int, attachment_id: int, event_id: int,
+                    metadata: dict[str, Any]) -> int:
+        """Give ``attachment_id`` the chunks (and embeddings) of an attachment with identical text.
+
+        Cloned events and re-uploads carry the same documents; copying skips the embedding work.
         """
-        # Convert embedding to PostgreSQL array string format
-        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-        
-        # Use CAST() instead of :: to avoid parameter binding conflicts
+        self.delete_attachment_chunks(attachment_id, commit=False)
+        embedding_col = ", embedding" if self._pgvector_available else ""
+        count = db.session.execute(text(f"""
+            INSERT INTO plugin_assistant.extracted_documents
+                (id, event_id, attachment_id, chunk_index, content_text, content_hash, metadata_json,
+                 extraction_status, created_at, updated_at{embedding_col})
+            SELECT gen_random_uuid(), :event_id, :attachment_id, chunk_index, content_text, content_hash,
+                   metadata_json || CAST(:metadata AS jsonb), extraction_status, now(), now(){embedding_col}
+            FROM plugin_assistant.extracted_documents WHERE attachment_id = :source
+        """), {"event_id": event_id, "attachment_id": attachment_id, "source": source_attachment_id,
+              "metadata": json.dumps(metadata)}).rowcount
+        db.session.commit()
+        return count
+
+    def find_attachment_with_hash(self, content_hash: str, exclude_attachment_id: int) -> Optional[int]:
+        """Another attachment already indexed with this exact text (content_hash is indexed)."""
+        return db.session.execute(text("""
+            SELECT attachment_id FROM plugin_assistant.extracted_documents
+            WHERE content_hash = :hash AND attachment_id <> :exclude LIMIT 1
+        """), {"hash": content_hash, "exclude": exclude_attachment_id}).scalar()
+
+    def is_current(self, attachment_id: int, file_id: int) -> bool:
+        """Chunks exist for this version of the file (Indico file rows are immutable per version)."""
+        return db.session.execute(text("""
+            SELECT 1 FROM plugin_assistant.extracted_documents
+            WHERE attachment_id = :attachment_id AND metadata_json->>'file_id' = :file_id LIMIT 1
+        """), {"attachment_id": attachment_id, "file_id": str(file_id)}).scalar() is not None
+
+    def update_attachment_metadata(self, attachment_id: int, metadata: dict[str, Any]) -> None:
+        """Record a new file version whose text did not change (no re-embedding needed)."""
         db.session.execute(text("""
-            UPDATE plugin_assistant.extracted_documents 
-            SET embedding = CAST(:embedding AS vector)
-            WHERE id = :id
-        """), {"embedding": embedding_str, "id": str(doc_id)})
-    
-    def delete_attachment_chunks(self, attachment_id: int) -> int:
+            UPDATE plugin_assistant.extracted_documents
+            SET metadata_json = coalesce(metadata_json, '{}'::jsonb) || CAST(:metadata AS jsonb)
+            WHERE attachment_id = :attachment_id
+        """), {"attachment_id": attachment_id, "metadata": json.dumps(metadata)})
+        db.session.commit()
+
+    def delete_attachment_chunks(self, attachment_id: int, commit: bool = True) -> int:
         """Delete all chunks for an attachment.
         
         Args:
             attachment_id: Indico attachment ID.
+            commit: False when part of a larger transaction (e.g. the request deleting the file).
             
         Returns:
             Number of chunks deleted.
         """
         result = ExtractedDocument.query.filter_by(
             attachment_id=attachment_id
-        ).delete()
-        db.session.commit()
+        ).delete(synchronize_session=False)
+        if commit:
+            db.session.commit()
         logger.debug(f"Deleted {result} chunks for attachment {attachment_id}")
         return result
     

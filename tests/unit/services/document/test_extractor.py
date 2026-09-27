@@ -60,7 +60,7 @@ class TestDocumentExtractorInit:
         
         assert extractor.is_supported(Path("test.pdf"))
         assert extractor.is_supported(Path("test.docx"))
-        assert extractor.is_supported(Path("test.doc"))
+        assert not extractor.is_supported(Path("test.doc"))  # python-docx cannot read legacy .doc
         assert extractor.is_supported(Path("test.txt"))
         assert extractor.is_supported(Path("test.md"))
     
@@ -98,7 +98,7 @@ class TestDocumentExtractorIsSupported:
     def test_supported_docx(self, extractor):
         """Test DOCX files are supported."""
         assert extractor.is_supported("document.docx")
-        assert extractor.is_supported("document.doc")
+        assert not extractor.is_supported("document.doc")
     
     def test_supported_text(self, extractor):
         """Test text files are supported."""
@@ -475,15 +475,17 @@ class TestDocumentExtractorEdgeCases:
         assert extractor.is_supported("file.TxT")
         assert extractor.is_supported("file.DocX")
     
-    @patch('indico_assistant.services.document.extractor.DocumentExtractor._extract_docx')
-    def test_extract_doc_extension(self, mock_docx, extractor, tmp_path):
-        """Test extracting .doc files uses docx extractor."""
+    def test_extract_doc_extension_is_refused(self, extractor, tmp_path):
+        """Legacy .doc used to go to python-docx, which cannot parse it; it is refused up front."""
+        from indico_assistant.services.document.extractor import UnsupportedFileTypeError
+
         doc_file = tmp_path / "test.doc"
         doc_file.write_bytes(b"content")
-        
-        mock_docx.return_value = "DOC content"
-        
-        result = extractor.extract(doc_file)
-        
-        assert result == "DOC content"
-        mock_docx.assert_called_once()
+        with pytest.raises(UnsupportedFileTypeError):
+            extractor.extract(doc_file)
+
+    def test_line_breaks_survive_sanitizing(self, extractor, tmp_path):
+        """The chunker splits on paragraphs and lines; sanitizing used to strip every newline."""
+        text_file = tmp_path / "notes.txt"
+        text_file.write_text("First paragraph.\n\nSecond\tline\x00.")
+        assert extractor.extract(text_file) == "First paragraph.\n\nSecond\tline."

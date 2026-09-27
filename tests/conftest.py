@@ -356,6 +356,10 @@ def create_extracted_documents_table(db):
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     '''))
+    # The test app already created the table from the model, which has no vector column (migration 004
+    # adds it in real databases), so CREATE TABLE IF NOT EXISTS above is a no-op there.
+    db.session.execute(text(
+        'ALTER TABLE plugin_assistant.extracted_documents ADD COLUMN IF NOT EXISTS embedding vector(384)'))
     
     db.session.commit()
     

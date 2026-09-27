@@ -4,6 +4,7 @@ This module defines the AssistantPlugin class which integrates with
 Indico's plugin system to provide AI-powered assistant capabilities.
 """
 
+import logging
 import os
 
 from indico.core.plugins import IndicoPlugin, IndicoPluginBlueprint
@@ -11,6 +12,9 @@ from indico.core import signals
 
 from indico_assistant.default_settings import DEFAULT_SETTINGS, EVENT_SETTINGS_DEFAULTS
 from indico_assistant.forms import SettingsForm
+
+
+logger = logging.getLogger(__name__)
 
 
 class AssistantPlugin(IndicoPlugin):
@@ -45,9 +49,12 @@ class AssistantPlugin(IndicoPlugin):
 
         self.connect(signals.plugin.cli, extend_cli)
         
-        # Connect to attachment_created signal for realtime indexing
-        # Feature: 011-realtime-attachment-indexing
-        self.connect(attachment_signals.attachment_created, _on_attachment_created)
+        # Keep the document index in line with attachments (Feature 011, reworked in audit Phase 2)
+        self.connect(attachment_signals.attachment_created, _on_attachment_changed)
+        self.connect(attachment_signals.attachment_updated, _on_attachment_changed)
+        self.connect(attachment_signals.attachment_deleted, _on_attachment_deleted)
+        self.connect(attachment_signals.folder_deleted, _on_folder_deleted)
+        self.connect(signals.core.after_commit, _queue_pending_indexing)
 
     def _setup_chat_widget(self):
         """One deferred, cacheable <script> for logged-in users; it fetches its config only when opened."""
@@ -152,96 +159,48 @@ class AssistantPlugin(IndicoPlugin):
         return self.settings.get(key)
 
 
-def _on_attachment_created(attachment, **kwargs):
-    """Signal handler for attachment creation events.
-    
-    Queues an asynchronous indexing task when a new attachment is uploaded.
-    This handler must complete in <100ms to avoid blocking user operations.
-    
-    Args:
-        attachment: The Attachment model instance that was created
-        **kwargs: Additional signal arguments (ignored)
-    
-    Feature: 011-realtime-attachment-indexing
-    Tasks: T017, T028-T030
-    FR-001: Queue indexing task within 1 second of upload
-    FR-002: Only index when vector search is enabled
-    FR-003: Validate file size before queueing
-    FR-009: Handler must complete in <100ms
-    FR-011: Graceful degradation when vector search unavailable
-    FR-012: Ignore unsupported file formats
+_PENDING_INDEXING = 'indico_assistant_pending_indexing'
+
+
+def _on_attachment_changed(attachment, **kwargs):
+    """Remember the attachment; it is queued once its transaction commits (see _queue_pending_indexing).
+
+    Indico sends these signals after flush but before commit: queueing right away let a fast worker
+    look for a row that was not visible yet and give up.
     """
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
+    from flask import g
+
     try:
-        from indico_assistant.plugin import AssistantPlugin
-        from indico_assistant.services.document.validation import (
-            is_supported_format,
-            determine_processing_tier
-        )
-        from indico_assistant.services.vector_search.store import VectorStore
+        g.setdefault(_PENDING_INDEXING, set()).add(attachment.id)
+    except Exception:
+        logger.exception('Could not schedule indexing for attachment %s', getattr(attachment, 'id', None))
+
+
+def _queue_pending_indexing(sender, **kwargs):
+    from flask import g, has_app_context
+
+    pending = g.pop(_PENDING_INDEXING, None) if has_app_context() else None
+    if not pending:
+        return
+    try:
         from indico_assistant.tasks.indexing import index_attachment_task
-        from indico_assistant.models.document import ProcessingTier
-        
-        # FR-012: Check if file format is supported
-        if not is_supported_format(attachment.file.filename):
-            logger.debug(
-                "Skipping indexing for unsupported file format: %s (attachment_id=%d)",
-                attachment.file.filename,
-                attachment.id
-            )
-            return  # Silently skip unsupported formats
-        
-        # FR-002: Check if vector search is enabled
-        plugin = AssistantPlugin.instance
-        if not plugin.settings.get('vector_search_enabled', False):
-            logger.debug("Vector search disabled, skipping indexing (attachment_id=%d)", attachment.id)
-            return  # Vector search disabled, skip indexing
-        
-        # FR-011: Check if pgvector is available
-        if not VectorStore.is_available():
-            logger.debug("pgvector unavailable, skipping indexing (attachment_id=%d)", attachment.id)
-            return  # Gracefully skip if vector search unavailable
-        
-        # FR-003: Determine processing tier based on file size
-        tier = determine_processing_tier(attachment.file.size)
-        
-        if tier == ProcessingTier.REJECTED:
-            logger.debug(
-                "Skipping indexing for file exceeding size limit: %s (attachment_id=%d, size=%d bytes)",
-                attachment.file.filename,
-                attachment.id,
-                attachment.file.size
-            )
-            return  # File too large, skip indexing
-        
-        # FR-001: Queue indexing task with appropriate priority
-        priority = 'high' if tier == ProcessingTier.FAST else 'low'
-        
-        index_attachment_task.apply_async(
-            args=[attachment.id, attachment.event_id],
-            kwargs={'force': False, 'priority': priority},
-            priority=9 if priority == 'high' else 3  # Celery priority (0-9)
-        )
-        
-        logger.info(
-            "Queued indexing task for attachment: %s (attachment_id=%d, event_id=%d, tier=%s, priority=%s)",
-            attachment.file.filename,
-            attachment.id,
-            attachment.event_id,
-            tier.value,
-            priority
-        )
-        
-    except Exception as e:
-        # FR-009, FR-011: Never raise exceptions from signal handler
-        # Errors are logged but don't block user operations
-        logger.error(
-            "Error in attachment_created signal handler (attachment_id=%d): %s",
-            attachment.id if attachment else None,
-            str(e),
-            exc_info=True
-        )
-        pass
+
+        for attachment_id in pending:  # the task skips anything that should not be indexed
+            index_attachment_task.delay(attachment_id)
+    except Exception:
+        logger.exception('Could not queue indexing for attachments %s', sorted(pending))
+
+
+def _on_attachment_deleted(attachment, **kwargs):
+    """Drop its chunks in the same transaction, so deleted files stop being searchable at once."""
+    from indico_assistant.services.vector_search.store import VectorStore
+
+    VectorStore().delete_attachment_chunks(attachment.id, commit=False)
+
+
+def _on_folder_deleted(folder, **kwargs):
+    from indico_assistant.services.vector_search.store import VectorStore
+
+    store = VectorStore()
+    for attachment in folder.attachments:
+        store.delete_attachment_chunks(attachment.id, commit=False)

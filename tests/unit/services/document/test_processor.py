@@ -134,6 +134,7 @@ class TestDocumentProcessorProcessFile:
         mock_embedding_service = MagicMock()
         mock_vector_store = MagicMock()
         mock_vector_store.get_content_hash.return_value = None
+        mock_vector_store.find_attachment_with_hash.return_value = None
         
         processor = DocumentProcessor(
             embedding_service=mock_embedding_service,
@@ -165,7 +166,7 @@ class TestDocumentProcessorProcessFile:
         
         # Mock embedding service
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         result = processor.process_file(
             file_path=text_file,
@@ -176,7 +177,7 @@ class TestDocumentProcessorProcessFile:
         assert result.success is True
         assert result.skipped is False
         assert result.chunks_created >= 1
-        processor._vector_store.insert_chunks.assert_called_once()
+        processor._vector_store.replace_attachment_chunks.assert_called_once()
     
     def test_process_file_no_text_content(self, processor, tmp_path):
         """Test processing a file with no text content."""
@@ -228,7 +229,7 @@ class TestDocumentProcessorProcessFile:
         
         # Mock embedding service
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         result = processor.process_file(
             file_path=text_file,
@@ -239,7 +240,7 @@ class TestDocumentProcessorProcessFile:
         
         assert result.success is True
         assert result.skipped is False
-        processor._vector_store.delete_attachment_chunks.assert_called_once_with(100)
+        processor._vector_store.replace_attachment_chunks.assert_called_once()  # delete + insert, one transaction
     
     def test_process_file_extraction_error(self, processor, tmp_path):
         """Test handling of extraction errors."""
@@ -263,7 +264,7 @@ class TestDocumentProcessorProcessFile:
         
         # Mock embedding service
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         processor.process_file(
             file_path=text_file,
@@ -271,7 +272,7 @@ class TestDocumentProcessorProcessFile:
             attachment_id=100
         )
         
-        processor._vector_store.delete_attachment_chunks.assert_called_once_with(100)
+        processor._vector_store.replace_attachment_chunks.assert_called_once()  # delete + insert, one transaction
     
     def test_process_file_no_chunks_generated(self, processor, tmp_path):
         """Test handling when chunker returns no chunks."""
@@ -300,6 +301,7 @@ class TestDocumentProcessorProcessContent:
         mock_embedding_service = MagicMock()
         mock_vector_store = MagicMock()
         mock_vector_store.get_content_hash.return_value = None
+        mock_vector_store.find_attachment_with_hash.return_value = None
         
         return DocumentProcessor(
             embedding_service=mock_embedding_service,
@@ -311,7 +313,7 @@ class TestDocumentProcessorProcessContent:
         content = b"This is test content for byte processing. " * 50
         
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         result = processor.process_content(
             content=content,
@@ -342,7 +344,7 @@ class TestDocumentProcessorProcessContent:
         content = b"Temporary test content. " * 20
         
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         # Store temp files created
         import tempfile
@@ -376,60 +378,53 @@ class TestDocumentProcessorProcessAttachment:
         mock_embedding_service = MagicMock()
         mock_vector_store = MagicMock()
         mock_vector_store.get_content_hash.return_value = None
+        mock_vector_store.find_attachment_with_hash.return_value = None
         
         return DocumentProcessor(
             embedding_service=mock_embedding_service,
             vector_store=mock_vector_store
         )
     
-    def test_process_attachment_no_file(self, processor):
-        """Test processing attachment with no file."""
-        mock_attachment = MagicMock()
-        mock_attachment.file = None
-        
-        result = processor.process_attachment(
-            attachment=mock_attachment,
-            event_id=1
-        )
-        
-        assert result["success"] is True
-        assert result["skipped"] is True
-        assert "No file attached" in result["error"]
-    
+    def _attachment(self, content=b"Test document content. " * 50, tmp_path=None):
+        attachment = MagicMock(id=123, file_id=7)
+        attachment.file.filename = "Document.TXT"
+        attachment.folder.event_id, attachment.folder.contribution_id = 1, 5
+        path = tmp_path / "stored-file.tmp"  # remote storage hands back a temp name
+        path.write_bytes(content)
+        attachment.file.get_local_path.return_value.__enter__.return_value = str(path)
+        return attachment
+
     def test_process_attachment_file_read_error(self, processor):
         """Test handling file read errors."""
         mock_attachment = MagicMock()
         mock_attachment.id = 123
-        mock_attachment.file.open.side_effect = IOError("Cannot read file")
+        mock_attachment.file.get_local_path.side_effect = IOError("Cannot read file")
         
-        result = processor.process_attachment(
-            attachment=mock_attachment,
-            event_id=1
-        )
+        result = processor.process_attachment(attachment=mock_attachment)
         
         assert result["success"] is False
         assert "read file" in result["error"].lower()
     
-    def test_process_attachment_success(self, processor):
-        """Test successful attachment processing."""
-        mock_attachment = MagicMock()
-        mock_attachment.id = 123
-        mock_attachment.file.filename = "document.txt"
-        mock_attachment.file.open.return_value.read.return_value = (
-            b"Test document content. " * 50
-        )
+    def test_process_attachment_success(self, processor, tmp_path):
+        """The file type comes from the filename (not the .tmp path); metadata records the version."""
+        processor._embedding_service.embed_batch.side_effect = lambda texts: [[0.1] * 384 for _ in texts]
+        processor._vector_store.replace_attachment_chunks.side_effect = lambda aid, chunks: len(chunks)
         
-        processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        result = processor.process_attachment(attachment=self._attachment(tmp_path=tmp_path))
         
-        result = processor.process_attachment(
-            attachment=mock_attachment,
-            event_id=1
-        )
-        
-        assert result["success"] is True
-        assert result["chunks_created"] >= 1
+        assert result["success"] is True and result["chunks_created"] >= 1
+        attachment_id, chunks = processor._vector_store.replace_attachment_chunks.call_args.args
+        assert attachment_id == 123 and chunks[0]["event_id"] == 1
+        assert {k: chunks[0]["metadata"][k] for k in ("filename", "file_id", "contribution_id")} == {
+            "filename": "Document.TXT", "file_id": 7, "contribution_id": 5}
 
+    def test_same_text_elsewhere_is_copied(self, processor, tmp_path):
+        processor._vector_store.find_attachment_with_hash.return_value = 99
+        processor._vector_store.copy_chunks.return_value = 3
+        result = processor.process_attachment(attachment=self._attachment(tmp_path=tmp_path))
+        assert result["chunks_created"] == 3
+        processor._embedding_service.embed_batch.assert_not_called()
+        assert processor._vector_store.copy_chunks.call_args.args[:3] == (99, 123, 1)
 
 class TestDocumentProcessorEdgeCases:
     """Tests for edge cases and error conditions."""
@@ -440,6 +435,7 @@ class TestDocumentProcessorEdgeCases:
         mock_embedding_service = MagicMock()
         mock_vector_store = MagicMock()
         mock_vector_store.get_content_hash.return_value = None
+        mock_vector_store.find_attachment_with_hash.return_value = None
         
         return DocumentProcessor(
             embedding_service=mock_embedding_service,
@@ -469,7 +465,7 @@ class TestDocumentProcessorEdgeCases:
             return [[0.1] * 384 for _ in texts]
         
         processor._embedding_service.embed_batch.side_effect = mock_embed_batch
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         result = processor.process_file(
             file_path=text_file,
@@ -504,7 +500,7 @@ class TestDocumentProcessorEdgeCases:
         text_file.write_text("Test content for storage. " * 20)
         
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.side_effect = Exception(
+        processor._vector_store.replace_attachment_chunks.side_effect = Exception(
             "Database connection failed"
         )
         
@@ -524,7 +520,7 @@ class TestDocumentProcessorEdgeCases:
         text_file.write_text(unicode_content, encoding='utf-8')
         
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         result = processor.process_file(
             file_path=text_file,
@@ -541,7 +537,7 @@ class TestDocumentProcessorEdgeCases:
         text_file.write_text("String path content. " * 30)
         
         processor._embedding_service.embed_batch.return_value = [[0.1] * 384]
-        processor._vector_store.insert_chunks.return_value = 1
+        processor._vector_store.replace_attachment_chunks.return_value = 1
         
         # Pass path as string instead of Path object
         result = processor.process_file(
