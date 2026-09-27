@@ -60,10 +60,13 @@ def widget_config():
         if match:
             event_id = int(match.group(1))
     
-    # Pass event_id to get_vars_js
-    config = plugin.get_vars_js(event_id=event_id) if plugin else {}
+    from flask import session
+    config = plugin.widget_config(session.user, event_id=event_id) if plugin else {}
     payload = f"window.IndicoAssistant = {json.dumps(config)};"
-    return current_app.response_class(payload, mimetype="application/javascript")
+    response = current_app.response_class(payload, mimetype="application/javascript")
+    # Contains a per-user token: never cache it in the browser, a proxy, or a CDN
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @blueprint.after_request

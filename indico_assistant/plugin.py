@@ -101,62 +101,31 @@ class AssistantPlugin(IndicoPlugin):
 
         return blueprint
 
-    def get_vars_js(self, event_id=None):
-        """Expose configuration to JavaScript as IndicoAssistant global.
+    def widget_config(self, user, event_id=None):
+        """Per-user widget configuration, served only by the uncached /widget/config.js route.
 
-        Returns a dictionary that will be available in JavaScript as:
-        - IndicoAssistant.enabled: Whether the widget is enabled
-        - IndicoAssistant.chainlitUrl: URL of the Chainlit server
-        - IndicoAssistant.authToken: JWT token for authenticated users (null if not logged in)
-        - IndicoAssistant.theme: Current theme preference ('light', 'dark', or 'auto')
-
-        Args:
-            event_id: Optional event ID from request context (Feature 013: event context)
-
-        Returns:
-            dict: Widget configuration for JavaScript.
+        SECURITY: this must never be named ``get_vars_js``. Indico renders every plugin's
+        ``get_vars_js()`` into the shared ``/assets/js-vars/global.js``, which is generated once
+        and cached for all visitors, so a token minted here would be served to everyone.
         """
-        from flask import session, g
-        try:
-            from flask_login import current_user
-        except Exception:  # pragma: no cover
-            current_user = None
-        from indico.web.flask.util import send_file
-
         config = {
-            "enabled": self.settings.get("chat_widget_enabled", False),
-            "chainlitUrl": self.settings.get("chainlit_server_url", "http://localhost:8000"),
+            "enabled": self.settings.get("chat_widget_enabled"),
+            "chainlitUrl": self.settings.get("chainlit_server_url"),
             "authToken": None,
             "theme": "auto",
         }
-
-        # Generate auth token for authenticated users
-        session_user = getattr(session, "user", None)
-        g_user = getattr(g, "user", None)
-        
-        # Try to get current_user safely
+        if user is None:
+            return config
+        # Prefer stored secret; fall back to env var so an empty form submission doesn't clear it
+        secret = self.settings.get("chainlit_auth_secret") or os.environ.get("CHAINLIT_AUTH_SECRET", "")
+        if not secret:
+            self.logger.warning("Chainlit auth secret not set; no JWT issued")
+            return config
+        from indico_assistant.services.jwt_service import create_chainlit_token
         try:
-            cu = current_user if current_user and not getattr(current_user, 'is_anonymous', True) else None
-        except (AttributeError, RuntimeError):
-            cu = None
-        
-        user = session_user or g_user or cu
-
-        # Indico does not expose Flask-Login's current_user; use session.user instead
-        if user and not getattr(user, "is_anonymous", False):
-            # Prefer stored secret; fallback to env var to avoid empty submissions clearing it
-            secret = self.settings.get("chainlit_auth_secret") or os.environ.get("CHAINLIT_AUTH_SECRET", "")
-            if secret:
-                from indico_assistant.services.jwt_service import create_chainlit_token
-
-                try:
-                    config["authToken"] = create_chainlit_token(user, secret, event_id=event_id)
-                except Exception:
-                    # Graceful degradation - widget will work without auth
-                    self.logger.warning("Failed to generate Chainlit token", exc_info=True)
-            else:
-                self.logger.warning("Chainlit auth secret not set; no JWT issued")
-
+            config["authToken"] = create_chainlit_token(user, secret, event_id=event_id)
+        except Exception:
+            self.logger.warning("Failed to generate Chainlit token", exc_info=True)
         return config
 
     def inject_bundle(self, name, *args, **kwargs):  # type: ignore[override]

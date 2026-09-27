@@ -2,7 +2,7 @@
  * Indico Assistant Chat Widget
  *
  * This script loads the Chainlit Copilot widget and configures it with
- * settings from the IndicoAssistant global (provided by get_vars_js()).
+ * settings from the IndicoAssistant global (provided by the uncached /widget/config.js route).
  *
  * Features:
  * - Dynamic script loading of Chainlit Copilot
