@@ -179,6 +179,9 @@ class NL2SQLPipeline:
         
         if not keyword:
             return sql  # Can't fix without a keyword
+        # The keyword comes from the user's question and goes inside '%...%': escape quotes (an apostrophe
+        # broke the query and triggered paid corrections) and LIKE wildcards.
+        keyword = re.sub(r"[%_\\]", lambda m: "\\" + m.group(0), keyword).replace("'", "''")
         
         # Check if the query is missing JOINs to notes/contributions
         has_notes_join = "JOIN EVENTS.NOTES" in sql_upper or "JOIN NOTES" in sql_upper

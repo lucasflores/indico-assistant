@@ -832,3 +832,14 @@ class TestNL2SQLPipelineAccessContext:
                   user_id=1, user=MagicMock(id=1, is_admin=False))
         pipeline._corrector.correct.assert_not_called()
         assert pipeline._executor.execute.call_count == 1
+
+
+def test_topic_keyword_is_escaped_inside_the_like_literal(pipeline):
+    """A keyword from the question ("O'Brien", "100%") must not break or widen the generated SQL."""
+    from types import SimpleNamespace
+
+    sql = "SELECT e.id FROM events.events e WHERE e.title ILIKE '%x%'"
+    for value, literal in (("O'Brien", "O''Brien"), ("100%", "100\\%"), ("snake_case", "snake\\_case")):
+        classification = SimpleNamespace(entities=[SimpleNamespace(type="topic", value=value)], time_range=None)
+        fixed = pipeline._fix_topic_search_sql(sql, classification)
+        assert f"e.title ILIKE '%{literal}%'" in fixed
