@@ -218,3 +218,17 @@ def test_health_check_is_bounded(monkeypatch):
     _fake_ibis(monkeypatch, handler)
     LLMService(_Plugin()).health_check()
     assert bodies[0]["max_tokens"] == 16
+
+
+def test_collectors_nest_and_the_outer_one_survives_errors(monkeypatch):
+    from indico_assistant.services.llm.service import collect_calls
+
+    _fake_ibis(monkeypatch, lambda request: httpx.Response(
+        200, json=_ibis_reply('```json\n{"city": "Lisbon"}\n```', "0.00010")))
+    llm = LLMService(_Plugin())
+    with collect_calls() as outer:
+        with pytest.raises(RuntimeError):
+            with collect_calls() as inner:  # e.g. the pipeline's own collector
+                llm.generate("Capital of Portugal?", Answer)
+                raise RuntimeError("pipeline failed after the call")
+    assert len(inner) == 1 and len(outer) == 1
