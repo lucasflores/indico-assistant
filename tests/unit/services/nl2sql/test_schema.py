@@ -32,13 +32,14 @@ class TestSchemaContextIntentMapping:
         assert "events.events" in tables
         assert "categories.categories" in tables
 
-    def test_registration_query_intent_returns_registration_tables(self):
-        """Registration query intent should return events and registrations tables."""
+    def test_registration_query_intent_never_exposes_registrant_data(self):
+        """Registrant data is not queryable (Phase 0): Indico's participant-list visibility rules can't be
+        enforced on LLM-written SQL, so registration questions fall back to event data only."""
         context = SchemaContext()
         tables = context.get_tables_for_intent("registration_query")
-        
-        assert "events.events" in tables
-        assert "events.registrations" in tables
+
+        assert "events.registrations" not in tables
+        assert "events.registration_data" not in tables
 
     def test_contribution_query_intent_returns_contribution_tables(self):
         """Contribution query intent should return contribution-related tables."""
