@@ -90,7 +90,7 @@ class SettingsForm(IndicoForm):
     nl2sql_cache_ttl = IntegerField(
         "NL2SQL Cache TTL (seconds)",
         validators=[Optional(), NumberRange(min=0, max=3600)],
-        description="Cache TTL for identical queries (0=disabled, max 3600, default: 600)",
+        description="Not used: answers depend on who asks and where, so query results are never cached",
     )
 
     nl2sql_allowed_tables = TextAreaField(

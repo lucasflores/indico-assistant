@@ -13,10 +13,18 @@ to the LLM for SQL generation. Supports intent-to-tables mapping for
 efficient context loading.
 """
 
+import functools
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+@functools.lru_cache(maxsize=8)
+def _read_yaml(path: str, mtime: float) -> dict[str, Any]:
+    """Parsed once per process (and again when the file changes): it is ~40 KB, ~30 ms to parse."""
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
 
 
 class SchemaContext:
@@ -141,8 +149,7 @@ class SchemaContext:
             self._schema_cache = {}
             return self._schema_cache
 
-        with open(path, "r") as f:
-            self._schema_cache = yaml.safe_load(f) or {}
+        self._schema_cache = _read_yaml(str(path), path.stat().st_mtime)
 
         # SECURITY: the YAML file is the allowlist. Tables missing from it are NOT loaded from the
         # live database (that would silently make them queryable).

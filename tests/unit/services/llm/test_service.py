@@ -291,3 +291,21 @@ class TestCreateLLMService:
         service = create_llm_service(plugin)
         
         assert service._plugin is plugin
+
+
+def test_client_rebuilt_when_admin_changes_settings():
+    """The per-process LLM service picks up new provider/model/key without a restart."""
+    from unittest.mock import MagicMock, patch
+
+    from indico_assistant.services.llm.service import LLMService
+
+    settings = {"llm_provider": "openai", "llm_model": "a", "llm_base_url": None, "llm_api_key": "k"}
+    plugin = MagicMock()
+    plugin.settings.get.side_effect = lambda key, default=None: settings.get(key, default)
+    service = LLMService(plugin)
+    with patch.object(LLMService, "_create_client", side_effect=lambda settings: MagicMock()) as create:
+        first = service._ensure_client()[0]
+        assert service._ensure_client()[0] is first
+        settings["llm_model"] = "b"
+        assert service._ensure_client()[0] is not first
+    assert create.call_count == 2
