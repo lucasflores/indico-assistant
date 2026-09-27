@@ -11,7 +11,7 @@ from indico_assistant.models.document import ProcessingTier
 
 
 # Supported document formats for indexing
-SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.txt', '.md'}
+SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md'}  # no .doc: python-docx cannot read it
 
 # File size thresholds in bytes
 SIZE_FAST_THRESHOLD = 10 * 1024 * 1024  # 10MB - guaranteed fast processing

@@ -233,9 +233,17 @@ Poll until the answer is ready (`202` while pending; jobs expire after an hour).
 
 A failed or timed-out answer (2 minutes per answer) returns `500` with `error` and `message`.
 
-**Deployment**: run Celery workers that consume the `assistant` queue
-(`indico celery worker -Q celery,assistant`, or a dedicated pool: `-Q assistant`). Worker concurrency
-is the cluster-wide cap on simultaneous answers.
+**Deployment**: run Celery workers that consume the plugin's queues: `assistant` (chat answers; its
+concurrency is the cluster-wide cap on simultaneous answers) and `assistant_bulk` (attachment
+indexing, syncs, nightly cleanup; low concurrency is fine). For example
+`indico celery worker -Q celery,assistant,assistant_bulk`, or dedicated pools per queue.
+
+**Document index lifecycle**: an uploaded or edited attachment is indexed after its transaction
+commits; deleting an attachment or folder removes its chunks in the same transaction. Chunks record
+the Indico file version they came from, so a sync (`POST /api/assistant/search/sync/all`) finds what
+changed in SQL without reading files, and queues only that. Text already indexed for another
+attachment (cloned events) is copied instead of re-embedded. A nightly task removes chunks of
+attachments deleted while the plugin was off and closes sync runs whose worker died.
 
 ### Session Management
 

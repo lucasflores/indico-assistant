@@ -30,10 +30,9 @@ class TestFormatValidation:
         assert is_supported_format("document.docx") is True
         assert is_supported_format("REPORT.DOCX") is True
     
-    def test_is_supported_format_accepts_doc(self):
-        """Test that DOC files are recognized as supported."""
-        assert is_supported_format("document.doc") is True
-        assert is_supported_format("REPORT.DOC") is True
+    def test_is_supported_format_rejects_doc(self):
+        """Legacy .doc is not supported: python-docx cannot read it."""
+        assert is_supported_format("document.doc") is False
     
     def test_is_supported_format_accepts_txt(self):
         """Test that TXT files are recognized as supported."""
