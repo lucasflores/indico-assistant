@@ -91,6 +91,19 @@ def test_deleted_attachments_leave_the_index(db, index, attach):
     assert chunks(db, attachment) == []
 
 
+def test_unindexable_new_version_leaves_the_index(db, index, attach):
+    attachment = attach()
+    index(attachment)
+    new_version(db, attachment, b'   ')  # extracts to no text
+    assert index(attachment)['error'] == 'No text content extracted'
+    assert chunks(db, attachment) == []
+
+    index(new_version(db, attachment, b'Back again.') or attachment)
+    attachment.file.filename = 'minutes.zip'
+    assert index(attachment)['error'] == 'unsupported format'
+    assert chunks(db, attachment) == []
+
+
 def test_links_are_never_indexed():
     link = MagicMock(is_deleted=False, folder=MagicMock(is_deleted=False), type=AttachmentType.link)
     assert indexing.skip_reason(link) == 'not a file'
@@ -112,6 +125,16 @@ def test_delete_signal_drops_chunks_in_the_same_transaction(db, index, attach):
     _on_attachment_deleted(first)
     _on_folder_deleted(second.folder)
     assert chunks(db, first) == [] and chunks(db, second) == []
+
+
+def test_delete_signal_never_fails_indicos_delete(db, index, attach):
+    from indico_assistant.plugin import _on_attachment_deleted
+    from indico_assistant.services.vector_search.store import VectorStore
+
+    attachment = attach()
+    with patch.object(VectorStore, 'delete_attachment_chunks', side_effect=RuntimeError('lock timeout')):
+        _on_attachment_deleted(attachment)
+    assert db.session.execute(text('SELECT 1')).scalar() == 1  # the outer transaction is still usable
 
 
 def test_changes_are_queued_only_after_commit(attach):

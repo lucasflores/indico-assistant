@@ -191,16 +191,28 @@ def _queue_pending_indexing(sender, **kwargs):
         logger.exception('Could not queue indexing for attachments %s', sorted(pending))
 
 
-def _on_attachment_deleted(attachment, **kwargs):
-    """Drop its chunks in the same transaction, so deleted files stop being searchable at once."""
+def _drop_chunks(attachment_ids):
+    """Drop chunks in the deleting request's transaction, so deleted files stop being searchable at once.
+
+    Never fails the user's delete: a savepoint keeps an error out of the outer transaction, and the
+    nightly cleanup_orphaned_documents removes anything missed.
+    """
+    from indico.core.db import db
+
     from indico_assistant.services.vector_search.store import VectorStore
 
-    VectorStore().delete_attachment_chunks(attachment.id, commit=False)
+    try:
+        with db.session.begin_nested():
+            store = VectorStore()
+            for attachment_id in attachment_ids:
+                store.delete_attachment_chunks(attachment_id, commit=False)
+    except Exception:
+        logger.exception('Could not drop search chunks of attachments %s', attachment_ids)
+
+
+def _on_attachment_deleted(attachment, **kwargs):
+    _drop_chunks([attachment.id])
 
 
 def _on_folder_deleted(folder, **kwargs):
-    from indico_assistant.services.vector_search.store import VectorStore
-
-    store = VectorStore()
-    for attachment in folder.attachments:
-        store.delete_attachment_chunks(attachment.id, commit=False)
+    _drop_chunks([attachment.id for attachment in folder.attachments])

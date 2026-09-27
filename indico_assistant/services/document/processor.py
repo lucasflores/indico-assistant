@@ -144,6 +144,7 @@ class DocumentProcessor:
             
             if not text or not text.strip():
                 logger.info(f"No text content in: {path}")
+                self._vector_store.delete_attachment_chunks(attachment_id)  # the old version's text is gone
                 return ProcessingResult(
                     success=True,
                     attachment_id=attachment_id,
@@ -176,6 +177,7 @@ class DocumentProcessor:
             
             if not chunks:
                 logger.info(f"No chunks generated for: {path}")
+                self._vector_store.delete_attachment_chunks(attachment_id)
                 return ProcessingResult(
                     success=True,
                     attachment_id=attachment_id,

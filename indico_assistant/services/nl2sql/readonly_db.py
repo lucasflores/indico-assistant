@@ -26,10 +26,12 @@ own role is unaffected: owners bypass RLS and a permissive policy covers any non
 import hashlib
 import hmac
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 
 
 ENV_URI = 'ASSISTANT_NL2SQL_DATABASE_URI'
@@ -60,8 +62,10 @@ def get_engine():
         raise NotConfigured(f'The assistant cannot query the database: {ENV_URI} is not set. '
                             f'See the README ("NL2SQL database role").')
     if uri not in _engines:
-        # Small pool: the role's CONNECTION LIMIT caps concurrent NL2SQL queries cluster-wide anyway
-        _engines[uri] = create_engine(uri, pool_size=2, max_overflow=3, pool_pre_ping=True, pool_recycle=300)
+        # No pool: idle pooled connections in every web and worker process would use up the role's
+        # CONNECTION LIMIT, which is meant to cap running queries. One connect per question is cheap next
+        # to the LLM calls.
+        _engines[uri] = create_engine(uri, poolclass=NullPool)
     return _engines[uri]
 
 
@@ -73,9 +77,10 @@ def _get_secret():
     if 'value' not in _secret:
         from indico.core.db import db
         try:
-            value = db.session.execute(text('SELECT secret FROM plugin_assistant.nl2sql_secret')).scalar()
+            # own connection: Indico's session would autoflush pending rows and stay in a transaction
+            with db.engine.connect() as conn:
+                value = conn.execute(text('SELECT secret FROM plugin_assistant.nl2sql_secret')).scalar()
         except Exception as exc:
-            db.session.rollback()
             raise NotConfigured('The NL2SQL database setup script has not been run '
                                 '(plugin_assistant.nl2sql_secret is missing).') from exc
         if not value:
@@ -105,25 +110,35 @@ def scoped_connection(context, connection_factory=None, signer=None):
 
 # Columns the row policies read; granted alongside the allowlisted columns when the table has them.
 POLICY_COLUMNS = ('id', 'event_id', 'category_id', 'contribution_id', 'session_id', 'folder_id', 'attachment_id',
-                  'is_deleted', 'protection_mode')
+                  'subcontribution_id', 'is_deleted', 'protection_mode')
 
 _CTX = '(SELECT {} FROM plugin_assistant.nl2sql_ctx())'
 _ADMIN = _CTX.format('is_admin')
 _SCOPED = _CTX.format('event_id')
 _EVENT_VISIBLE = 'EXISTS (SELECT 1 FROM events.events ev WHERE ev.id = {})'
+# Indico's ProtectionMode: 0 public, 1 inheriting (the default), 2 protected
 _NOT_PROTECTED = f'(protection_mode <> 2 OR {_ADMIN})'
+_LINKED_OBJECT_VISIBLE = '''
+        AND (contribution_id IS NULL OR EXISTS (SELECT 1 FROM events.contributions c WHERE c.id = contribution_id))
+        AND (subcontribution_id IS NULL OR EXISTS (SELECT 1 FROM events.contributions c
+             WHERE c.id = plugin_assistant.nl2sql_subcontribution_parent(subcontribution_id)))
+        AND (session_id IS NULL OR EXISTS (SELECT 1 FROM events.sessions s WHERE s.id = session_id))'''
 
 POLICIES = {
     'events.events': f'''NOT is_deleted AND CASE
         WHEN {_SCOPED} IS NOT NULL THEN id = {_SCOPED}
         ELSE {_ADMIN}
-          OR protection_mode = 1
-          OR (protection_mode = 0 AND category_id IN (SELECT plugin_assistant.nl2sql_public_category_ids()))
-          OR (protection_mode = 0 AND category_id IN (SELECT plugin_assistant.nl2sql_read_category_ids()))
+          OR protection_mode = 0
+          -- inheriting: its category decides; unlisted events (no category) only through their own ACL
+          OR (protection_mode = 1 AND category_id IN (SELECT plugin_assistant.nl2sql_public_category_ids()))
+          OR (protection_mode = 1 AND category_id IN (SELECT plugin_assistant.nl2sql_read_category_ids()))
           OR category_id IN (SELECT plugin_assistant.nl2sql_managed_category_ids())
           OR id IN (SELECT plugin_assistant.nl2sql_granted_event_ids())
         END''',
-    'events.contributions': f"NOT is_deleted AND {_NOT_PROTECTED} AND {_EVENT_VISIBLE.format('event_id')}",
+    # an inheriting contribution in a session is protected by that session (Contribution.protection_parent)
+    'events.contributions': f'''NOT is_deleted AND {_NOT_PROTECTED} AND {_EVENT_VISIBLE.format('event_id')}
+        AND (protection_mode <> 1 OR session_id IS NULL
+             OR EXISTS (SELECT 1 FROM events.sessions s WHERE s.id = session_id))''',
     'events.sessions': f"NOT is_deleted AND {_NOT_PROTECTED} AND {_EVENT_VISIBLE.format('event_id')}",
     'events.session_blocks': 'EXISTS (SELECT 1 FROM events.sessions s WHERE s.id = session_id)',
     'events.timetable_entries': _EVENT_VISIBLE.format('event_id'),
@@ -132,13 +147,10 @@ POLICIES = {
     'events.persons': _EVENT_VISIBLE.format('event_id'),
     'events.event_person_links': _EVENT_VISIBLE.format('event_id'),
     'events.contribution_person_links': 'EXISTS (SELECT 1 FROM events.contributions c WHERE c.id = contribution_id)',
-    'events.notes': f'''NOT is_deleted AND {_EVENT_VISIBLE.format('event_id')}
-        AND (contribution_id IS NULL OR EXISTS (SELECT 1 FROM events.contributions c WHERE c.id = contribution_id))
-        AND (session_id IS NULL OR EXISTS (SELECT 1 FROM events.sessions s WHERE s.id = session_id))''',
+    # linked to a subcontribution: only subcontribution_id is set, and its access is its contribution's
+    'events.notes': f"NOT is_deleted AND {_EVENT_VISIBLE.format('event_id')}{_LINKED_OBJECT_VISIBLE}",
     'attachments.folders': f'''NOT is_deleted AND {_NOT_PROTECTED} AND event_id IS NOT NULL
-        AND {_EVENT_VISIBLE.format('event_id')}
-        AND (contribution_id IS NULL OR EXISTS (SELECT 1 FROM events.contributions c WHERE c.id = contribution_id))
-        AND (session_id IS NULL OR EXISTS (SELECT 1 FROM events.sessions s WHERE s.id = session_id))''',
+        AND {_EVENT_VISIBLE.format('event_id')}{_LINKED_OBJECT_VISIBLE}''',
     'attachments.attachments': f'''NOT is_deleted AND {_NOT_PROTECTED}
         AND EXISTS (SELECT 1 FROM attachments.folders f WHERE f.id = folder_id)''',
     'attachments.files': 'EXISTS (SELECT 1 FROM attachments.attachments a WHERE a.id = attachment_id)',
@@ -170,17 +182,18 @@ BEGIN
     is_admin := split_part(payload, ':', 3) = '1';
 END $fn$;
 
--- (category id, protecting category id, effective mode 1=public 2=protected); an inheriting root is public
+-- (category id, protecting category id, effective mode 0=public 2=protected): inheriting (1) categories
+-- take their parent's; the root cannot inherit
 CREATE OR REPLACE FUNCTION plugin_assistant.nl2sql_category_protection()
 RETURNS TABLE (category_id int, protecting_id int, mode int)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
     WITH RECURSIVE t AS (
-        SELECT c.id, c.id AS protecting_id, CASE WHEN c.protection_mode = 0 THEN 1 ELSE c.protection_mode END AS mode
+        SELECT c.id, c.id AS protecting_id, CASE WHEN c.protection_mode = 2 THEN 2 ELSE 0 END AS mode
         FROM categories.categories c WHERE c.parent_id IS NULL
         UNION ALL
         SELECT c.id,
-               CASE WHEN c.protection_mode = 0 THEN t.protecting_id ELSE c.id END,
-               CASE WHEN c.protection_mode = 0 THEN t.mode ELSE c.protection_mode END
+               CASE WHEN c.protection_mode = 1 THEN t.protecting_id ELSE c.id END,
+               CASE WHEN c.protection_mode = 1 THEN t.mode ELSE c.protection_mode END
         FROM categories.categories c JOIN t ON c.parent_id = t.id
     )
     SELECT id, protecting_id, mode FROM t
@@ -193,7 +206,7 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION plugin_assistant.nl2sql_public_category_ids()
 RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
-    SELECT category_id FROM plugin_assistant.nl2sql_category_protection() WHERE mode = 1
+    SELECT category_id FROM plugin_assistant.nl2sql_category_protection() WHERE mode = 0
 $fn$;
 
 -- categories whose protecting category grants the user read (or full) access
@@ -221,6 +234,11 @@ RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_cata
     SELECT id FROM m
 $fn$;
 
+CREATE OR REPLACE FUNCTION plugin_assistant.nl2sql_subcontribution_parent(int)
+RETURNS int LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
+    SELECT contribution_id FROM events.subcontributions WHERE id = $1 AND NOT is_deleted
+$fn$;
+
 CREATE OR REPLACE FUNCTION plugin_assistant.nl2sql_granted_event_ids()
 RETURNS SETOF int LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $fn$
     SELECT p.event_id FROM events.principals p
@@ -232,7 +250,7 @@ $fn$;
 
 _FUNCTION_NAMES = ('nl2sql_ctx()', 'nl2sql_category_protection()', 'nl2sql_user_groups()',
                    'nl2sql_public_category_ids()', 'nl2sql_read_category_ids()', 'nl2sql_managed_category_ids()',
-                   'nl2sql_granted_event_ids()')
+                   'nl2sql_granted_event_ids()', 'nl2sql_subcontribution_parent(int)')
 
 
 def _quote_literal(value):
@@ -253,6 +271,10 @@ def setup_sql(tables, existing_columns, indico_role, password=None):
     missing = sorted(set(tables) - set(POLICIES))
     if missing:
         raise ValueError(f'No row policy defined for allowlisted table(s): {", ".join(missing)}')
+    # the policies query these tables as the read-only role, so it needs them too
+    needed = {dep for table in tables for dep in re.findall(r'\b(?:events|attachments|categories)\.\w+', POLICIES[table])}
+    if needed - set(tables):
+        raise ValueError(f'Row policies need these tables allowlisted too: {", ".join(sorted(needed - set(tables)))}')
     lines = [
         '-- Indico assistant: read-only NL2SQL role with row-level security. Generated by',
         '-- `indico assistant nl2sql-db-sql`; run as a superuser or the owner of the Indico tables.',
@@ -284,6 +306,9 @@ def setup_sql(tables, existing_columns, indico_role, password=None):
         lines.append(f'REVOKE ALL ON FUNCTION plugin_assistant.{name} FROM PUBLIC;')
         lines.append(f'GRANT EXECUTE ON FUNCTION plugin_assistant.{name} TO {RO_ROLE};')
     schemas = sorted({t.split('.')[0] for t in tables})
+    # start from nothing, so a table removed from the allowlist loses its grant on a re-run
+    lines.append(f'REVOKE ALL ON ALL TABLES IN SCHEMA {", ".join(sorted({t.split(".")[0] for t in POLICIES}))} '
+                 f'FROM {RO_ROLE};')
     lines.append(f'GRANT USAGE ON SCHEMA {", ".join(schemas)} TO {RO_ROLE};')
     for table in sorted(tables):
         columns = sorted((set(tables[table]) | set(POLICY_COLUMNS)) & existing_columns.get(table, set()))
