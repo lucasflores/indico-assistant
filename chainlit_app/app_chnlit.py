@@ -132,6 +132,9 @@ async def _wait_for_answer(client: httpx.AsyncClient, job_id: str, auth_token: s
         response = await client.get(
             f"/api/assistant/chat/jobs/{job_id}", headers={"X-Assistant-Auth": auth_token}
         )
+        if response.status_code == 429 and loop.time() < deadline:  # polling too fast: the answer still comes
+            await asyncio.sleep(float(response.headers.get("Retry-After", POLL_INTERVAL)))
+            continue
         if response.status_code != 202 or loop.time() > deadline:
             return response
         await asyncio.sleep(POLL_INTERVAL)
