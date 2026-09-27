@@ -64,7 +64,7 @@ class RHHealth(RH):
         # Determine overall status
         if not enabled:
             status = "unhealthy"
-        elif llm_status != "connected":
+        elif llm_status not in ("connected", "configured"):
             status = "degraded"
         else:
             status = "healthy"
@@ -117,6 +117,11 @@ class RHHealth(RH):
 
         # Use the LLM service to perform actual health check
         try:
+            from flask import session
+            if not (session.user and session.user.is_admin):
+                # A live check is a paid LLM call; public callers (load balancers, anyone) only
+                # learn whether the provider is configured.
+                return {"status": "configured", "provider": provider, "model": model}
             health_status = plugin.llm_service.health_check()
             result = {
                 "status": health_status.status,
