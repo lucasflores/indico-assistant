@@ -27,7 +27,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "indico>=3.3",
-    "instructor>=1.0.0",
+    "instructor>=1.15",  # hooks: completion:response and completion:error per attempt
     "openai>=1.0.0",
     "ollama>=0.3.0",
     "langfuse>=2.0.0",

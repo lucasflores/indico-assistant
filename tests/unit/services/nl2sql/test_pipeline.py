@@ -770,3 +770,23 @@ class TestNL2SQLPipelineErrorResult:
 
         assert result.generated_sql == "SELECT * FROM secret_table"
         assert "secret_table" in result.tables_accessed
+
+
+def test_result_lists_the_llm_calls_made_for_the_question(pipeline):
+    """Each question's cost travels with its result (the shared call_log mixes concurrent requests)."""
+    from unittest.mock import MagicMock
+
+    from indico_assistant.services.llm.service import LLMService
+    from indico_assistant.services.nl2sql.models import PipelineResult
+
+    llm = LLMService(MagicMock())
+
+    def answer(*args, **kwargs):
+        llm._store([], {"stage": "QueryClassification", "cost_usd": "0.00010"})
+        llm._store([], {"stage": "SQLGeneration", "cost_usd": "0.00020"})
+        return PipelineResult(success=True, answer="Two events.")
+
+    pipeline._process = answer
+    result = pipeline.process("How many events?", user_id=1)
+    assert [c["stage"] for c in result.llm_calls] == ["QueryClassification", "SQLGeneration"]
+    assert len(pipeline.process("Again?", user_id=1).llm_calls) == 2  # not 4: a fresh list per question
