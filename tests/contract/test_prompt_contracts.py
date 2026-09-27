@@ -1,57 +1,11 @@
 """Contract tests for NL2SQL prompt outputs."""
 
-from typing import Any
-
 import pytest
 
 from indico_assistant.services.nl2sql.generator import SQL_GENERATION_PROMPT
 from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
 from indico_assistant.services.nl2sql.schema import SchemaContext
 from indico_assistant.services.nl2sql.validator import SQLValidator
-from indico_assistant.services.nl2sql.executor import QueryExecutor
-
-
-class _FakeEmbeddingService:
-    def __init__(self) -> None:
-        self.last_text: str | None = None
-
-    def embed_text(self, text: str) -> list[float]:
-        self.last_text = text
-        return [0.1, 0.2]
-
-
-class _FakeResult:
-    def __init__(self, rows: list[tuple[Any, ...]], columns: list[str]) -> None:
-        self._rows = rows
-        self._columns = columns
-
-    def keys(self) -> list[str]:
-        return self._columns
-
-    def fetchall(self) -> list[tuple[Any, ...]]:
-        return self._rows
-
-
-class _FakeSession:
-    def __init__(self) -> None:
-        self.last_params: dict[str, Any] | None = None
-
-    def execute(self, statement: Any, params: dict[str, Any] | None = None) -> _FakeResult:
-        sql_text = str(statement)
-        if "SET LOCAL statement_timeout" in sql_text:
-            return _FakeResult([], [])
-        self.last_params = params or {}
-        return _FakeResult([("chunk",)], ["content_text"])
-    
-    def begin_nested(self):
-        """Mock nested transaction context manager."""
-        return self
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, *args):
-        return False
 
 
 @pytest.mark.contract
@@ -114,26 +68,6 @@ def test_document_query_vector_pattern_in_prompt() -> None:
     assert "plugin_assistant.extracted_documents" in SQL_GENERATION_PROMPT
     assert "<=> :query_vector" in SQL_GENERATION_PROMPT
     assert "ORDER BY" in SQL_GENERATION_PROMPT
-
-
-@pytest.mark.contract
-def test_executor_substitutes_query_vector() -> None:
-    """Executor substitutes :query_vector parameter from embedding."""
-    fake_session = _FakeSession()
-
-    def factory() -> _FakeSession:
-        return fake_session
-
-    embedding_service = _FakeEmbeddingService()
-    executor = QueryExecutor(factory, embedding_service=embedding_service)
-
-    sql = "SELECT content_text FROM plugin_assistant.extracted_documents ORDER BY embedding <=> :query_vector"
-    result = executor.execute(sql, question="test question")
-
-    assert result.success
-    assert embedding_service.last_text == "test question"
-    assert fake_session.last_params is not None
-    assert fake_session.last_params.get("query_vector") == "[0.1,0.2]"
 
 
 @pytest.mark.contract

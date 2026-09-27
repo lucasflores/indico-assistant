@@ -67,7 +67,7 @@ class TestCreateNL2SQLPipeline:
         
         assert call_kwargs['llm_service'] == mock_llm_service
         assert call_kwargs['max_rows'] == 1000
-        assert call_kwargs['timeout_seconds'] == 30
+        assert call_kwargs['timeout_seconds'] == 10
         assert call_kwargs['max_correction_attempts'] == 3
     
     @patch('indico_assistant.services.nl2sql.factory.NL2SQLPipeline')
@@ -233,7 +233,7 @@ class TestCreateNL2SQLPipelineFromPlugin:
         call_kwargs = mock_create_pipeline.call_args[1]
         
         # Should use default values
-        assert call_kwargs['timeout_seconds'] == 30
+        assert call_kwargs['timeout_seconds'] == 10
         assert call_kwargs['max_rows'] == 1000
         assert call_kwargs['max_correction_attempts'] == 3
         assert call_kwargs['cache_ttl_seconds'] == 600

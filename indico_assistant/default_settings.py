@@ -13,7 +13,7 @@ DEFAULT_SETTINGS = {
     "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)
     "nl2sql_enabled": True,
-    "nl2sql_timeout": 30,
+    "nl2sql_timeout": 10,
     "nl2sql_max_rows": 1000,
     "nl2sql_max_corrections": 3,
     "nl2sql_cache_ttl": 600,

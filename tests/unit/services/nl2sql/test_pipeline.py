@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from indico_assistant.services.nl2sql.models import PipelineErrorType
+from indico_assistant.services.nl2sql.models import ExecutionResult, PipelineErrorType
 from indico_assistant.services.nl2sql.pipeline import NL2SQLPipeline
 
 
@@ -124,13 +124,17 @@ def pipeline(
     mock_db_session_factory,
     mock_cache: MagicMock,
 ) -> NL2SQLPipeline:
-    """Create a pipeline instance."""
-    return NL2SQLPipeline(
+    """Create a pipeline instance whose executor returns one row (no database needed)."""
+    pipeline = NL2SQLPipeline(
         llm_service=mock_llm_service,
         schema_context=mock_schema_context,
         db_session_factory=mock_db_session_factory,
         cache=mock_cache,
     )
+    pipeline._executor.execute = MagicMock(return_value=ExecutionResult(
+        success=True, rows=[{"event_id": 1, "title": "Event 1"}], row_count=1,
+        columns=["event_id", "title"], execution_time_ms=1))
+    return pipeline
 
 
 class TestNL2SQLPipelineInitialization:
@@ -557,7 +561,7 @@ class TestNL2SQLPipelineErrorCorrection:
         format_response.data.sources = []
         pipeline._formatter.format = MagicMock(return_value=format_response)
 
-        result = pipeline.process("How many events?", user_id=1)
+        result = pipeline.process("How many events?", user_id=1, user=MagicMock(id=1, is_admin=False))
 
         # Correction should have been attempted
         pipeline._corrector.correct.assert_called()
@@ -596,7 +600,7 @@ class TestNL2SQLPipelineErrorCorrection:
         correction_response.data.corrected_query = "SELECT 1"
         pipeline._corrector.correct = MagicMock(return_value=correction_response)
 
-        result = pipeline.process("Bad query", user_id=1)
+        result = pipeline.process("Bad query", user_id=1, user=MagicMock(id=1, is_admin=False))
 
         assert result.success is False
         assert result.error.error_type == PipelineErrorType.CORRECTION_EXHAUSTED
@@ -668,10 +672,8 @@ class TestNL2SQLPipelineEmptyResults:
         pipeline._validator.validate = MagicMock(return_value=valid_result)
 
         # Make execution return empty results
-        result_mock = MagicMock()
-        result_mock.keys.return_value = ["id"]
-        result_mock.fetchall.return_value = []
-        mock_db_session.execute.return_value = result_mock
+        pipeline._executor.execute = MagicMock(return_value=ExecutionResult(
+            success=True, rows=[], row_count=0, columns=["id"], execution_time_ms=1))
 
         empty_summary = MagicMock()
         empty_summary.answer = "No results found"
@@ -790,3 +792,43 @@ def test_result_lists_the_llm_calls_made_for_the_question(pipeline):
     result = pipeline.process("How many events?", user_id=1)
     assert [c["stage"] for c in result.llm_calls] == ["QueryClassification", "SQLGeneration"]
     assert len(pipeline.process("Again?", user_id=1).llm_calls) == 2  # not 4: a fresh list per question
+
+
+class TestNL2SQLPipelineAccessContext:
+    """Phase 0: the executor gets the authenticated user's context; timeouts are not corrected."""
+
+    def _run(self, pipeline, mock_classification_response, mock_sql_response, mock_format_response, **kwargs):
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock(return_value=mock_sql_response)
+        pipeline._formatter.format = MagicMock(return_value=mock_format_response)
+        pipeline._validator.validate = MagicMock(return_value=MagicMock(valid=True, violations=[]))
+        return pipeline.process("How many events?", **kwargs)
+
+    def test_context_is_the_authenticated_user_and_scope(self, pipeline, mock_classification_response,
+                                                         mock_sql_response, mock_format_response):
+        user = MagicMock(id=7, is_admin=False)
+        self._run(pipeline, mock_classification_response, mock_sql_response, mock_format_response,
+                  user_id=99, user=user, event_ids=[42])  # user_id=99: a claimed identity, not the viewer
+        context = pipeline._executor.execute.call_args.kwargs["context"]
+        assert (context.user_id, context.event_id, context.is_admin) == (7, 42, False)
+
+    def test_no_user_no_context(self, pipeline, mock_classification_response, mock_sql_response,
+                                mock_format_response):
+        pipeline._executor.execute = MagicMock(return_value=ExecutionResult(
+            success=False, rows=[], row_count=0, columns=[], execution_time_ms=0,
+            error_message="A user context is required to query event data", correctable=False))
+        pipeline._corrector.correct = MagicMock()
+        self._run(pipeline, mock_classification_response, mock_sql_response, mock_format_response, user_id=1)
+        assert pipeline._executor.execute.call_args.kwargs["context"] is None
+        pipeline._corrector.correct.assert_not_called()  # no paid rewrite for a query that can never run
+
+    def test_timeout_is_not_sent_to_the_corrector(self, pipeline, mock_classification_response,
+                                                  mock_sql_response, mock_format_response):
+        pipeline._executor.execute = MagicMock(return_value=ExecutionResult(
+            success=False, rows=[], row_count=0, columns=[], execution_time_ms=10000,
+            error_message="Query timed out after 30 seconds", correctable=False))
+        pipeline._corrector.correct = MagicMock()
+        self._run(pipeline, mock_classification_response, mock_sql_response, mock_format_response,
+                  user_id=1, user=MagicMock(id=1, is_admin=False))
+        pipeline._corrector.correct.assert_not_called()
+        assert pipeline._executor.execute.call_count == 1

@@ -16,37 +16,55 @@ import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DataError, ProgrammingError, SQLAlchemyError
 
 from indico_assistant.services.nl2sql.models import ExecutionResult
 
 if TYPE_CHECKING:
     from indico_assistant.services.embedding.service import EmbeddingService
+    from indico_assistant.services.nl2sql.readonly_db import QueryContext
 
 
 class ExecutionError(Exception):
     """Execution error raised for invalid execution preconditions."""
 
 
+TIMEOUT_MESSAGE_PREFIX = "Query timed out after"
+
+
+def is_timeout_error(message: str | None) -> bool:
+    """Statement timeouts must not be sent to the correction loop: the corrected query is just as heavy."""
+    text_ = (message or "").lower()
+    return "statement timeout" in text_ or text_.startswith(TIMEOUT_MESSAGE_PREFIX.lower())
+
+
 class QueryExecutor:
-    """Executes validated SQL queries."""
+    """Executes validated SQL as the read-only NL2SQL role (see readonly_db).
+
+    Each query runs on its own short read-only transaction, never on Indico's session: a statement
+    timeout, the signed per-question context that the row-level security policies read, and a hard
+    row cap (the query is wrapped in LIMIT and only max_rows + 1 rows are fetched).
+    """
 
     def __init__(
         self,
-        db_session_factory: Callable[[], Any],
+        connection_factory: Callable[[], Any] | None = None,
         max_rows: int = 1000,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 10,
         embedding_service: "EmbeddingService | None" = None,
+        signer: Callable[["QueryContext"], str] | None = None,
     ) -> None:
         """
-        Initialize the executor.
-
         Args:
-            db_session_factory: Factory function to get database session.
+            connection_factory: Returns a context-managed SQLAlchemy connection as the read-only role.
             max_rows: Maximum rows to return (FR-024).
-            timeout_seconds: Query timeout in seconds (FR-025).
+            timeout_seconds: Statement timeout (FR-025); the role also has its own.
+            signer: Signs the QueryContext for the row policies.
         """
-        self._db_session_factory = db_session_factory
+        from indico_assistant.services.nl2sql import readonly_db
+
+        self._connection_factory = connection_factory or readonly_db.connect
+        self._signer = signer or readonly_db.sign
         self._max_rows = max_rows
         self._timeout_seconds = timeout_seconds
         self._embedding_service = embedding_service
@@ -56,119 +74,53 @@ class QueryExecutor:
         sql: str,
         params: dict[str, Any] | None = None,
         question: str | None = None,
+        context: "QueryContext | None" = None,
     ) -> ExecutionResult:
-        """
-        Execute a validated SQL query.
-
-        The query is executed in a read-only transaction with timeout
-        and row limits applied. Results are converted to a list of
-        dictionaries.
-
-        Args:
-            sql: The validated SQL query.
-            params: Optional query parameters for parameterized queries.
-
-        Returns:
-            ExecutionResult with rows or error information.
-        """
+        """Execute a validated SQL query for the user and scope in `context`."""
         start_time = time.time()
         params = params or {}
 
         try:
-            session = self._db_session_factory()
-
-            # Use nested transaction (SAVEPOINT) to isolate query execution
-            # from parent transaction. This prevents rollback from affecting
-            # chat session/message persistence.
-            # Feature 013: Fix transaction isolation for error handling
-            with session.begin_nested():
-                # Add LIMIT if not present (FR-024)
-                sql_with_limit = self._ensure_limit(sql)
-
-                # Prepare vector params if needed
-                params = self._prepare_vector_params(
-                    sql_with_limit, question, params
-                )
-
-                # Set statement timeout (FR-025)
-                timeout_ms = self._timeout_seconds * 1000
-                session.execute(
-                    text(f"SET LOCAL statement_timeout = {timeout_ms}")
-                )
-
-                # Execute the query
-                result = session.execute(text(sql_with_limit), params)
-
-                # Get column names
+            if context is None:
+                raise ExecutionError("A user context is required to query event data")
+            signed_context = self._signer(context)
+            params = self._prepare_vector_params(sql, question, params)
+            with self._connection_factory() as conn, conn.begin():
+                conn.execute(text(f"SET LOCAL statement_timeout = {int(self._timeout_seconds * 1000)}"))
+                conn.execute(text("SELECT set_config('indico_assistant.ctx', :ctx, true)"),
+                             {"ctx": signed_context})
+                result = conn.execute(text(self._wrap_limit(sql)), params)
                 columns = list(result.keys())
+                raw_rows = result.fetchmany(self._max_rows + 1)
 
-                # Fetch results
-                raw_rows = result.fetchall()
-
-            # Check if truncated (outside nested transaction)
-            truncated = len(raw_rows) >= self._max_rows
-
-            # Convert to list of dicts
-            rows = [dict(zip(columns, row)) for row in raw_rows]
-
-            # Limit rows if exceeded
-            if len(rows) > self._max_rows:
-                rows = rows[: self._max_rows]
-                truncated = True
-
-            execution_time = int((time.time() - start_time) * 1000)
-
+            truncated = len(raw_rows) > self._max_rows
+            rows = [dict(zip(columns, row)) for row in raw_rows[: self._max_rows]]
             return ExecutionResult(
                 success=True,
                 rows=rows,
                 row_count=len(rows),
                 columns=columns,
-                execution_time_ms=execution_time,
+                execution_time_ms=int((time.time() - start_time) * 1000),
                 truncated=truncated,
             )
 
-        except ExecutionError as e:
-            execution_time = int((time.time() - start_time) * 1000)
-            return ExecutionResult(
-                success=False,
-                rows=[],
-                row_count=0,
-                columns=[],
-                execution_time_ms=execution_time,
-                error_message=str(e),
-            )
-
-        except SQLAlchemyError as e:
-            # Nested transaction automatically rolls back to SAVEPOINT
-            # No need to call rollback() - prevents affecting parent transaction
-            execution_time = int((time.time() - start_time) * 1000)
-            error_msg = str(e)
-
-            # Check for timeout
-            if "statement timeout" in error_msg.lower():
-                error_msg = (
-                    f"Query timed out after {self._timeout_seconds} seconds"
-                )
-
-            return ExecutionResult(
-                success=False,
-                rows=[],
-                row_count=0,
-                columns=[],
-                execution_time_ms=execution_time,
-                error_message=error_msg,
-            )
-
         except Exception as e:
-            # Nested transaction automatically rolls back to SAVEPOINT
-            execution_time = int((time.time() - start_time) * 1000)
+            error_msg = str(e)
+            if isinstance(e, ExecutionError):
+                pass
+            elif is_timeout_error(error_msg):
+                error_msg = f"{TIMEOUT_MESSAGE_PREFIX} {self._timeout_seconds} seconds"
+            elif not isinstance(e, SQLAlchemyError):
+                error_msg = f"Unexpected error: {error_msg}"
             return ExecutionResult(
                 success=False,
                 rows=[],
                 row_count=0,
                 columns=[],
-                execution_time_ms=execution_time,
-                error_message=f"Unexpected error: {str(e)}",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+                error_message=error_msg,
+                # Only errors in the SQL itself; a timeout (OperationalError) or setup failure would recur.
+                correctable=isinstance(e, (ProgrammingError, DataError)),
             )
 
     def _contains_vector_placeholder(self, sql: str) -> bool:
@@ -202,28 +154,9 @@ class QueryExecutor:
         updated_params["query_vector"] = vector_str
         return updated_params
 
-    def _ensure_limit(self, sql: str) -> str:
-        """
-        Ensure SQL has a LIMIT clause.
-
-        If the SQL doesn't already have a LIMIT, adds one with max_rows.
-
-        Args:
-            sql: The SQL query.
-
-        Returns:
-            SQL with LIMIT clause ensured.
-        """
-        sql_upper = sql.upper()
-
-        # Check if LIMIT already exists
-        if "LIMIT" in sql_upper:
-            return sql
-
-        # Add LIMIT
-        # Handle potential trailing semicolon
-        sql_stripped = sql.rstrip().rstrip(";")
-        return f"{sql_stripped} LIMIT {self._max_rows}"
+    def _wrap_limit(self, sql: str) -> str:
+        """Cap the rows in SQL whatever the query says (a LIMIT inside it may be missing or huge)."""
+        return f"SELECT * FROM ({sql.strip().rstrip(';')}) AS nl2sql_q LIMIT {self._max_rows + 1}"
 
     @property
     def max_rows(self) -> int:

@@ -154,6 +154,11 @@ class ExecutionResult(BaseModel):
         default=False,
         description="Whether results were truncated due to row limit",
     )
+    correctable: bool = Field(
+        default=True,
+        description="Whether rewriting the SQL could fix the failure (not for timeouts, "
+                    "connection or configuration errors)",
+    )
 
 
 class CachedResult(BaseModel):

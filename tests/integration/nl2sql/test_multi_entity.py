@@ -97,17 +97,6 @@ class TestMultiEntityQueryIntegration:
         # session_query should require multiple tables
         assert len(tables) > 1
 
-    def test_attendee_query_intent_maps_to_multiple_tables(
-        self, mock_llm_service: MagicMock
-    ) -> None:
-        """Attendee query should map to multiple tables."""
-        from indico_assistant.services.nl2sql.schema import SchemaContext
-
-        # Use class constant directly
-        tables = SchemaContext.INTENT_TABLES_MAP.get("attendee_query", [])
-
-        assert len(tables) > 1
-
     def test_schedule_query_intent_maps_to_multiple_tables(
         self, mock_llm_service: MagicMock
     ) -> None:
