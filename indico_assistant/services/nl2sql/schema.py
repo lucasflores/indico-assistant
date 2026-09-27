@@ -236,16 +236,18 @@ class SchemaContext:
         Get all tables that are allowed for queries.
 
         Args:
-            allowlist: Optional explicit list of allowed tables.
-                If None, returns all tables in schema.
+            allowlist: The admin's ``nl2sql_allowed_tables`` (list, or comma-separated string from
+                older settings). Empty means the default set; it can only narrow available_tables.yaml.
 
         Returns:
             List of allowed table names.
         """
-        if allowlist is not None:
-            return allowlist
-
         schema = self._load_schema()
+        if isinstance(allowlist, str):
+            allowlist = [t.strip() for t in allowlist.split(",")]
+        allowlist = [t for t in allowlist or () if t]
+        if allowlist:
+            return [t for t in allowlist if t in schema]
         return list(schema.keys())
 
     def is_table_allowed(
