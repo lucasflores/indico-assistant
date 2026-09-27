@@ -46,6 +46,8 @@ later (see Out of Scope).
 - Q: Suggest a time when none is given? → A: **Yes** (OQ-3), see US8.
 - Q: Admin control over actions? → A: **Yes**: an admin can enable or disable each action (OQ-4), FR-021.
 - Q: Can a file sent in the chat be attached ("attach this to my contribution")? → A: **Yes**, see US9.
+- Q: How far back can undo reach? → A: Any plan confirmed in the **last 24 hours**, from any chat.
+- Q: Upload limits? → A: pdf, docx, pptx, xlsx, txt, md, png, jpg; 25 MB per file; 5 files per message.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -202,7 +204,8 @@ the Teams meeting all move by one hour.
 
 ### User Story 7 - Undo (Priority: P3)
 
-"Undo that" within the chat reverses the last carried-out plan, after confirmation: objects it created are
+"Undo that" reverses a plan the user confirmed in the last 24 hours (from any chat; the assistant lists them
+when there is more than one), after confirmation: objects it created are
 deleted (the Teams meeting is cancelled); changes it made to existing objects are restored.
 
 **Why this priority**: a safety net; less important once confirmation works.
@@ -435,7 +438,7 @@ contribution's material, logged as the user's upload.
 - ~~OQ-2~~ resolved: rank categories by both recent activity and chat topic.
 - ~~OQ-3~~ resolved: suggest times (US8, FR-023); Outlook free/busy pending the tenant probe.
 - ~~OQ-4~~ resolved: per-action admin switch (FR-021).
-- **OQ-5**: Undo window: which confirmed plans can "undo" reach — only the most recent plan in the current
-  chat, or any plan the user confirmed in the last N hours (from any chat)?
-- **OQ-6**: Allowed upload types and size for chat files (default proposal: pdf, docx, pptx, xlsx, txt, md,
-  png, jpg; 25 MB; 5 files per message).
+- ~~OQ-5~~ resolved: undo reaches any plan the user confirmed in the last 24 hours, from any chat; the
+  assistant lists them and the user picks (US7).
+- ~~OQ-6~~ resolved: chat uploads limited to pdf, docx, pptx, xlsx, txt, md, png, jpg; 25 MB per file; 5 files
+  per message (FR-024).
