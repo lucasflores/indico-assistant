@@ -40,6 +40,17 @@ def validator():
     "SELECT dblink_exec('host=x', 'drop table y') FROM events.events",         # remote connections
     "SELECT query_to_xml('select * from users.users', true, true, '') FROM events.events",  # SQL from a string
     "SELECT lo_import('/etc/passwd') FROM events.events",                      # file read
+    # SQL audit: string forms whose quoting rules differ from plain literals are refused outright
+    "SELECT E'x' FROM events.events",
+    "SELECT e.id FROM events.events e WHERE e.title = e'x'",
+    "SELECT U&'x' FROM events.events",
+    'SELECT U&"id" FROM events.events',
+    # session settings, the row-security helpers, and one-call resource hogs
+    "SELECT current_setting('indico_assistant.ctx') FROM events.events",
+    "SELECT plugin_assistant.nl2sql_granted_event_ids() FROM events.events",
+    "SELECT repeat('x', 1000) FROM events.events",
+    "SELECT lpad(e.title, 1000) FROM events.events e",
+    "SELECT generate_series(1, 10) FROM events.events",
 ])
 def test_rejected(validator, sql):
     result = validator.validate(sql)
@@ -55,6 +66,10 @@ def test_rejected(validator, sql):
     "JOIN events.persons p ON p.id = cpl.person_id WHERE c.event_id = :event_id LIMIT 50",
     "SELECT e.id FROM events.events e, events.contributions c WHERE c.event_id = e.id LIMIT 5",  # allowed comma join
     "SELECT d.content FROM plugin_assistant.extracted_documents d ORDER BY d.embedding <=> :query_vector LIMIT 10",
+    # not escape strings: a word ending in e before a quote, a CASE branch, a doubled quote, a cast
+    "SELECT e.id FROM events.events e WHERE e.type = 'lecture' AND e.title <> 'the office'",
+    "SELECT CASE WHEN e.id > 1 THEN 'a' ELSE'b' END FROM events.events e",
+    "SELECT e.id FROM events.events e WHERE e.title ILIKE '%it''s%' AND e.start_dt::date > '2026-01-01'",
 ])
 def test_allowed(validator, sql):
     result = validator.validate(sql)

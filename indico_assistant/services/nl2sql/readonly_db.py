@@ -239,6 +239,10 @@ def _quote_literal(value):
     return "'" + value.replace("'", "''") + "'"
 
 
+def _quote_ident(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
 def setup_sql(tables, existing_columns, indico_role, password=None):
     """The one-time setup script.
 
@@ -273,7 +277,7 @@ def setup_sql(tables, existing_columns, indico_role, password=None):
         "INSERT INTO plugin_assistant.nl2sql_secret SELECT encode(gen_random_bytes(32), 'hex') "
         'WHERE NOT EXISTS (SELECT 1 FROM plugin_assistant.nl2sql_secret);',
         'REVOKE ALL ON plugin_assistant.nl2sql_secret FROM PUBLIC;',
-        f'GRANT SELECT ON plugin_assistant.nl2sql_secret TO {indico_role};',
+        f'GRANT SELECT ON plugin_assistant.nl2sql_secret TO {_quote_ident(indico_role)};',
         _FUNCTIONS,
     ]
     for name in _FUNCTION_NAMES:

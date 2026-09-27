@@ -123,3 +123,27 @@ def test_vector_placeholder_is_filled_from_the_question():
     make(conn, embedding_service=embedder).execute('SELECT 1 ORDER BY x <=> :query_vector', question='q',
                                                    context=CTX)
     assert conn.statements[-1][1] == {'query_vector': '[0.5,0.25]'}
+
+
+def test_colons_in_generated_sql_are_not_taken_for_parameters():
+    """text() read ':TBD' inside a literal as a missing parameter; only our own placeholders bind now."""
+    from sqlalchemy import text
+
+    from indico_assistant.services.nl2sql.executor import _escape_colons
+
+    sql = "SELECT e.id FROM events.events e WHERE e.title ILIKE '%(:TBD)%' AND e.id = :event_id AND e.start_dt::date > now()"
+    escaped = _escape_colons(sql, {'event_id': 1})
+    assert sorted(text(escaped).compile().params) == ['event_id']  # before the fix: ['TBD', 'event_id']
+
+
+def test_executor_binds_only_known_parameters():
+    executed = []
+
+    class Recording(FakeConnection):
+        def execute(self, statement, params=None):
+            executed.append(statement)
+            return super().execute(statement, params)
+
+    make(Recording()).execute("SELECT 1 FROM events.events e WHERE e.title = ' :x' AND e.id = :event_id",
+                              params={'event_id': 3}, context=CTX)
+    assert sorted(executed[-1].compile().params) == ['event_id']  # ':x' stays text
