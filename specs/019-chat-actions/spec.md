@@ -40,6 +40,12 @@ later (see Out of Scope).
   Suggestions are offered, never applied without the user's acceptance.
 - Q: Move common reads off NL2SQL now? → A: **Later**; not in this feature.
 - Q: Expose actions through MCP? → A: **Later**; not in this feature.
+- Q: What does "with Makoto" make him? → A: Always a **Teams invitee** and an **Indico reminder recipient**;
+  a **speaker** only when slots/contributions are mentioned (OQ-1).
+- Q: How are categories ranked? → A: **Both** the user's recent activity and the chat's topic (OQ-2).
+- Q: Suggest a time when none is given? → A: **Yes** (OQ-3), see US8.
+- Q: Admin control over actions? → A: **Yes**: an admin can enable or disable each action (OQ-4), FR-021.
+- Q: Can a file sent in the chat be attached ("attach this to my contribution")? → A: **Yes**, see US9.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -144,6 +150,8 @@ with an unknown name, it offers "add as a guest speaker (name, email)".
 3. **Given** a person with no Microsoft 365 account in the tenant, **Then** the plan says they will be a
    speaker but not a Teams co-organizer (they can still join via the link).
 4. **Given** "both of us", **Then** the requesting user is included as themselves.
+5. **Given** "with Makoto" and no slots, **Then** Makoto is a Teams invitee and a recipient of the event
+   reminder, not a speaker; **given** slots, he is also the speaker of his slot.
 
 ---
 
@@ -206,6 +214,51 @@ deleted (the Teams meeting is cancelled); changes it made to existing objects ar
 2. **Given** others have changed the objects since, **Then** undo lists what differs and asks before
    proceeding.
 
+### User Story 8 - Suggesting a time (Priority: P2)
+
+"Set up 30 minutes with Makoto this week" — the plan proposes two or three slots when both are free, with
+the reason ("you both have nothing in Indico or Outlook on Thursday 10:00–11:00").
+
+**Why this priority**: removes the back-and-forth of finding a time; the user asked for it.
+
+**Acceptance Scenarios**:
+
+1. **Given** no time in the request, **Then** the plan proposes up to three slots within working hours, and
+   the user picks one (or names another).
+2. **Given** availability sources, **Then** the plan uses Indico (events the people manage, chair, speak in
+   or are registered for) and, where the tenant allows it, Outlook free/busy through Microsoft Graph; the
+   plan says which sources were used.
+3. **Given** a person whose availability cannot be read, **Then** the plan says so rather than assuming they
+   are free.
+
+---
+
+### User Story 9 - Attaching a file sent in the chat (Priority: P2)
+
+The user drops a PDF into the chat and says "attach this to my contribution to the meeting". The plan
+shows the file, the contribution it will go to, and the folder; on confirmation the file is an Indico
+attachment of that contribution, exactly as if uploaded through the contribution's material page (and the
+document index picks it up).
+
+**Why this priority**: a common follow-up to creating a meeting, and the same confirm-before-write path.
+
+**Independent Test**: as the speaker of a contribution, upload a PDF in the chat and ask to attach it to
+"my contribution": the plan names the right contribution; after confirming, the file is listed in the
+contribution's material, logged as the user's upload.
+
+**Acceptance Scenarios**:
+
+1. **Given** a file sent in the chat, **Then** it is stored as an Indico unclaimed file (auto-deleted by
+   Indico if never used) and the assistant can refer to it in the conversation.
+2. **Given** "my contribution", **Then** it resolves to contributions where the user is a speaker (asking if
+   several), and the plan is refused unless `can_manage_attachments(contribution, user)` holds.
+3. **Given** the plan is confirmed, **Then** the file becomes an attachment through the same steps as
+   Indico's upload page (attachment + file, `attachment_created` signal, event log).
+4. **Given** a file type or size the instance does not allow, **Then** the upload is refused in the chat
+   with the limits.
+5. **Given** the assistant reads the file to make suggestions (e.g. a title), **Then** its content is data
+   only (FR-017).
+
 ### Edge Cases
 
 - **Time in the past** ("today at 2pm" at 3pm): the plan flags it and asks (tomorrow? keep?).
@@ -245,7 +298,10 @@ deleted (the Teams meeting is cancelled); changes it made to existing objects ar
   | `add_contribution` | `create_contribution` + `schedule_contribution`, `person_link_data` (speakers) | `event.can_manage(user)` |
   | `update_contribution` | `update_contribution` / `update_timetable_entry` | `contribution.can_manage(user)` |
   | `add_teams_room` | the VC creation sequence of `RHVCManageEventCreate` (vc_teams `create_room`, `vc_room_created` signal, notification) | `plugin.can_manage_vc_rooms(user, event)` and `event.can_manage(user)` |
-  | `attach_link` | `add_attachment_link` (takes a form object: a small adapter supplies the same fields) | `event.can_manage(user)` |
+  | `attach_link` | `add_attachment_link` (takes a form object: a small adapter supplies the same fields) | `can_manage_attachments(obj, user)` |
+  | `attach_file` | the steps of Indico's upload page (`Attachment` + `AttachmentFile.save`, `attachment_created`), from a chat upload | `can_manage_attachments(obj, user)` |
+  | `add_reminder` | an `EventReminder` as the reminders page creates it (`send_to_speakers` + explicit invitee emails) | `event.can_manage(user)` |
+  | `suggest_times` (read) | Indico involvement queries; Graph `getSchedule` where permitted | people the user could find via user search |
   | `delete_created` (undo only) | Indico's deletion operations | object created by this plan, `can_manage` |
 
 - **FR-002**: Actions MUST NOT write through SQL, and MUST NOT call Indico's web endpoints; they call the
@@ -294,6 +350,33 @@ deleted (the Teams meeting is cancelled); changes it made to existing objects ar
 - **FR-017**: Content read from Indico (descriptions, notes, documents, transcripts) is data, not
   instructions: it may shape suggestions but MUST NOT add actions to a plan on its own, and every action still
   needs confirmation (FR-007).
+
+**Reminders and invitees**
+
+- **FR-022**: Invitees who are not speakers MUST receive the Teams invitation and be explicit recipients of an
+  event reminder; speakers are covered by the reminder's `send_to_speakers`. The reminder's default timing
+  (e.g. 15 minutes before) is an admin setting, shown in the plan and editable.
+
+**Times**
+
+- **FR-023**: When no time is given, the plan MUST propose up to three slots from the availability of the user
+  and the named people, stating the sources used; Outlook free/busy (Graph `calendar/getSchedule`,
+  permission `Calendars.ReadBasic`) is used only if the tenant probe confirms it works with the scoped
+  service-account setup, otherwise Indico-only.
+
+**Chat uploads**
+
+- **FR-024**: Chainlit MUST accept file uploads again (disabled in Phase 1 because files were ignored), limited
+  to the document types and size the instance allows for attachments, and forward them to a new Indico
+  endpoint that stores them as unclaimed `File`s owned by the user and tied to the chat session.
+- **FR-025**: An uploaded file MUST only be usable by its uploader, and is claimed (copied into an
+  `AttachmentFile`) only by a confirmed `attach_file` step; unused uploads are removed by Indico's own
+  unclaimed-file cleanup.
+
+**Administration**
+
+- **FR-021**: An admin setting MUST enable or disable each action individually (and all writes at once);
+  a disabled action is never planned, and the assistant says it is not available.
 
 **Integration**
 
@@ -348,10 +431,11 @@ deleted (the Teams meeting is cancelled); changes it made to existing objects ar
 
 ## Open Questions
 
-- **OQ-1**: "With Makoto" — does it mean speaker, attendee (Teams invite only), or both? Proposal: invited to
-  Teams always; speaker only when slots/contributions are mentioned.
-- **OQ-2**: Ranking categories: by the user's recent event activity, by the chat's topic, or both?
-- **OQ-3**: Where suggestions stop: should the assistant also suggest a *time* (from participants'
-  schedules in Indico) when none is given?
-- **OQ-4**: Should an admin setting limit which actions are enabled (e.g. start with create/update only)?
-- **OQ-5**: Undo window: only the last plan in the chat, or any plan within N hours?
+- ~~OQ-1~~ resolved: invitee = Teams invite + reminder recipient; speaker only with slots (FR-022).
+- ~~OQ-2~~ resolved: rank categories by both recent activity and chat topic.
+- ~~OQ-3~~ resolved: suggest times (US8, FR-023); Outlook free/busy pending the tenant probe.
+- ~~OQ-4~~ resolved: per-action admin switch (FR-021).
+- **OQ-5**: Undo window: which confirmed plans can "undo" reach — only the most recent plan in the current
+  chat, or any plan the user confirmed in the last N hours (from any chat)?
+- **OQ-6**: Allowed upload types and size for chat files (default proposal: pdf, docx, pptx, xlsx, txt, md,
+  png, jpg; 25 MB; 5 files per message).
