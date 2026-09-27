@@ -44,7 +44,7 @@ def create_instructor_client(
     """Create an Instructor client for the specified provider.
     
     Args:
-        provider: Provider name ("ollama", "huggingface", "openai", or other OpenAI-compatible).
+        provider: Provider name ("ollama", "huggingface", "openai", "ibis", or other OpenAI-compatible).
         model: Model name to use.
         base_url: Optional custom base URL for the provider.
         api_key: Optional API key for authentication.
@@ -91,7 +91,7 @@ def create_instructor_client(
             return _create_openai_client(model, base_url, api_key)
         else:
             raise ValueError(
-                f"Unsupported provider '{provider}'. Supported: ollama, huggingface, openai. "
+                f"Unsupported provider '{provider}'. Supported: ollama, huggingface, openai, ibis. "
                 f"For other providers, ensure base_url and api_key are configured."
             )
 
