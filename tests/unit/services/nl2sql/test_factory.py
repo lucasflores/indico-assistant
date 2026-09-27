@@ -57,14 +57,11 @@ class TestCreateNL2SQLPipeline:
         
         assert result == mock_pipeline
         
-        # Verify defaults
-        mock_cache_class.assert_called_once_with(
-            ttl_seconds=600,
-            max_entries=1000
-        )
+        # Verify defaults; no cache, as its key ignores the question's event scope
+        mock_cache_class.assert_not_called()
         mock_pipeline_class.assert_called_once()
         call_kwargs = mock_pipeline_class.call_args[1]
-        
+        assert call_kwargs['cache'] is None
         assert call_kwargs['llm_service'] == mock_llm_service
         assert call_kwargs['max_rows'] == 1000
         assert call_kwargs['timeout_seconds'] == 10
@@ -86,6 +83,7 @@ class TestCreateNL2SQLPipeline:
             max_rows=500,
             timeout_seconds=60,
             max_correction_attempts=5,
+            enable_cache=True,
             cache_ttl_seconds=300,
             cache_max_entries=500,
         )

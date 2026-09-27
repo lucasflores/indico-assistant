@@ -192,9 +192,9 @@ Returns the health status of the plugin:
 }
 ```
 
-Any logged-in user may call it. Only admins trigger a live LLM check (which costs a request);
-everyone else gets `configured` from the settings alone. Anonymous requests to any assistant
-endpoint get 401.
+It is public, for load balancers and monitoring. Only admins trigger a live LLM check (which
+costs a request); everyone else gets `configured` from the settings alone. Anonymous requests to
+every other assistant endpoint get 401.
 
 Status values:
 - `healthy`: All services operational

@@ -315,26 +315,21 @@ class LangfuseClient:
 
 # Module-level client instance (lazy initialization)
 _client_instance: Optional[LangfuseClient] = None
+_client_key: tuple | None = None
+_CLIENT_SETTINGS = ('langfuse_enabled', 'langfuse_privacy_level', 'langfuse_host',
+                    'langfuse_public_key', 'langfuse_secret_key')
 
 
 def get_langfuse_client(settings: dict) -> LangfuseClient:
-    """Get or create a LangfuseClient instance (T012).
-    
-    This factory function provides a singleton-like pattern for the
-    Langfuse client, but allows re-initialization with new settings.
-    
-    Args:
-        settings: Plugin settings dictionary
-        
-    Returns:
-        LangfuseClient instance
-    """
-    global _client_instance
-    
-    # Create new instance if none exists or settings changed
-    if _client_instance is None:
-        _client_instance = LangfuseClient(settings)
-    
+    """The per-process LangfuseClient, rebuilt when its settings change (T012)."""
+    global _client_instance, _client_key
+
+    key = tuple(settings.get(name) for name in _CLIENT_SETTINGS)
+    if _client_instance is None or key != _client_key:
+        # ponytail: no lock; two threads seeing a settings change at once each build a client
+        if _client_instance is not None:
+            _client_instance.shutdown()
+        _client_instance, _client_key = LangfuseClient(settings), key
     return _client_instance
 
 

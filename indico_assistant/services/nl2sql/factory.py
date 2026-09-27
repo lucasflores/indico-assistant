@@ -34,7 +34,7 @@ def create_nl2sql_pipeline(
     llm_service: LLMService,
     schema_file_path: str | None = None,
     db_session_factory: Callable[[], Any] | None = None,
-    enable_cache: bool = True,
+    enable_cache: bool = False,
     cache_ttl_seconds: int = 600,
     cache_max_entries: int = 1000,
     max_rows: int = 1000,
@@ -60,7 +60,8 @@ def create_nl2sql_pipeline(
             If None, uses default path.
         db_session_factory: Session factory for the audit log (never runs generated SQL).
             If None, uses Indico's db.session.
-        enable_cache: Whether to enable query caching (default: True).
+        enable_cache: Whether to enable query caching (default: False). Its key (user, SQL) ignores the
+            event scope of the question, so only enable it for callers with a single scope.
         cache_ttl_seconds: Cache TTL in seconds (default: 600).
         cache_max_entries: Maximum cache entries (default: 1000).
         max_rows: Maximum rows to return (default: 1000).
@@ -140,8 +141,7 @@ def create_nl2sql_pipeline_from_plugin(
 
     return create_nl2sql_pipeline(
         llm_service=llm_service,
-        # ponytail: no result cache. Its key (user, SQL) ignores the event scope, and a per-chat pipeline
-        # never hits it anyway; a shared cache would need the full QueryContext in the key.
+        # ponytail: no result cache (see enable_cache); a shared one would need the full QueryContext in the key
         enable_cache=False,
         max_rows=max_rows,
         timeout_seconds=timeout,

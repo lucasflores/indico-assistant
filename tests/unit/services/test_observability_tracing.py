@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from indico_assistant.services.observability.client import LangfuseClient, NoOpSpan
+from indico_assistant.services.observability.client import LangfuseClient, NoOpSpan, get_langfuse_client, reset_client
 
 
 def _client(observation):
@@ -29,3 +29,12 @@ def test_langfuse_failure_falls_back_to_noop(method):
         raise ConnectionError('langfuse down')
     with getattr(_client(broken), method)('x') as observation:
         assert isinstance(observation, NoOpSpan)
+
+
+def test_client_is_shared_until_its_settings_change():
+    reset_client()
+    settings = {'langfuse_enabled': False, 'langfuse_host': 'https://a'}
+    first = get_langfuse_client(settings)
+    assert get_langfuse_client(dict(settings)) is first
+    assert get_langfuse_client({**settings, 'langfuse_host': 'https://b'}) is not first
+    reset_client()

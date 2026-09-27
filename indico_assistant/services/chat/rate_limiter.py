@@ -44,15 +44,13 @@ class RateLimiter:
 
     def check_rate(self, user_id: int, endpoint_type: str = 'chat') -> RateLimitResult:
         """Count a request by ``user_id``; refused if any limit of ``endpoint_type`` is used up."""
-        limiters = self._limiters.get(endpoint_type, self._limiters['chat'])
-        for limiter in limiters:
-            if not limiter.test(user_id):
+        for limiter in self._limiters.get(endpoint_type, self._limiters['chat']):
+            # hit() checks and counts in one atomic Redis step, and counts nothing when it refuses
+            # ponytail: a refusal by a later limit leaves the earlier ones counted (shortest window first)
+            if not limiter.hit(user_id):
                 retry_after = int(limiter.get_reset_delay(user_id).total_seconds())
                 return RateLimitResult(allowed=False, remaining=0, retry_after=max(1, retry_after))
-        for limiter in limiters:
-            limiter.hit(user_id)
         return RateLimitResult(allowed=True, remaining=-1, retry_after=0)
-
 
 _rate_limiter: RateLimiter | None = None
 
