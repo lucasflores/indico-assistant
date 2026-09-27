@@ -56,17 +56,12 @@ attachments.attachments:
       type: INTEGER
       description: Folder ID containing this attachment.
       nullable: true
-    event_id:
-      type: INTEGER
-      description: Event ID associated with the attachment.
-      nullable: true
     title:
       type: VARCHAR
       description: Attachment title.
       nullable: true
   relationships:
     - attachments.folders.id -> attachments.attachments.folder_id
-    - events.events.id -> attachments.attachments.event_id
 
 attachments.folders:
   description: Table containing folder metadata for attachments.
@@ -512,13 +507,8 @@ events.session_blocks:
       type: INTEGER
       description: Session ID associated with the block.
       nullable: false
-    event_id:
-      type: INTEGER
-      description: Event ID associated with the block.
-      nullable: false
   relationships:
     - events.sessions.id -> events.session_blocks.session_id
-    - events.events.id -> events.session_blocks.event_id
 
 events.tracks:
   description: Table containing contribution tracks within events.

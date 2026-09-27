@@ -169,7 +169,7 @@ class TestRHSessionDetail:
             msg.role = role
             msg.content = f"Message {i}"
             msg.created_at = datetime.now(timezone.utc)
-            msg.metadata = None
+            msg.metadata_json = None
             mock_messages.append(msg)
         
         with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:

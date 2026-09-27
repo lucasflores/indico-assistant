@@ -315,3 +315,13 @@ def test_admin_allowlist_only_narrows(setting, expected):
     everything = context.get_all_allowed_tables()
     assert "events.events" in everything and "users.users" not in everything
     assert context.get_all_allowed_tables(setting) == (expected or everything)
+
+
+def test_allowlist_names_only_real_columns():
+    """Columns in available_tables.yaml must exist in Indico 3.3, or the LLM writes SQL that fails."""
+    missing = {
+        ("attachments.attachments", "event_id"),  # attachments reach the event through their folder
+        ("events.session_blocks", "event_id"),     # blocks reach the event through their session
+    }
+    schema = SchemaContext()._load_schema()
+    assert not {(t, c) for t, c in missing if c in (schema[t].get("columns") or {})}

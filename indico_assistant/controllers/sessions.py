@@ -142,7 +142,9 @@ class RHSessionDetail(RHChatBase):
         if not rate_result.allowed:
             raise self._rate_limit_error(rate_result.retry_after)
 
-    def _process(self, session_id: str):
+    def _process(self, session_id: str | None = None):
+        # Indico does not pass URL args to _process; this never worked through the real route
+        session_id = session_id or request.view_args["session_id"]
         """Get session details with message history.
         
         Args:
@@ -192,7 +194,7 @@ class RHSessionDetail(RHChatBase):
                     role=msg.role,
                     content=msg.content,
                     created_at=msg.created_at.isoformat(),
-                    metadata=msg.metadata
+                    metadata=msg.metadata_json  # (msg.metadata is SQLAlchemy's table MetaData)
                 ))
             
             response = SessionDetailResponse(
@@ -231,7 +233,9 @@ class RHSessionDelete(RHChatBase):
         if not rate_result.allowed:
             raise self._rate_limit_error(rate_result.retry_after)
 
-    def _process(self, session_id: str):
+    def _process(self, session_id: str | None = None):
+        # Indico does not pass URL args to _process; this never worked through the real route
+        session_id = session_id or request.view_args["session_id"]
         """Delete a chat session.
         
         Args:
