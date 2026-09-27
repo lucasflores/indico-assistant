@@ -36,7 +36,11 @@ class SQLValidator:
     # connections or run SQL from a string. Matched on the query with literals removed and
     # identifier quotes stripped, so "set_config"( or pg_catalog.pg_sleep( are caught too.
     FORBIDDEN_FUNCTION_PATTERN: Pattern[str] = re.compile(
-        r"\b(pg_\w+|set_config|dblink\w*|lo_\w+|(?:query|table|cursor|schema|database)_to_xml\w*)\s*\(",
+        r"\b(pg_\w+|set_config|current_setting|dblink\w*|lo_\w+|(?:query|table|cursor|schema|database)_to_xml\w*"
+        # resource-heavy builders: one call can allocate up to 1 GB or generate unbounded rows
+        r"|repeat|lpad|rpad|generate_series|string_to_table"
+        # the row-security helpers are for the policies, not for queries
+        r"|nl2sql_\w+)\s*\(",
         re.IGNORECASE,
     )
     SYSTEM_SCHEMA_PATTERN: Pattern[str] = re.compile(r"\b(pg_catalog|information_schema|pg_toast)\s*\.",
@@ -105,7 +109,7 @@ class SQLValidator:
         # Rules below run on the code only: literals blanked, identifier quotes removed
         code = self._code_only(sql)
         if code is None:
-            return self._result(sql, [], ["Unterminated quote in query"])
+            return self._result(sql, [], ["Unterminated quote or unsupported string syntax in query"])
         if "--" in code or "/*" in code:
             violations.append("SQL comments are not allowed")
         if ";" in code.rstrip().rstrip(";"):
@@ -194,12 +198,18 @@ class SQLValidator:
     def _code_only(sql: str) -> str | None:
         """The query with string literals blanked and double-quoted identifiers unquoted.
 
-        Returns None on an unterminated quote. Keeps positions roughly aligned; only used for checks.
+        Returns None on an unterminated quote, and on escape (E'...') or Unicode (U&'...') strings: their
+        rules differ from plain literals, so a scanner that treats them like plain literals can disagree
+        with Postgres about where a string ends. Generated queries never need them.
+        Keeps positions roughly aligned; only used for checks.
         """
         out, i, n = [], 0, len(sql)
         while i < n:
             ch = sql[i]
             if ch in ("'", '"'):
+                before = sql[max(0, i - 3):i]
+                if re.search(r"(?:^|[^\w$])(?:[eE]|[uU]&)$", before):  # E'...', U&'...' (not e.g. title')
+                    return None
                 j = i + 1
                 while True:
                     j = sql.find(ch, j)

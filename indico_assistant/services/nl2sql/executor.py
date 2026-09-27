@@ -12,6 +12,7 @@ Executes validated SQL queries against the database with proper
 permission enforcement and row limits.
 """
 
+import re
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -24,6 +25,20 @@ from indico_assistant.services.nl2sql.models import ExecutionResult
 if TYPE_CHECKING:
     from indico_assistant.services.embedding.service import EmbeddingService
     from indico_assistant.services.nl2sql.readonly_db import QueryContext
+
+
+# ":name" that SQLAlchemy's text() would take as a bind parameter (not "::" casts, not already escaped)
+_BIND_PARAM = re.compile(r"(?<![:\w\\]):(\w+)")
+
+
+def _escape_colons(sql, params):
+    """Keep only our own placeholders as bind parameters.
+
+    text() treats every ":word" as a parameter, even inside a string such as '(:TBD)', so such queries
+    failed with a missing-parameter error. Everything that is not a parameter we bind is escaped and
+    reaches Postgres unchanged.
+    """
+    return _BIND_PARAM.sub(lambda m: m.group(0) if m.group(1) in (params or {}) else "\\" + m.group(0), sql)
 
 
 class ExecutionError(Exception):
@@ -85,7 +100,7 @@ class QueryExecutor:
             params = self._prepare_vector_params(sql, question, params)
             with readonly_db.scoped_connection(context, self._connection_factory, self._signer) as conn:
                 conn.execute(text(f"SET LOCAL statement_timeout = {int(self._timeout_seconds * 1000)}"))
-                result = conn.execute(text(self._wrap_limit(sql)), params)
+                result = conn.execute(text(_escape_colons(self._wrap_limit(sql), params)), params)
                 columns = list(result.keys())
                 raw_rows = result.fetchmany(self._max_rows + 1)
 
