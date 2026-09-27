@@ -8,14 +8,23 @@ Feature: 005-langfuse-observability (T019) - Added tracing instrumentation
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import time
+from collections import deque
 from typing import TYPE_CHECKING, Any, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
 from indico_assistant.services.llm.errors import LLMError, ErrorType, _map_exception_to_error
 from indico_assistant.services.llm.models import LLMResponse, HealthStatus
+
+# Completion records of the generate() call running in this thread/task. Instructor calls hooks in the
+# calling thread, so concurrent calls on one shared client each see only their own completions.
+# Holds (records, response model name, requested model).
+_current_calls: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("llm_current_calls", default=None)
+
+CALL_LOG_MAX = 1000  # the shared call_log keeps only the most recent records
 
 if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
@@ -86,10 +95,20 @@ class LLMService:
         self._client = None
         self._logger = logger
         self._tracer: Optional["Tracer"] = None
-        # One completion_record() per HTTP call made by generate(); callers
-        # (e.g. the eval harness) read and clear it.
-        self.call_log: list[dict[str, Any]] = []
+        # Recent completion_record()s across calls, for single-threaded callers such as the eval
+        # harness (clear, run, read). Bounded: the service lives as long as the process. Per-call
+        # records are on each LLMResponse (.calls), which is what concurrent callers should use.
+        self.call_log: deque[dict[str, Any]] = deque(maxlen=CALL_LOG_MAX)
     
+    def _record_completion(self, completion: Any) -> None:
+        current = _current_calls.get()
+        if current is None:  # a completion outside generate() (e.g. health_check)
+            return
+        calls, stage, model = current
+        record = completion_record(stage, model, completion)
+        calls.append(record)
+        self.call_log.append(record)
+
     def set_tracer(self, tracer: "Tracer") -> None:
         """Set tracer for observability instrumentation (T019).
         
@@ -153,6 +172,8 @@ class LLMService:
         
         try:
             self._client = self._create_client()
+            # One hook for the client's lifetime; it records into the calling generate()'s own list.
+            self._client.on("completion:response", self._record_completion)
             return self._client, None
         except Exception as e:
             self._logger.warning(
@@ -214,16 +235,11 @@ class LLMService:
         tracer = self._tracer
         generation_name = f"llm-{response_model.__name__}"
 
-        # Record every raw completion, including instructor's validation
-        # retries and attempts that end in failure: each one is billed.
-        def _record(completion: Any) -> None:
-            self.call_log.append(
-                completion_record(response_model.__name__, settings["model"], completion)
-            )
-
-        # ponytail: hook lives on the (possibly shared) client for the call's
-        # duration; per-request LLMService instances keep it unambiguous.
-        client.on("completion:response", _record)
+        # Every raw completion is recorded, including instructor's validation retries and attempts that
+        # end in failure (each one is billed), by the client's one hook (_record_completion) into this
+        # call's own list.
+        calls: list[dict[str, Any]] = []
+        context_token = _current_calls.set((calls, response_model.__name__, settings["model"]))
         try:
             # Make the LLM call with Instructor, optionally traced
             if tracer is not None:
@@ -270,14 +286,15 @@ class LLMService:
                     "latency_ms": latency_ms,
                     "retries": retries,
                     "response_model": response_model.__name__,
-                    "served_model": self.call_log[-1]["served_model"] if self.call_log else None,
+                    "served_model": calls[-1]["served_model"] if calls else None,
                 }
             )
 
             return LLMResponse.success_response(
                 result=result,
                 latency_ms=latency_ms,
-                retries=retries
+                retries=retries,
+                calls=calls,
             )
             
         except Exception as e:
@@ -317,10 +334,11 @@ class LLMService:
             return LLMResponse.error_response(
                 error=error,
                 latency_ms=latency_ms,
-                retries=retries
+                retries=retries,
+                calls=calls,
             )
         finally:
-            client.off("completion:response", _record)
+            _current_calls.reset(context_token)
 
     def health_check(self) -> HealthStatus:
         """Test LLM provider connectivity.

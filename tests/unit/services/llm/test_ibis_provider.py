@@ -82,3 +82,62 @@ def test_ibis_client_disables_sdk_retries():
     client = factory.create_instructor_client("ibis", "ibis/Balanced", api_key="sk-ibis-x")
     assert client.client.max_retries == 0
     assert str(client.client.base_url) == "https://labs.aithoth.com/ibis-api/v1/"
+
+
+def _fake_ibis(monkeypatch, handler):
+    real_openai = openai.OpenAI
+    monkeypatch.setattr(
+        factory, "OpenAI",
+        lambda **kw: real_openai(http_client=httpx.Client(transport=httpx.MockTransport(handler)), **kw),
+    )
+
+
+def test_concurrent_calls_on_one_service_keep_their_own_records(monkeypatch):
+    """The service (and its client) is shared per process; overlapping calls must not see each other's
+    completions (they used to: each call hooked the shared client, so every hook saw every completion)."""
+    import threading
+
+    both_in_flight = threading.Barrier(2, timeout=5)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        city = "Lisbon" if "Portugal" in request.content.decode() else "Madrid"
+        both_in_flight.wait()  # both requests are open at the same time
+        cost = "0.00011" if city == "Lisbon" else "0.00022"
+        return httpx.Response(200, json=_ibis_reply(f'```json\n{{"city": "{city}"}}\n```', cost))
+
+    _fake_ibis(monkeypatch, handler)
+    llm = LLMService(_Plugin())
+    llm._ensure_client()  # one long-lived client shared by both calls, as in production
+    results = {}
+
+    def ask(question):
+        results[question] = llm.generate(question, Answer)
+
+    threads = [threading.Thread(target=ask, args=(q,)) for q in ("Capital of Portugal?", "Capital of Spain?")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert [c["cost_usd"] for c in results["Capital of Portugal?"].calls] == ["0.00011"]
+    assert [c["cost_usd"] for c in results["Capital of Spain?"].calls] == ["0.00022"]
+    assert sorted(c["cost_usd"] for c in llm.call_log) == ["0.00011", "0.00022"]
+
+
+def test_call_log_is_bounded(monkeypatch):
+    from indico_assistant.services.llm import service as service_module
+
+    monkeypatch.setattr(service_module, "CALL_LOG_MAX", 2)
+    _fake_ibis(monkeypatch, lambda request: httpx.Response(
+        200, json=_ibis_reply('```json\n{"city": "Lisbon"}\n```', "0.00010")))
+    llm = LLMService(_Plugin())
+    for _ in range(3):
+        assert len(llm.generate("Capital of Portugal?", Answer).calls) == 1
+    assert len(llm.call_log) == 2  # the service lives as long as the process: only recent records kept
+
+
+def test_unsupported_provider_message_lists_ibis():
+    import pytest
+
+    with pytest.raises(ValueError, match="ollama, huggingface, openai, ibis"):
+        factory.create_instructor_client("ibsi", "m")

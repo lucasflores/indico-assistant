@@ -6,7 +6,7 @@ LLM service to return structured results.
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar, Literal
+from typing import Any, Generic, TypeVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -47,6 +47,8 @@ class LLMResponse(BaseModel, Generic[T]):
     error: LLMError | None = None
     latency_ms: int = Field(ge=0)
     retries: int = Field(ge=0, default=0)
+    # One record per HTTP completion made by this call (model served, tokens, cost), retries included.
+    calls: list[dict[str, Any]] = Field(default_factory=list)
     
     model_config = {"arbitrary_types_allowed": True}
     
@@ -68,7 +70,8 @@ class LLMResponse(BaseModel, Generic[T]):
         cls,
         result: T,
         latency_ms: int,
-        retries: int = 0
+        retries: int = 0,
+        calls: list[dict[str, Any]] | None = None,
     ) -> "LLMResponse[T]":
         """Create a successful response.
         
@@ -84,7 +87,8 @@ class LLMResponse(BaseModel, Generic[T]):
             success=True,
             result=result,
             latency_ms=latency_ms,
-            retries=retries
+            retries=retries,
+            calls=calls or [],
         )
     
     @classmethod
@@ -92,7 +96,8 @@ class LLMResponse(BaseModel, Generic[T]):
         cls,
         error: LLMError,
         latency_ms: int,
-        retries: int = 0
+        retries: int = 0,
+        calls: list[dict[str, Any]] | None = None,
     ) -> "LLMResponse[T]":
         """Create an error response.
         
@@ -108,7 +113,8 @@ class LLMResponse(BaseModel, Generic[T]):
             success=False,
             error=error,
             latency_ms=latency_ms,
-            retries=retries
+            retries=retries,
+            calls=calls or [],
         )
 
     @property
