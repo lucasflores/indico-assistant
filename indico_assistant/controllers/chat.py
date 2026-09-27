@@ -36,21 +36,10 @@ class RHChat(RHChatBase):
     """POST /chat: save the message and queue its answer (Celery); poll RHChatJob for the reply."""
 
     def _check_access(self) -> None:
-        """Verify user authentication and rate limits.
-        
-        Feature 016: Allow unauthenticated access for identity prompting flow.
-        Rate limiting only applies to authenticated users.
-        """
-        super()._check_access()
-        
-        # Check rate limit only for authenticated users
-        if self.user is not None:
-            rate_limiter = get_rate_limiter()
-            rate_result = rate_limiter.check_rate(self.user.id, "chat")
-            
-            if not rate_result.allowed:
-                from indico_assistant.schemas.errors import ErrorCode
-                raise self._rate_limit_error(rate_result.retry_after)
+        super()._check_access()  # login required
+        rate_result = get_rate_limiter().check_rate(self.user.id, "chat")
+        if not rate_result.allowed:
+            raise self._rate_limit_error(rate_result.retry_after)
 
     def _process(self):
         """Process the chat request.

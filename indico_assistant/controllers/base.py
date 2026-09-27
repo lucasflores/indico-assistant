@@ -13,7 +13,7 @@ import os
 import logging
 from flask import current_app, jsonify, request, session
 from indico.web.rh import RH
-from werkzeug.exceptions import Forbidden, NotFound, Unauthorized
+from werkzeug.exceptions import Forbidden, NotFound, TooManyRequests, Unauthorized
 
 from indico_assistant.schemas.errors import ErrorCode, create_error_response
 from indico_assistant.services.jwt_service import validate_chainlit_token
@@ -250,22 +250,16 @@ class RHChatBase(RHAssistantBase):
             403
         )
 
-    def _rate_limit_error(self, retry_after: int):
-        """Create a rate limit exceeded error response.
-        
-        Args:
-            retry_after: Seconds until rate limit resets
-            
-        Returns:
-            Flask response tuple with 429 status and Retry-After header
-        """
+    def _rate_limit_error(self, retry_after: int) -> TooManyRequests:
+        """A 429 to ``raise`` (Indico sends its JSON response as-is, with Retry-After)."""
         response = jsonify(create_error_response(
             ErrorCode.RATE_LIMITED,
             "Too many requests, please wait before retrying",
             {"retry_after": retry_after}
         ))
+        response.status_code = 429
         response.headers['Retry-After'] = str(retry_after)
-        return response, 429
+        return TooManyRequests(response=response)
 
     def _internal_error(self, message: str = "An internal error occurred"):
         """Create an internal server error response.
