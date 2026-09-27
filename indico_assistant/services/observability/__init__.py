@@ -26,20 +26,8 @@ if TYPE_CHECKING:
     from indico_assistant.services.observability.client import LangfuseClient
 
 
-# Configure structured logging for observability module (T015)
+# Logging goes through Indico's configuration (a handler of our own duplicated every line)
 logger = logging.getLogger(__name__)
-
-# Set up structured logging format
-_handler = logging.StreamHandler()
-_handler.setFormatter(
-    logging.Formatter(
-        fmt='{"timestamp": "%(asctime)s", "level": "%(levelname)s", '
-            '"module": "%(name)s", "message": "%(message)s"}',
-        datefmt='%Y-%m-%dT%H:%M:%S%z'
-    )
-)
-logger.addHandler(_handler)
-logger.setLevel(logging.INFO)
 
 
 def get_observability_logger(name: str) -> logging.Logger:
@@ -56,16 +44,9 @@ def get_observability_logger(name: str) -> logging.Logger:
 
 # Lazy imports to avoid circular dependencies
 def get_langfuse_client(settings: dict) -> "LangfuseClient":
-    """Factory function to create a LangfuseClient instance.
-    
-    Args:
-        settings: Plugin settings dictionary containing Langfuse configuration
-        
-    Returns:
-        LangfuseClient instance (with graceful degradation if unavailable)
-    """
-    from indico_assistant.services.observability.client import LangfuseClient
-    return LangfuseClient(settings)
+    """The per-process LangfuseClient (building one per call meant a network auth check per call)."""
+    from indico_assistant.services.observability.client import get_langfuse_client as _get_client
+    return _get_client(settings)
 
 
 __all__ = [
