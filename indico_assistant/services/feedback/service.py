@@ -7,7 +7,7 @@ Task: T031
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+
 from typing import Any, Optional
 from uuid import UUID
 
@@ -79,31 +79,23 @@ class FeedbackService:
                 "Cannot provide feedback on messages from other users' sessions"
             )
         
-        # Check for existing feedback from this user on this message
-        existing = FeedbackEntry.query.filter_by(
-            message_id=message_id,
-            user_id=user_id
-        ).first()
-        
-        if existing:
-            # Update existing feedback
-            existing.feedback_type = feedback_type
-            existing.rating = rating
-            existing.comment = comment
-            existing.updated_at = datetime.now(timezone.utc)
-            db.session.flush()
-            return existing
-        
-        # Create new feedback entry
-        feedback = FeedbackEntry.create(
+        # The model stores one value per (message, user, type); thumbs are one vote, so switching
+        # between up and down replaces the other one.
+        thumbs = ('thumbs_up', 'thumbs_down')
+        if feedback_type in thumbs:
+            FeedbackEntry.query.filter(
+                FeedbackEntry.message_id == message_id,
+                FeedbackEntry.user_id == user_id,
+                FeedbackEntry.feedback_type.in_(thumbs),
+                FeedbackEntry.feedback_type != feedback_type,
+            ).delete(synchronize_session=False)
+        value = {'rating': rating, 'comment': comment}.get(feedback_type, True)
+        return FeedbackEntry.create_or_update(
             message_id=message_id,
             user_id=user_id,
             feedback_type=feedback_type,
-            rating=rating,
-            comment=comment
+            value=value if value is not None else '',
         )
-        
-        return feedback
 
     def _validate_message_access(
         self,

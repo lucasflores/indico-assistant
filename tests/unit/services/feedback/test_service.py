@@ -32,62 +32,29 @@ class TestFeedbackService:
             service = FeedbackService()
             yield service
 
-    def test_submit_feedback_creates_new_entry(self, feedback_service):
-        """Test creating new feedback entry."""
+    @pytest.mark.parametrize(("kwargs", "stored"), [
+        ({"feedback_type": "thumbs_up"}, True),
+        ({"feedback_type": "rating", "rating": 4}, 4),
+        ({"feedback_type": "comment", "comment": "Very helpful!"}, "Very helpful!"),
+    ])
+    def test_submit_feedback_stores_one_value_per_type(self, feedback_service, kwargs, stored):
+        """The model keeps (message, user, type) -> value; the service used a create() that never existed."""
         message_id = uuid4()
-        
-        mock_message = MagicMock()
-        mock_message.id = message_id
-        mock_message.session.user_id = 123
-        
-        mock_feedback = MagicMock()
-        mock_feedback.id = uuid4()
-        mock_feedback.message_id = message_id
-        mock_feedback.feedback_type = "thumbs_up"
-        
-        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = mock_message
-            
-            with patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-                mock_fb_cls.query.filter_by.return_value.first.return_value = None
-                mock_fb_cls.create.return_value = mock_feedback
-                
-                result = feedback_service.submit_feedback(
-                    user_id=123,
-                    message_id=message_id,
-                    feedback_type="thumbs_up"
-                )
-                
-                mock_fb_cls.create.assert_called_once()
-                assert result == mock_feedback
+        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls, \
+                patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
+            mock_msg_cls.query.get.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
+            result = feedback_service.submit_feedback(user_id=123, message_id=message_id, **kwargs)
+        mock_fb_cls.create_or_update.assert_called_once_with(
+            message_id=message_id, user_id=123, feedback_type=kwargs["feedback_type"], value=stored)
+        assert result is mock_fb_cls.create_or_update.return_value
 
-    def test_submit_feedback_updates_existing_entry(self, feedback_service):
-        """Test updating existing feedback entry."""
+    def test_switching_thumbs_replaces_the_other_vote(self, feedback_service):
         message_id = uuid4()
-        
-        mock_message = MagicMock()
-        mock_message.id = message_id
-        mock_message.session.user_id = 123
-        
-        existing_feedback = MagicMock()
-        existing_feedback.id = uuid4()
-        existing_feedback.feedback_type = "thumbs_down"
-        
-        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = mock_message
-            
-            with patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-                mock_fb_cls.query.filter_by.return_value.first.return_value = existing_feedback
-                
-                result = feedback_service.submit_feedback(
-                    user_id=123,
-                    message_id=message_id,
-                    feedback_type="thumbs_up"  # Changed from thumbs_down
-                )
-                
-                assert existing_feedback.feedback_type == "thumbs_up"
-                assert result == existing_feedback
-                mock_fb_cls.create.assert_not_called()
+        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls, \
+                patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
+            mock_msg_cls.query.get.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
+            feedback_service.submit_feedback(user_id=123, message_id=message_id, feedback_type="thumbs_down")
+        mock_fb_cls.query.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
 
     def test_submit_feedback_message_not_found(self, feedback_service):
         """Test error when message doesn't exist."""
@@ -120,64 +87,6 @@ class TestFeedbackService:
                     message_id=message_id,
                     feedback_type="thumbs_up"
                 )
-
-    def test_submit_feedback_with_rating(self, feedback_service):
-        """Test creating feedback with numeric rating."""
-        message_id = uuid4()
-        
-        mock_message = MagicMock()
-        mock_message.id = message_id
-        mock_message.session.user_id = 123
-        
-        mock_feedback = MagicMock()
-        mock_feedback.id = uuid4()
-        mock_feedback.rating = 4
-        
-        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = mock_message
-            
-            with patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-                mock_fb_cls.query.filter_by.return_value.first.return_value = None
-                mock_fb_cls.create.return_value = mock_feedback
-                
-                result = feedback_service.submit_feedback(
-                    user_id=123,
-                    message_id=message_id,
-                    feedback_type="rating",
-                    rating=4
-                )
-                
-                call_kwargs = mock_fb_cls.create.call_args[1]
-                assert call_kwargs['rating'] == 4
-
-    def test_submit_feedback_with_comment(self, feedback_service):
-        """Test creating feedback with comment."""
-        message_id = uuid4()
-        
-        mock_message = MagicMock()
-        mock_message.id = message_id
-        mock_message.session.user_id = 123
-        
-        mock_feedback = MagicMock()
-        mock_feedback.id = uuid4()
-        mock_feedback.comment = "Very helpful!"
-        
-        with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = mock_message
-            
-            with patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-                mock_fb_cls.query.filter_by.return_value.first.return_value = None
-                mock_fb_cls.create.return_value = mock_feedback
-                
-                result = feedback_service.submit_feedback(
-                    user_id=123,
-                    message_id=message_id,
-                    feedback_type="comment",
-                    comment="Very helpful!"
-                )
-                
-                call_kwargs = mock_fb_cls.create.call_args[1]
-                assert call_kwargs['comment'] == "Very helpful!"
 
 
 class TestValidateMessageAccess:

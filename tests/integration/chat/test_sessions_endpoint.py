@@ -106,7 +106,7 @@ class TestSessionsEndpointIntegration:
             msg.role = role
             msg.content = content
             msg.created_at = datetime.now(timezone.utc)
-            msg.metadata = {"sql_generated": "SELECT..."} if role == "assistant" else None
+            msg.metadata_json = {"sql_generated": "SELECT..."} if role == "assistant" else None
             mock_messages.append(msg)
         
         with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:

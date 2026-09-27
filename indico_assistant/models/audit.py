@@ -172,7 +172,7 @@ class QueryAuditLog(Base):
         Args:
             reason: Rejection reason code
         """
-        self.validation_rejection_reason = reason
+        self.validation_rejection_reason = reason[:128]  # varchar(128); longer failed the whole request
         self.success = False
 
     def mark_error(self, error_message: str) -> None:
