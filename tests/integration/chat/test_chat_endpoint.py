@@ -58,7 +58,7 @@ class TestPostChat:
     def test_queues_the_answer(self, request_, service, jobs, answer_task):
         session_id = uuid4()
         request_.get_json.return_value = {"message": "What events are tomorrow?", "event_id": 7}
-        service.submit_message.return_value = (session_id, True)
+        service.submit_message.return_value = (session_id, True, 'q1')
 
         response, status = _controller(RHChat)._process()
 
@@ -68,11 +68,11 @@ class TestPostChat:
         service.submit_message.assert_called_once_with(user=USER, message="What events are tomorrow?",
                                                        session_id=None, event_id=7)
         jobs[1].assert_called_once_with(123, session_id)
-        answer_task.delay.assert_called_once_with("job1", 123, session_id, "What events are tomorrow?")
+        answer_task.delay.assert_called_once_with("job1", 123, session_id, "What events are tomorrow?", 'q1')
 
     def test_broker_down_fails_the_job(self, request_, service, jobs, answer_task):
         request_.get_json.return_value = {"message": "hi"}
-        service.submit_message.return_value = (uuid4(), False)
+        service.submit_message.return_value = (uuid4(), False, uuid4())
         answer_task.delay.side_effect = ConnectionError('broker down')
 
         response, status = _controller(RHChat)._process()

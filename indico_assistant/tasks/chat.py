@@ -13,16 +13,18 @@ logger = logging.getLogger(__name__)
 CHAT_QUEUE = 'assistant'
 # One answer is up to ~8 LLM calls; past this the user is told to retry instead of the worker waiting on.
 SOFT_TIME_LIMIT = 120
+HARD_TIME_LIMIT = SOFT_TIME_LIMIT + 30
 
 
 @celery.task(name='indico_assistant_answer_chat', queue=CHAT_QUEUE, ignore_result=True,
-             soft_time_limit=SOFT_TIME_LIMIT, time_limit=SOFT_TIME_LIMIT + 30)
-def answer_chat(job_id, user_id, session_id, message):
+             soft_time_limit=SOFT_TIME_LIMIT, time_limit=HARD_TIME_LIMIT)
+def answer_chat(job_id, user_id, session_id, message, message_id=None):
     from indico_assistant.services.chat import get_chat_service, jobs
     from indico_assistant.services.chat.service import ChatServiceError, EventAccessDeniedError
 
+    jobs.start(job_id)
     try:
-        result = get_chat_service().answer(user_id, session_id, message)
+        result = get_chat_service().answer(user_id, session_id, message, message_id)
     except SoftTimeLimitExceeded:
         db.session.rollback()
         jobs.finish(job_id, status='failed', error='TIMEOUT',

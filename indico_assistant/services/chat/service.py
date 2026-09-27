@@ -113,8 +113,10 @@ class ChatService:
         message: str,
         session_id: Optional[UUID] = None,
         event_id: Optional[int] = None
-    ) -> tuple[UUID, bool]:
-        """Web-request half: check access, save the user's message, commit. Returns (session_id, created).
+    ) -> tuple[UUID, bool, UUID]:
+        """Web-request half: check access, save the user's message, commit.
+
+        Returns (session_id, created, message_id); the answer is bound to that message.
 
         The answer is produced by :meth:`answer` in a Celery worker, so no LLM call runs in the web tier.
 
@@ -127,15 +129,17 @@ class ChatService:
             session, created = self._get_or_create_session(session_id, user.id, event_id)
             if session.event_id:
                 self._validate_event_access(user, session.event_id)
-            self._session_manager.add_user_message(session, message)
+            user_message = self._session_manager.add_user_message(session, message)
             self._session_manager.commit()
-            return session.id, created
+            return session.id, created, user_message.id
         except Exception:
             self._session_manager.rollback()
             raise
 
-    def answer(self, user_id: int, session_id: UUID, message: str) -> ChatResult:
-        """Worker half: answer the latest message of a session and save the reply.
+    def answer(self, user_id: int, session_id: UUID, message: str, message_id: UUID | None = None) -> ChatResult:
+        """Worker half: answer one message of a session and save the reply.
+
+        The context stops at ``message_id``: a question sent while this one was queued is not part of it.
 
         No database transaction stays open during the LLM calls: everything the pipeline needs is read
         first and committed, and the reply is written in a new short transaction.
@@ -148,7 +152,7 @@ class ChatService:
         self._validate_event_access(user, event_id)  # again: access may have been revoked while queued
         # plain values: touching expired ORM objects later would open a transaction mid-pipeline
         viewer = SimpleNamespace(id=user.id, is_admin=bool(user.is_admin))
-        context = self._context_builder.build_context(session.id)
+        context = self._context_builder.build_context(session.id, up_to=message_id)
         db.session.commit()
 
         response_text, metadata = self._process_with_nl2sql(

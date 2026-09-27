@@ -5,6 +5,7 @@ client polls GET /chat/jobs/<job_id>. Nothing here is durable: the conversation 
 chat tables, this only says whether the answer is ready.
 """
 
+import time
 from uuid import uuid4
 
 from indico.core.cache import make_scoped_cache
@@ -21,8 +22,22 @@ def create(user_id, session_id):
     return job_id
 
 
+def start(job_id):
+    """Called by the worker when it begins: from then on a job can be declared lost."""
+    finish(job_id, started_at=time.time())
+
+
 def get(job_id):
-    return _cache.get(job_id)
+    job = _cache.get(job_id)
+    if job and job['status'] == 'pending' and 'started_at' in job:
+        from indico_assistant.tasks.chat import HARD_TIME_LIMIT
+
+        # Killed at the hard time limit, or the worker died: Celery calls none of our code then, and an
+        # early-acked task is not redelivered (redelivery would repeat the LLM calls anyway).
+        if time.time() - job['started_at'] > HARD_TIME_LIMIT + 10:
+            job.update(status='failed', error='TIMEOUT',
+                       message='That took too long to answer. Try a narrower question.')
+    return job
 
 
 def finish(job_id, **result):
