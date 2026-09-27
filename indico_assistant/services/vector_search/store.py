@@ -15,6 +15,7 @@ from sqlalchemy import text
 
 from indico.core.db import db
 from indico_assistant.models.document import ExtractedDocument, ExtractionStatus
+from indico_assistant.services.nl2sql import readonly_db
 from indico_assistant.services.vector_search import check_pgvector_available
 
 if TYPE_CHECKING:
@@ -261,6 +262,7 @@ class VectorStore:
     def similarity_search(
         self,
         query_embedding: list[float],
+        context: "readonly_db.QueryContext",
         event_id: Optional[int] = None,
         event_ids: Optional[list[int]] = None,
         top_k: int = 5,
@@ -270,6 +272,8 @@ class VectorStore:
         
         Args:
             query_embedding: Query embedding vector.
+            context: Whose search this is; runs as the read-only role, so the row
+                policies drop chunks of events and attachments the user cannot see.
             event_id: Optional single event ID filter.
             event_ids: Optional list of event IDs to search in.
             top_k: Maximum number of results.
@@ -292,36 +296,34 @@ class VectorStore:
             logger.warning("pgvector not available, returning empty results")
             return []
         
-        # Build event filter
-        event_filter = ""
         params: dict[str, Any] = {
             "top_k": top_k,
-            "threshold": threshold
+            "threshold": threshold,
+            "embedding": "[" + ",".join(str(float(x)) for x in query_embedding) + "]",
         }
-        
-        # Convert embedding to PostgreSQL vector format
-        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
-        
+        event_filter = ""
         if event_id is not None:
-            event_filter = f"AND event_id = {event_id}"
-        elif event_ids is not None and event_ids:
-            event_filter = f"AND event_id = ANY(ARRAY{event_ids})"
+            event_ids = [event_id]
+        if event_ids:
+            event_filter = "AND event_id = ANY(:event_ids)"
+            params["event_ids"] = [int(e) for e in event_ids]
         
         query = text(f"""
             SELECT 
                 id, event_id, attachment_id, chunk_index,
                 content_text, metadata_json,
-                1 - (embedding <=> '{embedding_str}'::vector) as similarity
+                1 - (embedding <=> CAST(:embedding AS vector)) as similarity
             FROM plugin_assistant.extracted_documents
             WHERE extraction_status = 'completed'
             AND embedding IS NOT NULL
             {event_filter}
-            AND 1 - (embedding <=> '{embedding_str}'::vector) >= :threshold
-            ORDER BY embedding <=> '{embedding_str}'::vector
+            AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
+            ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :top_k
         """)
         
-        result = db.session.execute(query, params)
+        with readonly_db.scoped_connection(context) as conn:
+            result = conn.execute(query, params).fetchall()
         
         rows = []
         for row in result:

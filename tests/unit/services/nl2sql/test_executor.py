@@ -55,7 +55,7 @@ def test_returns_rows_and_columns():
 def test_sets_timeout_and_signed_context_before_the_query():
     conn = FakeConnection()
     make(conn, timeout_seconds=12).execute('SELECT id FROM events.events', context=CTX)
-    (timeout_sql, _), (ctx_sql, ctx_params), (query_sql, _) = conn.statements
+    (ctx_sql, ctx_params), (timeout_sql, _), (query_sql, _) = conn.statements
     assert timeout_sql == 'SET LOCAL statement_timeout = 12000'
     assert "set_config('indico_assistant.ctx'" in ctx_sql and ctx_params == {'ctx': 'signed:7::0'}
     assert query_sql.startswith('SELECT * FROM (')

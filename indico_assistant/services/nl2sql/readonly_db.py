@@ -26,6 +26,7 @@ own role is unaffected: owners bypass RLS and a permissive policy covers any non
 import hashlib
 import hmac
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from sqlalchemy import create_engine, text
@@ -87,6 +88,17 @@ def sign(context):
     payload = context.payload()
     signature = hmac.new(_get_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f'{payload}.{signature}'
+
+
+@contextmanager
+def scoped_connection(context, connection_factory=None, signer=None):
+    """A connection as the read-only role, in a transaction that sees only what ``context`` may see."""
+    if context is None:
+        raise ValueError('A user context is required to query event data')
+    signed = (signer or sign)(context)
+    with (connection_factory or connect)() as conn, conn.begin():
+        conn.execute(text(f"SELECT set_config('{CONTEXT_SETTING}', :ctx, true)"), {'ctx': signed})
+        yield conn
 
 
 # --- setup SQL -------------------------------------------------------------------------------------
@@ -252,6 +264,10 @@ def setup_sql(tables, existing_columns, indico_role, password=None):
         f"ALTER ROLE {RO_ROLE} SET idle_in_transaction_session_timeout = '15s';",
         f"ALTER ROLE {RO_ROLE} SET work_mem = '16MB';",
         f"ALTER ROLE {RO_ROLE} SET max_parallel_workers_per_gather = 0;",
+        # pgvector >= 0.8: keep walking the HNSW index until enough rows survive the row policies and
+        # event filters (otherwise it stops after ~40 neighbours and filtered searches come back empty).
+        # ponytail: capped by hnsw.max_scan_tuples (20k); very selective filters may still under-fill.
+        f"ALTER ROLE {RO_ROLE} SET hnsw.iterative_scan = 'strict_order';",
         '',
         'CREATE TABLE IF NOT EXISTS plugin_assistant.nl2sql_secret (secret text NOT NULL);',
         "INSERT INTO plugin_assistant.nl2sql_secret SELECT encode(gen_random_bytes(32), 'hex') "

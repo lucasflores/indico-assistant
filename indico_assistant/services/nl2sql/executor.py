@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, ProgrammingError, SQLAlchemyError
 
+from indico_assistant.services.nl2sql import readonly_db
 from indico_assistant.services.nl2sql.models import ExecutionResult
 
 if TYPE_CHECKING:
@@ -61,10 +62,8 @@ class QueryExecutor:
             timeout_seconds: Statement timeout (FR-025); the role also has its own.
             signer: Signs the QueryContext for the row policies.
         """
-        from indico_assistant.services.nl2sql import readonly_db
-
-        self._connection_factory = connection_factory or readonly_db.connect
-        self._signer = signer or readonly_db.sign
+        self._connection_factory = connection_factory  # None: readonly_db defaults
+        self._signer = signer
         self._max_rows = max_rows
         self._timeout_seconds = timeout_seconds
         self._embedding_service = embedding_service
@@ -83,12 +82,9 @@ class QueryExecutor:
         try:
             if context is None:
                 raise ExecutionError("A user context is required to query event data")
-            signed_context = self._signer(context)
             params = self._prepare_vector_params(sql, question, params)
-            with self._connection_factory() as conn, conn.begin():
+            with readonly_db.scoped_connection(context, self._connection_factory, self._signer) as conn:
                 conn.execute(text(f"SET LOCAL statement_timeout = {int(self._timeout_seconds * 1000)}"))
-                conn.execute(text("SELECT set_config('indico_assistant.ctx', :ctx, true)"),
-                             {"ctx": signed_context})
                 result = conn.execute(text(self._wrap_limit(sql)), params)
                 columns = list(result.keys())
                 raw_rows = result.fetchmany(self._max_rows + 1)

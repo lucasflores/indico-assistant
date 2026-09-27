@@ -13,7 +13,19 @@ Tests the semantic search service including:
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from indico_assistant.services.nl2sql.readonly_db import QueryContext
 import time
+
+USER = MagicMock(id=7, is_admin=False)
+
+
+@pytest.fixture(autouse=True)
+def event_access():
+    """Indico's can_access for event-scoped searches; granted unless a test says otherwise."""
+    with patch.object(SearchService, "_can_access_event", return_value=True) as can_access:
+        yield can_access
+
 
 from indico_assistant.services.vector_search.search import (
     SearchService,
@@ -84,7 +96,7 @@ class TestSearchService:
         """Test semantic search returns results successfully."""
         mock_vector_store.similarity_search.return_value = sample_raw_results
         
-        response = search_service.search(query="machine learning")
+        response = search_service.search(user=USER, query="machine learning")
         
         assert response.success is True
         assert len(response.results) == 2
@@ -98,7 +110,7 @@ class TestSearchService:
         """Test search generates query embedding."""
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test query")
+        search_service.search(user=USER, query="test query")
         
         mock_embedding_service.embed_text.assert_called_once_with("test query")
 
@@ -109,7 +121,7 @@ class TestSearchService:
         mock_embedding_service.embed_text.return_value = [0.5] * 384
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test")
+        search_service.search(user=USER, query="test")
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["query_embedding"] == [0.5] * 384
@@ -120,7 +132,7 @@ class TestSearchService:
         """Test raw results are converted to SearchResult objects."""
         mock_vector_store.similarity_search.return_value = sample_raw_results
         
-        response = search_service.search(query="test")
+        response = search_service.search(user=USER, query="test")
         
         assert all(isinstance(r, SearchResult) for r in response.results)
         assert response.results[0].content == "Machine learning fundamentals"
@@ -129,14 +141,14 @@ class TestSearchService:
 
     def test_semantic_search_empty_query_fails(self, search_service):
         """Test search with empty query returns error response."""
-        response = search_service.search(query="")
+        response = search_service.search(user=USER, query="")
         
         assert response.success is False
         assert response.error == "Query cannot be empty"
 
     def test_semantic_search_whitespace_query_fails(self, search_service):
         """Test search with whitespace-only query returns error."""
-        response = search_service.search(query="   \n\t  ")
+        response = search_service.search(user=USER, query="   \n\t  ")
         
         assert response.success is False
         assert response.error == "Query cannot be empty"
@@ -151,7 +163,7 @@ class TestSearchService:
         """Test search with event_id filter."""
         mock_vector_store.similarity_search.return_value = sample_raw_results
         
-        search_service.search(query="test", event_id=123)
+        search_service.search(user=USER, query="test", event_id=123)
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["event_id"] == 123
@@ -162,7 +174,7 @@ class TestSearchService:
         """Test search with multiple event_ids filter."""
         mock_vector_store.similarity_search.return_value = sample_raw_results
         
-        search_service.search(query="test", event_ids=[123, 124, 125])
+        search_service.search(user=USER, query="test", event_ids=[123, 124, 125])
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["event_ids"] == [123, 124, 125]
@@ -173,7 +185,7 @@ class TestSearchService:
         """Test search with custom similarity threshold."""
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test", threshold=0.9)
+        search_service.search(user=USER, query="test", threshold=0.9)
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["threshold"] == 0.9
@@ -184,7 +196,7 @@ class TestSearchService:
         """Test search uses default threshold when not specified."""
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test")
+        search_service.search(user=USER, query="test")
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["threshold"] == 0.7  # default
@@ -199,7 +211,7 @@ class TestSearchService:
         """Test search with custom top_k limit."""
         mock_vector_store.similarity_search.return_value = sample_raw_results[:1]
         
-        search_service.search(query="test", top_k=1)
+        search_service.search(user=USER, query="test", top_k=1)
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["top_k"] == 1
@@ -210,7 +222,7 @@ class TestSearchService:
         """Test search uses default top_k when not specified."""
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test")
+        search_service.search(user=USER, query="test")
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["top_k"] == 5  # default
@@ -221,7 +233,7 @@ class TestSearchService:
         """Test search handles large top_k value."""
         mock_vector_store.similarity_search.return_value = []
         
-        search_service.search(query="test", top_k=1000)
+        search_service.search(user=USER, query="test", top_k=1000)
         
         call_kwargs = mock_vector_store.similarity_search.call_args[1]
         assert call_kwargs["top_k"] == 1000
@@ -236,7 +248,7 @@ class TestSearchService:
         """Test search handles embedding generation failure."""
         mock_embedding_service.embed_text.side_effect = RuntimeError("Model unavailable")
         
-        response = search_service.search(query="test")
+        response = search_service.search(user=USER, query="test")
         
         assert response.success is False
         assert "Model unavailable" in response.error
@@ -247,7 +259,7 @@ class TestSearchService:
         """Test search handles vector store failure."""
         mock_vector_store.similarity_search.side_effect = Exception("Database timeout")
         
-        response = search_service.search(query="test")
+        response = search_service.search(user=USER, query="test")
         
         assert response.success is False
         assert "Database timeout" in response.error
@@ -262,7 +274,7 @@ class TestSearchService:
             vector_store=mock_vector_store
         )
         
-        response = service.search(query="test")
+        response = service.search(user=USER, query="test")
         
         assert response.success is False
         assert "not available" in response.error
@@ -277,7 +289,7 @@ class TestSearchService:
             vector_store=mock_vector_store
         )
         
-        response = service.search(query="test")
+        response = service.search(user=USER, query="test")
         
         assert response.success is False
         assert "not available" in response.error
@@ -288,7 +300,7 @@ class TestSearchService:
         """Test search records execution time."""
         mock_vector_store.similarity_search.return_value = []
         
-        response = search_service.search(query="test")
+        response = search_service.search(user=USER, query="test")
         
         assert response.search_time_ms >= 0
         assert isinstance(response.search_time_ms, float)
@@ -464,3 +476,34 @@ class TestCreateSearchServiceFactory:
             service = create_search_service(mock_plugin)
             
             assert isinstance(service, SearchService)
+
+
+class TestSearchServiceAccess:
+    """Phase 0: who is searching decides what the store may return."""
+
+    @pytest.fixture
+    def service(self):
+        embedder = MagicMock(is_enabled=True, embed_text=MagicMock(return_value=[0.1] * 384))
+        store = MagicMock(is_available=True, similarity_search=MagicMock(return_value=[]))
+        return SearchService(embedding_service=embedder, vector_store=store)
+
+    def test_refuses_without_a_user(self, service):
+        response = service.search(query="budget")
+        assert not response.success and "Log in" in response.error
+        service._vector_store.similarity_search.assert_not_called()
+
+    def test_global_search_runs_under_the_users_context(self, service):
+        service.search(user=USER, query="budget", event_ids=[1, 2])
+        kwargs = service._vector_store.similarity_search.call_args.kwargs
+        assert kwargs["context"] == QueryContext(user_id=7, event_id=None, is_admin=False)
+        assert kwargs["event_ids"] == [1, 2]
+
+    def test_event_search_needs_indico_access(self, service, event_access):
+        event_access.return_value = False
+        response = service.search(user=USER, query="budget", event_id=5)
+        assert response.success and response.results == []
+        service._vector_store.similarity_search.assert_not_called()
+
+    def test_event_search_is_scoped_to_that_event(self, service):
+        service.search(user=USER, query="budget", event_id=5)
+        assert service._vector_store.similarity_search.call_args.kwargs["context"].event_id == 5

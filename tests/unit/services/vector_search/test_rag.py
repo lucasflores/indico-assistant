@@ -175,10 +175,10 @@ class TestRAGService:
         call_kwargs = mock_search_service.search.call_args[1]
         assert call_kwargs["event_ids"] == [123, 124, 125]
 
-    def test_retrieval_with_user_id_filter(
+    def test_retrieval_passes_the_user(
         self, rag_service, mock_search_service, sample_search_results
     ):
-        """Test get_context passes user_id for permission filtering."""
+        """get_context passes the user; search limits results to what they may see."""
         mock_search_service.search.return_value = SearchResponse(
             success=True,
             results=sample_search_results,
@@ -187,10 +187,11 @@ class TestRAGService:
             search_time_ms=50
         )
         
-        rag_service.get_context(query="What does the document say?", user_id=999)
+        user = MagicMock(id=999)
+        rag_service.get_context(query="What does the document say?", user=user)
         
         call_kwargs = mock_search_service.search.call_args[1]
-        assert call_kwargs["user_id"] == 999
+        assert call_kwargs["user"] is user
 
     def test_retrieval_force_bypasses_classification(
         self, rag_service, mock_search_service, sample_search_results

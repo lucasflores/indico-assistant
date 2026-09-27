@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
+from indico_assistant.services.nl2sql.readonly_db import QueryContext
 from indico_assistant.services.vector_search import check_pgvector_available
 from indico_assistant.services.vector_search.store import VectorStore
 
@@ -121,7 +122,7 @@ class SearchService:
         event_ids: Optional[list[int]] = None,
         top_k: Optional[int] = None,
         threshold: Optional[float] = None,
-        user_id: Optional[int] = None
+        user: Any = None,
     ) -> SearchResponse:
         """Search for similar document chunks.
         
@@ -131,7 +132,8 @@ class SearchService:
             event_ids: Optional list of event IDs to search in.
             top_k: Maximum number of results (default: 5).
             threshold: Minimum similarity threshold (default: 0.7).
-            user_id: Optional user ID for permission filtering.
+            user: The authenticated Indico user; results are limited to what they
+                may see (required). ``event_id`` is checked with Indico's can_access.
             
         Returns:
             SearchResponse with results or error.
@@ -159,6 +161,14 @@ class SearchService:
                 error="Vector search is not available"
             )
         
+        empty = SearchResponse(success=True, results=[], total=0, query=query, search_time_ms=0)
+        if user is None:
+            return SearchResponse(success=False, results=[], total=0, query=query, search_time_ms=0,
+                                  error="Log in to search documents")
+        if event_id is not None and not self._can_access_event(user, event_id):
+            return empty
+        context = QueryContext(user_id=user.id, event_id=event_id, is_admin=bool(user.is_admin))
+
         top_k = top_k or self._default_top_k
         threshold = threshold or self._default_threshold
         
@@ -167,23 +177,9 @@ class SearchService:
             logger.debug(f"Generating embedding for query: {query[:50]}...")
             query_embedding = self._embedding_service.embed_text(query)
             
-            # Apply permission filtering if user_id provided
-            if user_id is not None and event_ids is None and event_id is None:
-                event_ids = self._get_accessible_event_ids(user_id)
-                if not event_ids:
-                    # User has no accessible events
-                    elapsed = (time.time() - start_time) * 1000
-                    return SearchResponse(
-                        success=True,
-                        results=[],
-                        total=0,
-                        query=query,
-                        search_time_ms=elapsed
-                    )
-            
-            # Search vector store
             raw_results = self._vector_store.similarity_search(
                 query_embedding=query_embedding,
+                context=context,
                 event_id=event_id,
                 event_ids=event_ids,
                 top_k=top_k,
@@ -229,30 +225,12 @@ class SearchService:
                 error=str(e)
             )
     
-    def _get_accessible_event_ids(self, user_id: int) -> list[int]:
-        """Get event IDs accessible to a user.
-        
-        This is a placeholder that should integrate with Indico's
-        permission system.
-        
-        Args:
-            user_id: Indico user ID.
-            
-        Returns:
-            List of accessible event IDs.
-        """
-        # Import here to avoid circular imports
-        try:
-            from indico_assistant.services.nl2sql.permissions import (
-                get_user_accessible_event_ids
-            )
-            return get_user_accessible_event_ids(user_id)
-        except ImportError:
-            logger.warning(
-                "Permission service not available, "
-                "returning empty event list"
-            )
-            return []
+    @staticmethod
+    def _can_access_event(user, event_id: int) -> bool:
+        from indico.modules.events import Event
+
+        event = Event.get(event_id, is_deleted=False)
+        return event is not None and event.can_access(user)
     
     def get_stats(self, event_id: Optional[int] = None) -> dict[str, Any]:
         """Get search service statistics.

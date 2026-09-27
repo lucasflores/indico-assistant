@@ -283,7 +283,10 @@ Submit feedback on assistant responses:
 
 #### POST /api/assistant/search
 
-Perform semantic search across indexed documents:
+Perform semantic search across indexed documents. Requires a logged-in user and the
+[NL2SQL database role](#nl2sql-database-role): the search runs as that role, so it only returns
+chunks from events and attachments the user may see. `event_id` is checked with Indico's
+`can_access` (no access: empty results); `event_ids` only narrows the search.
 
 ```json
 {
@@ -380,7 +383,8 @@ Without `ASSISTANT_NL2SQL_DATABASE_URI`, event-data questions fail with an error
 
 The script creates `pgcrypto` (for the signature check) and `plugin_assistant.nl2sql_secret` (the
 signing key; the role cannot read it), and sets on the role: read-only transactions, a 10 s statement
-timeout, 1 s lock timeout, `work_mem` 16MB, no parallel workers, 20 connections.
+timeout, 1 s lock timeout, `work_mem` 16MB, no parallel workers, 20 connections, and
+`hnsw.iterative_scan` (pgvector 0.8+) so filtered vector searches are not cut short.
 
 What a user can see: events that are public, plus events granted to them directly, through a local
 group, through read access to the event's category, or because they manage the category. Admins see
