@@ -43,17 +43,6 @@ class RHAssistantBase(RH):
             Unauthorized: If user is not authenticated
             Forbidden: If ADMIN_ONLY and user is not admin
         """
-        auth_header = request.headers.get("Authorization", "")
-        # Feature 016 (T007): Debug logging for tracing auth flow
-        logger.debug(
-            "Assistant auth: _check_access called, auth_header_present=%s",
-            bool(auth_header)
-        )
-        print(
-            f"[assistant auth] _check_access called auth_header_present={bool(auth_header)}",
-            flush=True,
-        )
-
         user = session.user
         # Feature 016 (T008): Set _user from session if available
         if user is not None:
@@ -69,10 +58,11 @@ class RHAssistantBase(RH):
                 logger.debug("Assistant auth: no user found from session or JWT")
                 self._user = None
         
-        # Feature 016: Allow unauthenticated access - subclasses can enforce if needed
+        # Every assistant endpoint runs LLM calls, SQL or search on behalf of a known user:
+        # anonymous access would be unmetered spend and unscoped data access.
         if user is None:
-            print("[assistant auth] no authenticated user found (unauthenticated access)", flush=True)
-        
+            raise Unauthorized("Log in to use the assistant")
+
         if self.ADMIN_ONLY and (user is None or not user.is_admin):
             raise Forbidden("Admin access required")
 
@@ -80,23 +70,15 @@ class RHAssistantBase(RH):
         """Get authenticated user from Authorization header if present."""
         auth_header = request.headers.get("Authorization", "")
         assistant_header = request.headers.get("X-Assistant-Auth", "")
-        current_app.logger.warning(
-            "Assistant API auth header present=%s assistant_header_present=%s",
-            bool(auth_header),
-            bool(assistant_header),
-        )
-        print(
-            f"[assistant auth] Authorization header present={bool(auth_header)} "
-            f"assistant_header_present={bool(assistant_header)}",
-            flush=True,
-        )
+        logger.debug("Assistant auth: authorization_header=%s assistant_header=%s",
+                     bool(auth_header), bool(assistant_header))
 
         token = assistant_header.strip()
         if not token:
             if not auth_header.startswith("Bearer "):
                 if auth_header:
                     current_app.logger.warning("Assistant auth header not Bearer")
-                    print("[assistant auth] Authorization header not Bearer")
+                    logger.debug("[assistant auth] Authorization header not Bearer")
                 return None
             token = auth_header.removeprefix("Bearer ").strip()
             if not token:
@@ -110,13 +92,13 @@ class RHAssistantBase(RH):
             secret = os.environ.get("CHAINLIT_AUTH_SECRET", "")
         if not secret:
             current_app.logger.warning("Assistant JWT secret not configured")
-            print("[assistant auth] JWT secret not configured")
+            logger.debug("[assistant auth] JWT secret not configured")
             return None
 
         payload = validate_chainlit_token(token, secret)
         if not payload:
             current_app.logger.warning("Assistant JWT validation failed")
-            print("[assistant auth] JWT validation failed")
+            logger.debug("[assistant auth] JWT validation failed")
             return None
 
         # Feature 016 (T007): Log JWT payload fields for debugging
@@ -132,7 +114,7 @@ class RHAssistantBase(RH):
                 "Assistant JWT missing identifier, available fields: %s",
                 list(payload.keys())
             )
-            print("[assistant auth] JWT missing identifier")
+            logger.debug("[assistant auth] JWT missing identifier")
             # Return None - identity will be 'unknown' but auth continues
             # if we're in a permissive endpoint
             return None
@@ -144,11 +126,11 @@ class RHAssistantBase(RH):
                 current_app.logger.warning(
                     "Assistant JWT user not found for id=%s", user_id
                 )
-                print(f"[assistant auth] JWT user not found id={user_id}")
+                logger.debug(f"[assistant auth] JWT user not found id={user_id}")
             return user
         except Exception:
             current_app.logger.exception("Assistant JWT user lookup failed")
-            print("[assistant auth] JWT user lookup failed")
+            logger.debug("[assistant auth] JWT user lookup failed")
             return None
     
     @property

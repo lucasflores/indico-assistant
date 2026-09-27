@@ -23,7 +23,7 @@
   }
 
   // Check if widget is enabled
-  if (!IndicoAssistant.enabled) {
+  if (!IndicoAssistant.enabled || !IndicoAssistant.authToken) {  // the API requires a logged-in user
     return;
   }
 
