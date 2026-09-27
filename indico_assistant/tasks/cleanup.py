@@ -1,104 +1,52 @@
-"""Session cleanup tasks for expired chat sessions.
+"""Retention: the assistant's own tables stop growing forever.
 
-Feature: 004-chat-api
-Task: T039
+Feature: 004-chat-api (scheduled since the scalability audit, Phase 2)
 
-This task runs daily to remove chat sessions that have been
-inactive for more than 90 days.
+Runs nightly. Deletes in batches (no single huge transaction); chat messages and their feedback go
+with their session (ON DELETE CASCADE).
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import datetime, timedelta, timezone
 
 from celery.schedules import crontab
+from sqlalchemy import text
 
 from indico.core.celery import celery
 from indico.core.db import db
 
-from indico_assistant.models.session import ChatSession
+from indico_assistant.tasks.indexing import BULK_QUEUE
+
 
 logger = logging.getLogger(__name__)
 
-# Default retention period in days
-SESSION_RETENTION_DAYS = 90
+# (table, timestamp column, days kept). The audit log holds questions, emails and IP addresses.
+RETENTION = [
+    ('plugin_assistant.chat_sessions', 'updated_at', 90),
+    ('plugin_assistant.query_audit_log', 'created_at', 90),
+    ('plugin_assistant.observability_error_records', 'created_at', 30),
+    ('plugin_assistant.document_sync_log', 'started_at', 90),
+    ('plugin_assistant.observability_sync_log', 'started_at', 90),
+]
+BATCH_SIZE = 5000
 
 
-@celery.task(name="indico_assistant_cleanup_expired_sessions")
-def cleanup_expired_sessions(retention_days: int = SESSION_RETENTION_DAYS) -> dict:
-    """Delete chat sessions inactive for longer than retention period.
-    
-    This task is scheduled to run daily via Celery beat.
-    
-    Args:
-        retention_days: Number of days after which inactive sessions are deleted
-        
-    Returns:
-        dict with deletion statistics
-    """
-    logger.info(
-        "Starting chat session cleanup (retention=%d days)",
-        retention_days
-    )
-    
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
-    
-    try:
-        # Find sessions that haven't been updated since cutoff
-        expired_sessions = ChatSession.query.filter(
-            ChatSession.updated_at < cutoff_date
-        ).all()
-        
-        session_count = len(expired_sessions)
-        message_count = 0
-        feedback_count = 0
-        
-        for session in expired_sessions:
-            # Count messages and feedback before deletion
-            message_count += len(session.messages)
-            for msg in session.messages:
-                feedback_count += len(msg.feedback_entries) if hasattr(msg, 'feedback_entries') else 0
-            
-            # Delete session (cascade deletes messages and feedback)
-            db.session.delete(session)
-        
+def purge(table, column, days, batch_size=BATCH_SIZE):
+    deleted = 0
+    while True:
+        count = db.session.execute(text(f'''
+            DELETE FROM {table} WHERE id IN (
+                SELECT id FROM {table} WHERE {column} < now() - make_interval(days => :days) LIMIT :batch)
+        '''), {'days': days, 'batch': batch_size}).rowcount
         db.session.commit()
-        
-        logger.info(
-            "Cleanup complete: deleted %d sessions, %d messages, %d feedback entries",
-            session_count,
-            message_count,
-            feedback_count
-        )
-        
-        return {
-            "status": "success",
-            "deleted_sessions": session_count,
-            "deleted_messages": message_count,
-            "deleted_feedback": feedback_count,
-            "cutoff_date": cutoff_date.isoformat()
-        }
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.exception("Error during session cleanup")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        deleted += count
+        if count < batch_size:
+            return deleted
 
 
-def schedule_cleanup_task() -> dict:
-    """Get the schedule configuration for the cleanup task.
-    
-    Returns:
-        Celery beat schedule entry for the cleanup task
-    """
-    return {
-        "indico_assistant_cleanup_expired_sessions": {
-            "task": "indico_assistant_cleanup_expired_sessions",
-            "schedule": crontab(hour=2, minute=0),  # Run daily at 2 AM
-            "kwargs": {"retention_days": SESSION_RETENTION_DAYS}
-        }
-    }
+# locked=False: idempotent and batched, and Indico's lock outlives a dead worker by 24 h
+@celery.periodic_task(name='indico_assistant.retention', run_every=crontab(minute='11', hour='3'),
+                      queue=BULK_QUEUE, plugin='assistant', locked=False)
+def apply_retention():
+    result = {table: purge(table, column, days) for table, column, days in RETENTION}
+    logger.info('Retention: %s', result)
+    return result
