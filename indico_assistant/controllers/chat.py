@@ -10,7 +10,6 @@ Task: T017
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from flask import jsonify, request
 from pydantic import ValidationError
@@ -18,12 +17,11 @@ from pydantic import ValidationError
 from indico_assistant.controllers.base import RHChatBase
 from indico_assistant.schemas.chat import ChatRequest, ChatResponse
 from indico_assistant.services.chat import (
-    ChatServiceError,
     EventAccessDeniedError,
-    QueryProcessingError,
     SessionAccessDeniedError,
     SessionNotFoundError,
     get_chat_service,
+    jobs,
 )
 from indico_assistant.services.chat.rate_limiter import (
     get_rate_limiter,
@@ -31,13 +29,11 @@ from indico_assistant.services.chat.rate_limiter import (
 
 logger = logging.getLogger(__name__)
 
+RESPONSE_METADATA = ("sql_generated", "confidence", "data_sources", "suggested_followups")
+
 
 class RHChat(RHChatBase):
-    """Request handler for POST /chat endpoint.
-    
-    Processes user messages through the NL2SQL pipeline
-    with session management and conversation context.
-    """
+    """POST /chat: save the message and queue its answer (Celery); poll RHChatJob for the reply."""
 
     def _check_access(self) -> None:
         """Verify user authentication and rate limits.
@@ -83,80 +79,48 @@ class RHChat(RHChatBase):
                 status=422
             )
 
-        # Parse session_id if provided (already validated as UUID by schema)
-        session_id = chat_request.session_id
-
-        # Process the message
         try:
-            chat_service = get_chat_service()
-            # Feature 016: Pass user ID (may be None after auth changes)
-            # The service handles identity resolution internally
-            user_id = self.user.id if self.user else None
-            result = chat_service.process_message(
-                user_id=user_id,
+            session_id, created = get_chat_service().submit_message(
+                user=self.user,
                 message=chat_request.message,
-                session_id=session_id,
-                event_id=chat_request.event_id
+                session_id=chat_request.session_id,
+                event_id=chat_request.event_id,
             )
-            
-            # Build response - Feature 016 (T024): Include identity_status
-            response_metadata = {
-                k: v for k, v in {
-                    "sql_generated": result.metadata.get("sql_generated"),
-                    "confidence": result.metadata.get("confidence"),
-                    "data_sources": result.metadata.get("data_sources", []),
-                    "identity_status": result.metadata.get("identity_status"),  # Feature 016
-                    "suggested_followups": result.metadata.get("suggested_followups", []),
-                }.items() if v is not None
-            }
-            
-            response = ChatResponse(
-                session_id=str(result.session_id),
-                message_id=str(result.message_id),
-                response=result.response,
-                metadata=response_metadata
-            )
-            
-            status_code = 201 if result.created_session else 200
-            return jsonify(response.model_dump(exclude_none=True, mode='json')), status_code
-            
         except SessionNotFoundError:
-            return self._error_response(
-                "SESSION_NOT_FOUND",
-                "Session not found",
-                status=404
-            )
+            return self._error_response("SESSION_NOT_FOUND", "Session not found", status=404)
         except SessionAccessDeniedError:
-            return self._error_response(
-                "ACCESS_DENIED",
-                "Session belongs to another user",
-                status=403
-            )
+            return self._error_response("ACCESS_DENIED", "Session belongs to another user", status=403)
         except EventAccessDeniedError as e:
-            return self._error_response(
-                "ACCESS_DENIED",
-                f"Access denied to event {e.event_id}",
-                status=403
-            )
-        except QueryProcessingError as e:
-            logger.exception("Query processing failed")
-            return self._error_response(
-                "QUERY_PROCESSING_ERROR",
-                "Failed to process query",
-                details=e.reason,
-                status=500
-            )
-        except ChatServiceError as e:
-            logger.exception("Chat service error")
-            return self._error_response(
-                "INTERNAL_ERROR",
-                "An unexpected error occurred",
-                status=500
-            )
-        except Exception as e:
-            logger.exception("Unexpected error in chat endpoint")
-            return self._error_response(
-                "INTERNAL_ERROR",
-                "An unexpected error occurred",
-                status=500
-            )
+            return self._error_response("ACCESS_DENIED", f"Access denied to event {e.event_id}", status=403)
+
+        from indico_assistant.tasks.chat import answer_chat
+
+        job_id = jobs.create(self.user.id, session_id)
+        answer_chat.delay(job_id, self.user.id, session_id, chat_request.message)
+        return jsonify({
+            "job_id": job_id,
+            "session_id": str(session_id),
+            "created_session": created,
+            "status": "pending",
+        }), 202
+
+
+class RHChatJob(RHChatBase):
+    """GET /chat/jobs/<job_id>: the queued answer, once a worker has produced it."""
+
+    def _process(self):
+        job = jobs.get(request.view_args["job_id"])
+        if job is None or job.get("user_id") != self.user.id:
+            return self._error_response("NOT_FOUND", "Unknown or expired chat job", status=404)
+        if job["status"] == "pending":
+            return jsonify({"status": "pending", "session_id": job["session_id"]}), 202
+        if job["status"] == "failed":
+            return self._error_response(job.get("error", "INTERNAL_ERROR"), job.get("message", ""), status=500)
+        metadata = job.get("metadata") or {}
+        response = ChatResponse(
+            session_id=job["session_id"],
+            message_id=job["message_id"],
+            response=job["response"],
+            metadata={k: metadata.get(k) for k in RESPONSE_METADATA if metadata.get(k) is not None},
+        )
+        return jsonify({"status": "done", **response.model_dump(exclude_none=True, mode="json")}), 200

@@ -53,7 +53,8 @@ reaction_on_message_received = false
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
-    enabled = true
+    # Off: the assistant ignores files, and every upload was written to this host's disk (20 × 500 MB)
+    enabled = false
     # Define accepted file types using MIME types
     # Examples:
     # 1. For specific file types:

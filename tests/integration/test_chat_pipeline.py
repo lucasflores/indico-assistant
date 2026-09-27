@@ -1,7 +1,6 @@
-"""Integration smoke test for chat pipeline.
+"""Integration smoke test for the chat wiring: POST /chat → Celery task → GET /chat/jobs/<id>.
 
-Feature: 010-chat-pipeline-integration
-Task: T021
+Feature: 010-chat-pipeline-integration (queued since the scalability audit, Phase 1)
 """
 
 from __future__ import annotations
@@ -9,84 +8,51 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 import indico_assistant.controllers.chat as chat_module
+from indico_assistant.controllers.chat import RHChat, RHChatJob
+from indico_assistant.services.chat import jobs
 from indico_assistant.services.chat.service import ChatService
+from indico_assistant.tasks.chat import answer_chat
 
 
-class TestChatPipelineSmoke:
-    """Smoke tests for chat pipeline wiring."""
+class FakeCache(dict):
+    def set(self, key, value, timeout=None):
+        self[key] = value
 
-    @pytest.fixture
-    def mock_user(self):
-        user = MagicMock()
-        user.id = 321
-        return user
 
-    @pytest.fixture
-    def chat_controller(self, mock_user):
-        from indico_assistant.controllers.chat import RHChat
+def test_chat_round_trip(monkeypatch):
+    user = MagicMock(id=321, is_admin=False)
+    session = MagicMock(id=uuid4(), event_id=None)
+    manager = MagicMock()
+    manager.create_session.return_value = manager.get_session.return_value = session
+    manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+    service = ChatService(session_manager=manager, context_builder=MagicMock())
+    monkeypatch.setattr(jobs, '_cache', FakeCache())
+    request = MagicMock()
+    monkeypatch.setattr(chat_module, 'request', request)
 
-        controller = RHChat.__new__(RHChat)
-        controller.user = mock_user
+    def rh(cls):
+        controller = cls.__new__(cls)
+        controller._user = user
         return controller
 
-    @pytest.fixture
-    def mock_request(self):
-        mock_req = MagicMock()
-        original_request = getattr(chat_module, "request", None)
-        chat_module.request = mock_req
-        yield mock_req
-        if original_request:
-            chat_module.request = original_request
+    queued = []
+    with patch('indico_assistant.controllers.chat.get_chat_service', return_value=service), \
+            patch('indico_assistant.services.chat.get_chat_service', return_value=service), \
+            patch.object(answer_chat, 'delay', side_effect=lambda *args: queued.append(args)), \
+            patch.object(service, '_load_user', return_value=user), \
+            patch.object(service, '_process_with_nl2sql', return_value=("Hello from pipeline", {})), \
+            patch('indico_assistant.services.chat.service.db'):
+        request.get_json.return_value = {"message": "Hello"}
+        response, status = rh(RHChat)._process()
+        assert status == 202
+        job_id = response.get_json()['job_id']
 
-    def test_chat_pipeline_smoke(self, chat_controller, mock_request, mock_user):
-        """Should route request through ChatService and return response."""
-        session_id = uuid4()
-        message_id = uuid4()
+        request.view_args = {'job_id': job_id}
+        assert rh(RHChatJob)._process()[1] == 202  # not answered yet
 
-        mock_request.get_json.return_value = {"message": "Hello"}
+        answer_chat.run(*queued[0])  # what the worker does
+        response, status = rh(RHChatJob)._process()
 
-        mock_session_manager = MagicMock()
-        mock_context_builder = MagicMock()
-        chat_service = ChatService(
-            session_manager=mock_session_manager,
-            context_builder=mock_context_builder
-        )
-
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session.event_id = None
-        mock_session_manager.create_session.return_value = mock_session
-
-        mock_user_msg = MagicMock()
-        mock_user_msg.id = uuid4()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-
-        mock_assistant_msg = MagicMock()
-        mock_assistant_msg.id = message_id
-        mock_session_manager.add_assistant_message.return_value = mock_assistant_msg
-
-        mock_context_builder.build_context.return_value = []
-
-        with patch.object(chat_service, "_process_with_nl2sql") as mock_process:
-            mock_process.return_value = ("Hello from pipeline", {"sql_generated": None})
-
-            with patch("indico_assistant.controllers.chat.get_chat_service") as mock_get:
-                mock_get.return_value = chat_service
-
-                with patch("indico_assistant.controllers.chat.get_rate_limiter") as mock_limiter:
-                    from indico_assistant.services.chat.rate_limiter import RateLimitResult
-
-                    mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                        allowed=True, remaining=59, retry_after=None
-                    )
-
-                    response, status_code = chat_controller._process()
-
-                    assert status_code == 201
-                    data = response.get_json()
-                    assert data["response"] == "Hello from pipeline"
-                    assert data["session_id"] == str(session_id)
-                    assert data["message_id"] == str(message_id)
+    assert status == 200
+    assert response.get_json()['response'] == "Hello from pipeline"

@@ -1,7 +1,6 @@
-"""Integration tests for POST /chat endpoint.
+"""POST /chat queues the answer in Celery; GET /chat/jobs/<job_id> returns it.
 
-Feature: 004-chat-api
-Task: T021
+Feature: 004-chat-api (queued since the scalability audit, Phase 1)
 """
 
 from __future__ import annotations
@@ -12,345 +11,112 @@ from uuid import uuid4
 import pytest
 
 import indico_assistant.controllers.chat as chat_module
+from indico_assistant.controllers.chat import RHChat, RHChatJob
+from indico_assistant.services.chat import EventAccessDeniedError, SessionAccessDeniedError, SessionNotFoundError
 
 
-class TestChatEndpointIntegration:
-    """Integration tests for the chat endpoint."""
+USER = MagicMock(id=123, is_admin=False)
 
-    @pytest.fixture
-    def mock_user(self):
-        """Create a mock authenticated user."""
-        user = MagicMock()
-        user.id = 123
-        user.is_admin = False
-        return user
 
-    @pytest.fixture
-    def mock_flask_session(self, mock_user):
-        """Mock Flask session with authenticated user."""
-        with patch('flask.session') as mock_session:
-            mock_session.user = mock_user
-            yield mock_session
+def _controller(cls):
+    controller = cls.__new__(cls)
+    controller._user = USER
+    return controller
 
-    @pytest.fixture
-    def chat_controller(self, mock_user):
-        """Create a chat controller instance."""
-        from indico_assistant.controllers.chat import RHChat
-        
-        controller = RHChat.__new__(RHChat)
-        controller.user = mock_user
-        return controller
 
-    @pytest.fixture
-    def mock_request(self):
-        """Create and inject a mock request into the chat module."""
-        mock_req = MagicMock()
-        original_request = getattr(chat_module, 'request', None)
-        chat_module.request = mock_req
-        yield mock_req
-        if original_request:
-            chat_module.request = original_request
+@pytest.fixture
+def request_(monkeypatch):
+    req = MagicMock()
+    monkeypatch.setattr(chat_module, 'request', req)
+    return req
 
-    def test_process_returns_response_with_new_session(
-        self, chat_controller, mock_user, mock_request
-    ):
-        """Test chat returns response and creates new session."""
+
+@pytest.fixture
+def service():
+    with patch('indico_assistant.controllers.chat.get_chat_service') as get:
+        yield get.return_value
+
+
+@pytest.fixture
+def jobs():
+    store = {}
+    with patch.object(chat_module.jobs, 'create', side_effect=lambda user_id, session_id: 'job1') as create, \
+            patch.object(chat_module.jobs, 'get', side_effect=store.get):
+        yield store, create
+
+
+@pytest.fixture
+def answer_task():
+    with patch('indico_assistant.tasks.chat.answer_chat') as task:
+        yield task
+
+
+class TestPostChat:
+    def test_queues_the_answer(self, request_, service, jobs, answer_task):
         session_id = uuid4()
-        message_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "What events are tomorrow?"
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat.service import ChatResult
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.return_value = ChatResult(
-                response="There are 3 events tomorrow.",
-                session_id=session_id,
-                message_id=message_id,
-                metadata={"sql_generated": "SELECT * FROM events"},
-                created_session=True
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 201  # Created
-                data = response.get_json()
-                assert data["session_id"] == str(session_id)
-                assert data["response"] == "There are 3 events tomorrow."
+        request_.get_json.return_value = {"message": "What events are tomorrow?", "event_id": 7}
+        service.submit_message.return_value = (session_id, True)
 
-    def test_process_returns_response_with_existing_session(
-        self, chat_controller, mock_user, mock_request
-    ):
-        """Test chat uses existing session when session_id provided."""
-        session_id = uuid4()
-        message_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "Show me the first one",
-            "session_id": str(session_id)  # Must be string, not UUID
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat.service import ChatResult
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.return_value = ChatResult(
-                response="The first event is Team Meeting.",
-                session_id=session_id,
-                message_id=message_id,
-                metadata={},
-                created_session=False
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=58, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 200  # OK, not Created
-                mock_service.process_message.assert_called_once()
-                call_kwargs = mock_service.process_message.call_args[1]
-                assert call_kwargs['session_id'] == session_id
+        response, status = _controller(RHChat)._process()
 
-    def test_process_validates_message_required(self, chat_controller, mock_request):
-        """Test validation error when message is missing."""
-        mock_request.get_json.return_value = {}
-        
-        with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-            from indico_assistant.services.chat.rate_limiter import RateLimitResult
-            
-            mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                allowed=True, remaining=59, retry_after=None
-            )
-            
-            response, status_code = chat_controller._process()
-            
-            assert status_code == 422
-            data = response.get_json()
-            assert data["error"] == "VALIDATION_ERROR"
+        assert status == 202
+        assert response.get_json() == {"job_id": "job1", "session_id": str(session_id),
+                                       "created_session": True, "status": "pending"}
+        service.submit_message.assert_called_once_with(user=USER, message="What events are tomorrow?",
+                                                       session_id=None, event_id=7)
+        jobs[1].assert_called_once_with(123, session_id)
+        answer_task.delay.assert_called_once_with("job1", 123, session_id, "What events are tomorrow?")
 
-    def test_process_validates_message_not_empty(self, chat_controller, mock_request):
-        """Test validation error when message is empty string."""
-        mock_request.get_json.return_value = {"message": ""}
-        
-        with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-            from indico_assistant.services.chat.rate_limiter import RateLimitResult
-            
-            mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                allowed=True, remaining=59, retry_after=None
-            )
-            
-            response, status_code = chat_controller._process()
-            
-            assert status_code == 422
+    @pytest.mark.parametrize('body', [{}, {"message": ""}])
+    def test_validation(self, request_, service, body):
+        request_.get_json.return_value = body
+        response, status = _controller(RHChat)._process()
+        assert status == 422
+        service.submit_message.assert_not_called()
 
-    def test_process_handles_session_not_found(self, chat_controller, mock_request):
-        """Test 404 error when session_id not found."""
-        session_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "Hello",
-            "session_id": str(session_id)
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat import SessionNotFoundError
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.side_effect = SessionNotFoundError(
-                f"Session {session_id} not found"
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 404
-                data = response.get_json()
-                assert data["error"] == "SESSION_NOT_FOUND"
+    @pytest.mark.parametrize(('error', 'status', 'code'), [
+        (SessionNotFoundError('x'), 404, 'SESSION_NOT_FOUND'),
+        (SessionAccessDeniedError('x'), 403, 'ACCESS_DENIED'),
+        (EventAccessDeniedError(7), 403, 'ACCESS_DENIED'),
+    ])
+    def test_refusals_queue_nothing(self, request_, service, answer_task, error, status, code):
+        request_.get_json.return_value = {"message": "hi", "session_id": str(uuid4())}
+        service.submit_message.side_effect = error
+        response, got = _controller(RHChat)._process()
+        assert (got, response.get_json()["error"]) == (status, code)
+        answer_task.delay.assert_not_called()
 
-    def test_process_handles_session_access_denied(self, chat_controller, mock_request):
-        """Test 403 error when user doesn't own session."""
-        session_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "Hello",
-            "session_id": str(session_id)
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat import SessionAccessDeniedError
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.side_effect = SessionAccessDeniedError(
-                "Session belongs to another user"
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 403
-                data = response.get_json()
-                assert data["error"] == "ACCESS_DENIED"
 
-    def test_process_handles_event_access_denied(self, chat_controller, mock_request):
-        """Test 403 error when user can't access event."""
-        mock_request.get_json.return_value = {
-            "message": "What's in event 456?",
-            "event_id": 456
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat import EventAccessDeniedError
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.side_effect = EventAccessDeniedError(
-                456, "Access denied to event"
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 403
-                data = response.get_json()
-                assert data["error"] == "ACCESS_DENIED"
+class TestChatJob:
+    def _get(self, request_, job_id='job1'):
+        request_.view_args = {'job_id': job_id}
+        return _controller(RHChatJob)._process()
 
-    def test_process_handles_query_processing_error(self, chat_controller, mock_request):
-        """Test 500 error when query processing fails."""
-        mock_request.get_json.return_value = {"message": "Complex query"}
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat import QueryProcessingError
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.side_effect = QueryProcessingError(
-                "Failed to process query",
-                reason="LLM timeout"
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 500
-                data = response.get_json()
-                assert data["error"] == "QUERY_PROCESSING_ERROR"
+    def test_pending(self, request_, jobs):
+        jobs[0]['job1'] = {'status': 'pending', 'user_id': 123, 'session_id': 's'}
+        response, status = self._get(request_)
+        assert status == 202 and response.get_json()['status'] == 'pending'
 
-    def test_process_returns_metadata_in_response(self, chat_controller, mock_request):
-        """Test response includes SQL and confidence metadata."""
-        session_id = uuid4()
-        message_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "How many events are there?"
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat.service import ChatResult
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.return_value = ChatResult(
-                response="There are 42 events.",
-                session_id=session_id,
-                message_id=message_id,
-                metadata={
-                    "sql_generated": "SELECT COUNT(*) FROM events",
-                    "confidence": 0.95,
-                    "data_sources": ["events"]
-                },
-                created_session=True
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                data = response.get_json()
-                assert "metadata" in data
-                assert data["metadata"]["sql_generated"] == "SELECT COUNT(*) FROM events"
-                assert data["metadata"]["confidence"] == 0.95
+    def test_done_returns_the_answer(self, request_, jobs):
+        session_id, message_id = uuid4(), uuid4()
+        jobs[0]['job1'] = {'status': 'done', 'user_id': 123, 'session_id': str(session_id),
+                           'message_id': str(message_id), 'response': 'Three events.',
+                           'metadata': {'sql_generated': 'SELECT 1', 'pipeline_error': None, 'internal': 'x'}}
+        response, status = self._get(request_)
+        data = response.get_json()
+        assert status == 200
+        assert (data['status'], data['response'], data['session_id']) == ('done', 'Three events.', str(session_id))
+        assert data['metadata'] == {'sql_generated': 'SELECT 1'}
 
-    def test_process_accepts_event_scoped_request(self, chat_controller, mock_request):
-        """Test chat request with event_id scope."""
-        session_id = uuid4()
-        message_id = uuid4()
-        
-        mock_request.get_json.return_value = {
-            "message": "What sessions are in this event?",
-            "event_id": 789
-        }
-        
-        with patch('indico_assistant.controllers.chat.get_chat_service') as mock_get:
-            from indico_assistant.services.chat.service import ChatResult
-            
-            mock_service = MagicMock()
-            mock_get.return_value = mock_service
-            mock_service.process_message.return_value = ChatResult(
-                response="This event has 5 sessions.",
-                session_id=session_id,
-                message_id=message_id,
-                metadata={},
-                created_session=True
-            )
-            
-            with patch('indico_assistant.controllers.chat.get_rate_limiter') as mock_limiter:
-                from indico_assistant.services.chat.rate_limiter import RateLimitResult
-                
-                mock_limiter.return_value.check_rate.return_value = RateLimitResult(
-                    allowed=True, remaining=59, retry_after=None
-                )
-                
-                response, status_code = chat_controller._process()
-                
-                assert status_code == 201
-                mock_service.process_message.assert_called_once()
-                call_kwargs = mock_service.process_message.call_args[1]
-                assert call_kwargs['event_id'] == 789
+    def test_failed(self, request_, jobs):
+        jobs[0]['job1'] = {'status': 'failed', 'user_id': 123, 'session_id': 's', 'error': 'TIMEOUT',
+                           'message': 'Too long'}
+        response, status = self._get(request_)
+        assert status == 500 and response.get_json()['error'] == 'TIMEOUT'
+
+    @pytest.mark.parametrize('job', [None, {'status': 'done', 'user_id': 999, 'session_id': 's'}])
+    def test_unknown_or_someone_elses_job(self, request_, jobs, job):
+        if job:
+            jobs[0]['job1'] = job
+        response, status = self._get(request_)
+        assert status == 404

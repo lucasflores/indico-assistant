@@ -59,197 +59,80 @@ class TestChatService:
         assert service._session_manager is mock_session_manager
         assert service._context_builder is mock_context_builder
 
-    def test_process_message_creates_new_session(
-        self, chat_service, mock_session_manager, mock_context_builder
-    ):
-        """Test processing a message creates new session when none provided."""
-        session_id = uuid4()
-        message_id = uuid4()
-        
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session.event_id = None
-        mock_session_manager.create_session.return_value = mock_session
-        mock_session_manager.get_session.return_value = None
-        
-        mock_user_msg = MagicMock()
-        mock_user_msg.id = uuid4()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-        
-        mock_assistant_msg = MagicMock()
-        mock_assistant_msg.id = message_id
-        mock_session_manager.add_assistant_message.return_value = mock_assistant_msg
-        
-        mock_context_builder.build_context.return_value = []
-        
-        with patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-            mock_process.return_value = ("Test response", {"sql": "SELECT 1"})
-            
-            result = chat_service.process_message(
-                user_id=123,
-                message="What is today?",
-                session_id=None
-            )
-            
-            assert isinstance(result, ChatResult)
-            assert result.session_id == session_id
-            assert result.message_id == message_id
-            assert result.response == "Test response"
-            assert result.created_session is True
-            mock_session_manager.create_session.assert_called_once_with(123, None)
+    @pytest.fixture
+    def user(self):
+        return MagicMock(id=123, is_admin=False)
 
-    def test_process_message_uses_existing_session(
-        self, chat_service, mock_session_manager, mock_context_builder
-    ):
-        """Test processing a message uses existing session when provided."""
-        session_id = uuid4()
-        
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session.event_id = None
-        mock_session_manager.get_session.return_value = mock_session
+    def test_submit_creates_session_saves_message_and_commits(self, chat_service, mock_session_manager, user):
+        session = MagicMock(id=uuid4(), event_id=None)
+        mock_session_manager.create_session.return_value = session
+
+        assert chat_service.submit_message(user, "What events?") == (session.id, True)
+        mock_session_manager.create_session.assert_called_once_with(123, None)
+        mock_session_manager.add_user_message.assert_called_once_with(session, "What events?")
+        mock_session_manager.commit.assert_called_once()
+
+    def test_submit_to_existing_session(self, chat_service, mock_session_manager, user):
+        session = MagicMock(id=uuid4(), event_id=None)
+        mock_session_manager.get_session.return_value = session
         mock_session_manager.validate_session_ownership.return_value = True
-        
-        mock_user_msg = MagicMock()
-        mock_user_msg.id = uuid4()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-        
-        mock_assistant_msg = MagicMock()
-        mock_assistant_msg.id = uuid4()
-        mock_session_manager.add_assistant_message.return_value = mock_assistant_msg
-        
-        mock_context_builder.build_context.return_value = []
-        
-        with patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-            mock_process.return_value = ("Response", {})
-            
-            result = chat_service.process_message(
-                user_id=123,
-                message="Follow up question",
-                session_id=session_id
-            )
-            
-            assert result.created_session is False
-            mock_session_manager.get_session.assert_called_once_with(session_id)
 
-    def test_process_message_session_not_found(
-        self, chat_service, mock_session_manager
-    ):
-        """Test error when session ID provided but not found."""
-        session_id = uuid4()
+        assert chat_service.submit_message(user, "and then?", session_id=session.id) == (session.id, False)
+        mock_session_manager.create_session.assert_not_called()
+
+    def test_submit_unknown_session(self, chat_service, mock_session_manager, user):
         mock_session_manager.get_session.return_value = None
-        
         with pytest.raises(SessionNotFoundError):
-            chat_service.process_message(
-                user_id=123,
-                message="Test",
-                session_id=session_id
-            )
-        
+            chat_service.submit_message(user, "hi", session_id=uuid4())
         mock_session_manager.rollback.assert_called_once()
 
-    def test_process_message_session_access_denied(
-        self, chat_service, mock_session_manager
-    ):
-        """Test error when user doesn't own the session."""
-        session_id = uuid4()
-        
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session_manager.get_session.return_value = mock_session
+    def test_submit_someone_elses_session(self, chat_service, mock_session_manager, user):
+        mock_session_manager.get_session.return_value = MagicMock()
         mock_session_manager.validate_session_ownership.return_value = False
-        
         with pytest.raises(SessionAccessDeniedError):
-            chat_service.process_message(
-                user_id=123,
-                message="Test",
-                session_id=session_id
-            )
-        
-        mock_session_manager.rollback.assert_called_once()
+            chat_service.submit_message(user, "hi", session_id=uuid4())
+        mock_session_manager.add_user_message.assert_not_called()
 
-    def test_process_message_event_access_validated(
+    def test_submit_checks_event_access_before_saving(self, chat_service, mock_session_manager, user):
+        mock_session_manager.create_session.return_value = MagicMock(event_id=456)
+        with patch.object(chat_service, '_validate_event_access',
+                          side_effect=EventAccessDeniedError(456)) as validate:
+            with pytest.raises(EventAccessDeniedError):
+                chat_service.submit_message(user, "hi", event_id=456)
+        validate.assert_called_once_with(user, 456)
+        mock_session_manager.add_user_message.assert_not_called()
+
+    def test_answer_runs_pipeline_as_the_user_with_no_transaction_open(
         self, chat_service, mock_session_manager, mock_context_builder
     ):
-        """Test that event access is validated for event-scoped sessions."""
         session_id = uuid4()
-        
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session.event_id = 456
-        mock_session_manager.create_session.return_value = mock_session
-        
-        mock_user_msg = MagicMock()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-        
-        mock_assistant_msg = MagicMock()
-        mock_assistant_msg.id = uuid4()
-        mock_session_manager.add_assistant_message.return_value = mock_assistant_msg
-        
-        mock_context_builder.build_context.return_value = []
-        
-        auth_user = MagicMock()
-        with patch.object(chat_service, '_load_user', return_value=auth_user) as mock_load, \
-                patch.object(chat_service, '_validate_event_access') as mock_validate, \
-                patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-            mock_process.return_value = ("Response", {})
+        mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=456)
+        mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+        mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
+        user = MagicMock(id=123, is_admin=True)
+        calls = []
 
-            chat_service.process_message(
-                user_id=123,
-                message="What events?",
-                event_id=456
-            )
+        def pipeline(message, context, event_id, user_id=None, auth_user=None):
+            calls.append('pipeline')
+            assert (auth_user.id, auth_user.is_admin, event_id, user_id) == (123, True, 456, 123)
+            return "Answer", {"confidence": 0.9}
 
-            mock_load.assert_called_once_with(123)
-            mock_validate.assert_called_once_with(auth_user, 456)
-            assert mock_process.call_args.kwargs['auth_user'] is auth_user
+        with patch.object(chat_service, '_load_user', return_value=user), \
+                patch.object(chat_service, '_process_with_nl2sql', side_effect=pipeline), \
+                patch('indico_assistant.services.chat.service.db') as db:
+            db.session.commit.side_effect = lambda: calls.append('commit')
+            result = chat_service.answer(123, session_id, "hi")
 
-    def test_process_message_commits_on_success(
-        self, chat_service, mock_session_manager, mock_context_builder
-    ):
-        """Test that transaction is committed on success."""
-        mock_session = MagicMock()
-        mock_session.id = uuid4()
-        mock_session.event_id = None
-        mock_session_manager.create_session.return_value = mock_session
-        
-        mock_user_msg = MagicMock()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-        
-        mock_assistant_msg = MagicMock()
-        mock_assistant_msg.id = uuid4()
-        mock_session_manager.add_assistant_message.return_value = mock_assistant_msg
-        
-        mock_context_builder.build_context.return_value = []
-        
-        with patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-            mock_process.return_value = ("Response", {})
-            
-            chat_service.process_message(user_id=123, message="Test")
-            
-            mock_session_manager.commit.assert_called_once()
+        assert calls == ['commit', 'pipeline']  # reads committed before any LLM call
+        assert result.response == "Answer" and result.session_id == session_id
+        mock_session_manager.add_assistant_message.assert_called_once()
+        mock_session_manager.commit.assert_called_once()
 
-    def test_process_message_rolls_back_on_error(
-        self, chat_service, mock_session_manager, mock_context_builder
-    ):
-        """Test that transaction is rolled back on error."""
-        mock_session = MagicMock()
-        mock_session.id = uuid4()
-        mock_session.event_id = None
-        mock_session_manager.create_session.return_value = mock_session
-        
-        mock_user_msg = MagicMock()
-        mock_session_manager.add_user_message.return_value = mock_user_msg
-        
-        mock_context_builder.build_context.return_value = []
-        
-        with patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-            mock_process.side_effect = Exception("Processing error")
-            
-            with pytest.raises(QueryProcessingError):
-                chat_service.process_message(user_id=123, message="Test")
-            
-            mock_session_manager.rollback.assert_called_once()
+    def test_answer_for_vanished_session(self, chat_service, mock_session_manager):
+        mock_session_manager.get_session.return_value = None
+        with patch.object(chat_service, '_load_user', return_value=MagicMock()):
+            with pytest.raises(SessionNotFoundError):
+                chat_service.answer(123, uuid4(), "hi")
 
 
 class TestChatResult:

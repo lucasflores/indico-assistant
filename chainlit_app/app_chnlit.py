@@ -10,7 +10,6 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 import asyncio
-import re
 import chainlit as cl
 import httpx
 import jwt
@@ -111,17 +110,31 @@ def _get_auth_token() -> str | None:
     return None
 
 
+_http_clients: dict[str, httpx.AsyncClient] = {}
+
+# Indico answers in a Celery worker (up to ~2.5 min); we poll for the reply meanwhile.
+POLL_INTERVAL = 1.0
+ANSWER_TIMEOUT = 180.0
+
+
 async def _get_http_client(base_url: str) -> httpx.AsyncClient:
-    client = cl.user_session.get("indico_http_client")
-    current_base_url = cl.user_session.get("indico_api_base_url")
-    if client is None or current_base_url != base_url:
-        client = httpx.AsyncClient(
-            base_url=base_url,
-            timeout=httpx.Timeout(30.0)
+    # One pooled client per Indico URL for the whole process (not one per chat session, never closed).
+    if base_url not in _http_clients:
+        _http_clients[base_url] = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(15.0))
+    return _http_clients[base_url]
+
+
+async def _wait_for_answer(client: httpx.AsyncClient, job_id: str, auth_token: str) -> httpx.Response:
+    """Poll the queued answer until it is ready, failed, or ANSWER_TIMEOUT passes."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ANSWER_TIMEOUT
+    while True:
+        response = await client.get(
+            f"/api/assistant/chat/jobs/{job_id}", headers={"X-Assistant-Auth": auth_token}
         )
-        cl.user_session.set("indico_http_client", client)
-        cl.user_session.set("indico_api_base_url", base_url)
-    return client
+        if response.status_code != 202 or loop.time() > deadline:
+            return response
+        await asyncio.sleep(POLL_INTERVAL)
 
 
 @cl.on_chat_start
@@ -154,10 +167,6 @@ def header_auth_callback(headers: dict) -> cl.User | None:
     token = None
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ")
-        token = auth_header.removeprefix("Bearer ")
-        token = auth_header.removeprefix("Bearer ")
-        token = auth_header.removeprefix("Bearer ")
-        token = auth_header.removeprefix("Bearer ")
     elif cookie_header:
         for part in cookie_header.split(";"):
             name, _, value = part.strip().partition("=")
@@ -177,7 +186,7 @@ def header_auth_callback(headers: dict) -> cl.User | None:
                 "authenticated": False,
                 "source": "indico",
                 "auth_token": token,
-                "event_id": event_id,
+                "event_id": None,
             },
         )
 
@@ -259,10 +268,8 @@ async def on_message(message: cl.Message):
     # Get event_id from user session (extracted during auth from Referer header)
     # Feature 013: Event context for scoped queries
     event_id = cl.user_session.get("indico_event_id")
-    print(f"[MESSAGE] event_id from session: {event_id}", flush=True)
     if event_id:
         payload["event_id"] = event_id
-        print(f"[MESSAGE] Including event_id={event_id} in payload", flush=True)
 
     logger.info(
         "Sending request to Indico assistant API",
@@ -274,6 +281,14 @@ async def on_message(message: cl.Message):
             json=payload,
             headers={"X-Assistant-Auth": auth_token},
         )
+        if response.status_code == 202:
+            queued = response.json()
+            cl.user_session.set("indico_session_id", queued.get("session_id"))
+            response = await _wait_for_answer(client, queued["job_id"], auth_token)
+            if response.status_code == 202:
+                loading_msg.content = "The assistant is taking too long to answer. Please try again."
+                await loading_msg.send()
+                return
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
         loading_msg.content = "Unable to reach the assistant service. Please try again later."
@@ -363,21 +378,8 @@ async def on_message(message: cl.Message):
         followup_text += "\n\nJust say the word!"
         reply += followup_text
     
-    # Feature 017: Stream the response for better UX
-    loading_msg.content = ""
+    loading_msg.content = reply
     await loading_msg.send()
-    
-    # Stream the response token by token
-    # Split on word boundaries for more natural streaming
-    tokens = re.findall(r'\S+\s*', reply)
-    for token in tokens:
-        await loading_msg.stream_token(token)
-        # Small delay for smoother streaming effect (adjustable)
-        await asyncio.sleep(0.02)
-    
-    # Finalize the message
-    await loading_msg.update()
-    logger.info("Response streamed and finalized")
 
 
 if __name__ == "__main__":

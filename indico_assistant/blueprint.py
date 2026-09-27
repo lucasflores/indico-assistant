@@ -100,7 +100,7 @@ def _register_routes():
     This is called after controllers are imported to avoid circular imports.
     """
     from indico_assistant.controllers.health import RHHealth
-    from indico_assistant.controllers.chat import RHChat
+    from indico_assistant.controllers.chat import RHChat, RHChatJob
     from indico_assistant.controllers.feedback import RHFeedback
     from indico_assistant.controllers.sessions import (
         RHSessionDelete,
@@ -113,6 +113,7 @@ def _register_routes():
     
     # Chat API endpoints (Feature 004)
     blueprint.add_url_rule("/chat", "chat", RHChat, methods=["POST"])
+    blueprint.add_url_rule("/chat/jobs/<job_id>", "chat_job", RHChatJob, methods=["GET"])
     
     # Session management endpoints (Feature 004, User Story 2)
     blueprint.add_url_rule("/sessions", "sessions_list", RHSessionList, methods=["GET"])
