@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Optional
 from uuid import UUID
 
@@ -106,165 +107,63 @@ class ChatService:
         self._session_manager = session_manager or get_session_manager()
         self._context_builder = context_builder or get_context_builder()
 
-    def process_message(
+    def submit_message(
         self,
-        user_id: Optional[int],
+        user: Any,
         message: str,
         session_id: Optional[UUID] = None,
         event_id: Optional[int] = None
-    ) -> ChatResult:
-        """Process a user chat message.
-        
-        Feature 016 (T019, T020): Integrates identity resolution for personal queries.
-        
-        1. Get or create session
-        2. Resolve user identity (if needed for personal queries)
-        3. Validate ownership and event access
-        4. Build conversation context
-        5. Process through NL2SQL pipeline (or return prompting message)
-        6. Save messages and return result
-        
-        Args:
-            user_id: Authenticated user ID (can be None for unauthenticated users)
-            message: User's message text
-            session_id: Existing session UUID (optional)
-            event_id: Event scope (optional)
-            
-        Returns:
-            ChatResult with response and metadata
-            
+    ) -> tuple[UUID, bool]:
+        """Web-request half: check access, save the user's message, commit. Returns (session_id, created).
+
+        The answer is produced by :meth:`answer` in a Celery worker, so no LLM call runs in the web tier.
+
         Raises:
             SessionNotFoundError: If session_id provided but not found
             SessionAccessDeniedError: If user doesn't own the session
             EventAccessDeniedError: If user can't access the event
-            QueryProcessingError: If NL2SQL processing fails
         """
-        from indico_assistant.services.chat.identity import (
-            get_identity_service,
-            IDENTITY_DISCLAIMER,
-        )
-        from indico_assistant.services.nl2sql.classifier import is_personal_query
-        
         try:
-            # Feature 016 (T019): Initialize identity service
-            identity_service = get_identity_service()
-            
-            # Get or create session (use 0 for user_id if None - session requires int)
-            session, created = self._get_or_create_session(
-                session_id, user_id or 0, event_id
-            )
-            
-            # Feature 016 (T019): Resolve identity
-            identity = identity_service.resolve_identity(
-                user_id=user_id,
-                message=message,
-                session=session
-            )
-            
-            # Feature 016 (T020): Check if this is a personal query needing identity
-            needs_identity = is_personal_query(message)
-            
-            # If personal query and identity unknown, return prompting message
-            if needs_identity and identity.user_id is None:
-                # Save user message first
-                user_msg = self._session_manager.add_user_message(session, message)
-                
-                # Return identity prompt as response
-                prompt_message = identity.prompt_message or (
-                    "I can't seem to identify who you are right now. "
-                    "Could you please provide your name, email, or user ID?"
-                )
-                
-                metadata = {
-                    "identity_status": {
-                        "source": "unknown",
-                        "disclaimer": None
-                    },
-                    "identity_prompt": True,
-                    "needs_clarification": identity.needs_clarification,
-                    "match_count": identity.match_count,
-                }
-                
-                # Save assistant response
-                assistant_msg = self._session_manager.add_assistant_message(
-                    session, prompt_message, metadata
-                )
-                self._session_manager.commit()
-                
-                return ChatResult(
-                    response=prompt_message,
-                    session_id=session.id,
-                    message_id=assistant_msg.id,
-                    metadata=metadata,
-                    created_session=created
-                )
-            
-            # Feature 016 (T021): Save resolved identity to session if user-provided
-            if (identity.source == 'user_provided' and 
-                identity.user_id is not None and
-                session.resolved_user_id != identity.user_id):
-                session.resolved_user_id = identity.user_id
-                session.identity_source = 'user_provided'
-            
-            # Use resolved user_id for processing
-            effective_user_id = identity.user_id
-            
-            # SECURITY: access is always decided by the *authenticated* user. A claimed identity
-            # ("I am ...") only changes whose data "my ..." questions refer to, never what is visible.
-            auth_user = self._load_user(user_id)
+            session, created = self._get_or_create_session(session_id, user.id, event_id)
             if session.event_id:
-                self._validate_event_access(auth_user, session.event_id)
-            
-            # Save user message
-            user_msg = self._session_manager.add_user_message(session, message)
-            
-            # Build context from previous messages
-            context = self._context_builder.build_context(session.id)
-            
-            # Process through NL2SQL pipeline (with RAG enhancement)
-            response_text, metadata = self._process_with_nl2sql(
-                message, context, session.event_id, user_id=effective_user_id, auth_user=auth_user
-            )
-            
-            # Feature 016 (T012, T025): Add identity status to metadata
-            metadata["identity_status"] = {
-                "source": identity.source,
-                "disclaimer": identity.disclaimer
-            }
-            
-            # Feature 016 (T025): Append disclaimer to response if user_provided
-            if identity.source == 'user_provided' and identity.disclaimer:
-                response_text = f"{response_text}\n\n*{identity.disclaimer}*"
-            
-            # Save assistant response
-            assistant_msg = self._session_manager.add_assistant_message(
-                session, response_text, metadata
-            )
-            
-            # Commit transaction
+                self._validate_event_access(user, session.event_id)
+            self._session_manager.add_user_message(session, message)
             self._session_manager.commit()
-            
-            return ChatResult(
-                response=response_text,
-                session_id=session.id,
-                message_id=assistant_msg.id,
-                metadata=metadata or {},
-                created_session=created
-            )
-            
-        except (SessionNotFoundError, SessionAccessDeniedError, EventAccessDeniedError):
+            return session.id, created
+        except Exception:
             self._session_manager.rollback()
             raise
-        except QueryProcessingError:
-            self._session_manager.rollback()
-            raise
-        except Exception as e:
-            self._session_manager.rollback()
-            logger.exception("Error processing chat message")
-            raise QueryProcessingError(
-                "An unexpected error occurred while processing your request",
-                reason=str(e)
-            ) from e
+
+    def answer(self, user_id: int, session_id: UUID, message: str) -> ChatResult:
+        """Worker half: answer the latest message of a session and save the reply.
+
+        No database transaction stays open during the LLM calls: everything the pipeline needs is read
+        first and committed, and the reply is written in a new short transaction.
+        """
+        session = self._session_manager.get_session(session_id)
+        user = self._load_user(user_id)
+        if session is None or user is None:
+            raise SessionNotFoundError(f"Session {session_id} not found")
+        event_id = session.event_id  # checked with can_access when the message was submitted
+        # plain values: touching expired ORM objects later would open a transaction mid-pipeline
+        viewer = SimpleNamespace(id=user.id, is_admin=bool(user.is_admin))
+        context = self._context_builder.build_context(session.id)
+        db.session.commit()
+
+        response_text, metadata = self._process_with_nl2sql(
+            message, context, event_id, user_id=viewer.id, auth_user=viewer
+        )
+
+        assistant_msg = self._session_manager.add_assistant_message(
+            self._session_manager.get_session(session_id), response_text, metadata
+        )
+        self._session_manager.commit()
+        return ChatResult(
+            response=response_text,
+            session_id=session_id,
+            message_id=assistant_msg.id,
+            metadata=metadata or {},
+        )
 
     def _get_or_create_session(
         self,

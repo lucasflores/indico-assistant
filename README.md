@@ -205,37 +205,37 @@ Status values:
 
 #### POST /api/assistant/chat
 
-Send a message to the assistant:
+Send a message to the assistant. The answer is produced by a Celery worker (queue `assistant`), so
+LLM calls never hold an Indico web worker; the request only saves the message and returns `202`:
+
+```json
+{"message": "How many events are there this week?", "session_id": "optional-session-id", "event_id": 123}
+```
+
+```json
+{"job_id": "374c73cc…", "session_id": "f982fd9d-…", "created_session": true, "status": "pending"}
+```
+
+#### GET /api/assistant/chat/jobs/{job_id}
+
+Poll until the answer is ready (`202` while pending; jobs expire after an hour). When done:
 
 ```json
 {
-  "message": "How many events are there this week?",
-  "session_id": "optional-session-id",
-  "event_id": 123
+  "status": "done",
+  "response": "There are 12 events this week ([source](http://localhost:8000/event/5/))...",
+  "session_id": "f982fd9d-…",
+  "message_id": "4be4e637-…",
+  "metadata": {"sql_generated": "SELECT COUNT(*) ...", "confidence": 0.95, "data_sources": [...],
+               "suggested_followups": [...]}
 }
 ```
 
-Response:
+A failed or timed-out answer (2 minutes per answer) returns `500` with `error` and `message`.
 
-```json
-{
-  "answer": "There are 12 events this week ([source](http://localhost:8000/event/5/))...",
-  "session_id": "generated-or-provided-id",
-  "metadata": {
-    "sql_generated": "SELECT COUNT(*) ...",
-    "confidence": 0.95,
-    "data_sources": ["events", "registrations"],
-    "citations": [
-      {
-        "type": "event",
-        "url": "http://localhost:8000/event/5/",
-        "title": "Weekly Planning Meeting"
-      }
-    ],
-    "user_identified": true
-  }
-}
-```
+**Deployment**: run Celery workers that consume the `assistant` queue
+(`indico celery worker -Q celery,assistant`, or a dedicated pool: `-Q assistant`). Worker concurrency
+is the cluster-wide cap on simultaneous answers.
 
 ### Session Management
 
