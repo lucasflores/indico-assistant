@@ -40,7 +40,7 @@ class ContextBuilder:
         """
         self._max_pairs = max_pairs or self.MAX_PAIRS
 
-    def build_context(self, session_id: UUID) -> list[dict[str, str]]:
+    def build_context(self, session_id: UUID, up_to: UUID | None = None) -> list[dict[str, str]]:
         """Build conversation context from session history.
         
         Retrieves the most recent messages from the session and
@@ -49,13 +49,18 @@ class ContextBuilder:
         
         Args:
             session_id: UUID of the chat session
-            
+            up_to: Only messages up to and including this one (default: all)
+
         Returns:
             List of message dicts in chronological order:
             [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
         """
         # Get messages ordered by most recent first, then reverse
-        messages = ChatMessage.query.filter_by(session_id=session_id)\
+        query = ChatMessage.query.filter_by(session_id=session_id)
+        if up_to is not None:
+            query = query.filter(ChatMessage.created_at <= ChatMessage.query.with_entities(ChatMessage.created_at)
+                                 .filter_by(id=up_to).scalar_subquery())
+        messages = query\
             .order_by(ChatMessage.created_at.desc())\
             .limit(self._max_pairs * 2)\
             .all()

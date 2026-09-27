@@ -69,7 +69,7 @@ class RHChat(RHChatBase):
             )
 
         try:
-            session_id, created = get_chat_service().submit_message(
+            session_id, created, message_id = get_chat_service().submit_message(
                 user=self.user,
                 message=chat_request.message,
                 session_id=chat_request.session_id,
@@ -86,7 +86,7 @@ class RHChat(RHChatBase):
 
         job_id = jobs.create(self.user.id, session_id)
         try:
-            answer_chat.delay(job_id, self.user.id, session_id, chat_request.message)
+            answer_chat.delay(job_id, self.user.id, session_id, chat_request.message, message_id)
         except Exception:
             # the message is saved; the answer never queued
             logger.exception("Could not queue chat answer %s", job_id)

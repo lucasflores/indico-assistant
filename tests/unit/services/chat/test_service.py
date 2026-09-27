@@ -67,7 +67,8 @@ class TestChatService:
         session = MagicMock(id=uuid4(), event_id=None)
         mock_session_manager.create_session.return_value = session
 
-        assert chat_service.submit_message(user, "What events?") == (session.id, True)
+        assert chat_service.submit_message(user, "What events?") == (
+            session.id, True, mock_session_manager.add_user_message.return_value.id)
         mock_session_manager.create_session.assert_called_once_with(123, None)
         mock_session_manager.add_user_message.assert_called_once_with(session, "What events?")
         mock_session_manager.commit.assert_called_once()
@@ -77,7 +78,7 @@ class TestChatService:
         mock_session_manager.get_session.return_value = session
         mock_session_manager.validate_session_ownership.return_value = True
 
-        assert chat_service.submit_message(user, "and then?", session_id=session.id) == (session.id, False)
+        assert chat_service.submit_message(user, "and then?", session_id=session.id)[:2] == (session.id, False)
         mock_session_manager.create_session.assert_not_called()
 
     def test_submit_unknown_session(self, chat_service, mock_session_manager, user):
@@ -122,10 +123,12 @@ class TestChatService:
                 patch.object(chat_service, '_process_with_nl2sql', side_effect=pipeline), \
                 patch('indico_assistant.services.chat.service.db') as db:
             db.session.commit.side_effect = lambda: calls.append('commit')
-            result = chat_service.answer(123, session_id, "hi")
+            result = chat_service.answer(123, session_id, "hi", message_id="q1")
 
         assert calls == ['commit', 'pipeline']  # reads committed before any LLM call
         validate.assert_called_once_with(user, 456)
+        # a question sent while this one was queued is not in its context
+        mock_context_builder.build_context.assert_called_once_with(session_id, up_to="q1")
         assert result.response == "Answer" and result.session_id == session_id
         mock_session_manager.add_assistant_message.assert_called_once()
         mock_session_manager.commit.assert_called_once()

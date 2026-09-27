@@ -12,7 +12,8 @@ from indico_assistant.tasks.chat import CHAT_QUEUE, answer_chat
 
 @pytest.fixture
 def finish():
-    with patch('indico_assistant.services.chat.jobs.finish') as finish:
+    with patch('indico_assistant.services.chat.jobs.finish') as finish, \
+            patch('indico_assistant.services.chat.jobs.start'):
         yield finish
 
 
@@ -32,7 +33,7 @@ def test_done(finish, service):
     service.answer.return_value = ChatResult(response='Hi', session_id=session_id, message_id=message_id,
                                              metadata={'confidence': 0.9})
     answer_chat.run('job1', 7, session_id, 'hello')
-    service.answer.assert_called_once_with(7, session_id, 'hello')
+    service.answer.assert_called_once_with(7, session_id, 'hello', None)
     finish.assert_called_once_with('job1', status='done', message_id=str(message_id), response='Hi',
                                    metadata={'confidence': 0.9})
 

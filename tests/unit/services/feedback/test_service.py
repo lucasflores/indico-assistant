@@ -42,7 +42,7 @@ class TestFeedbackService:
         message_id = uuid4()
         with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls, \
                 patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-            mock_msg_cls.query.get.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
+            mock_msg_cls.query.with_for_update.return_value.filter_by.return_value.first.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
             result = feedback_service.submit_feedback(user_id=123, message_id=message_id, **kwargs)
         mock_fb_cls.create_or_update.assert_called_once_with(
             message_id=message_id, user_id=123, feedback_type=kwargs["feedback_type"], value=stored)
@@ -52,16 +52,17 @@ class TestFeedbackService:
         message_id = uuid4()
         with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls, \
                 patch('indico_assistant.services.feedback.service.FeedbackEntry') as mock_fb_cls:
-            mock_msg_cls.query.get.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
+            mock_msg_cls.query.with_for_update.return_value.filter_by.return_value.first.return_value = MagicMock(id=message_id, session=MagicMock(user_id=123))
             feedback_service.submit_feedback(user_id=123, message_id=message_id, feedback_type="thumbs_down")
         mock_fb_cls.query.filter.return_value.delete.assert_called_once_with(synchronize_session=False)
+        mock_msg_cls.query.with_for_update.assert_called_once_with()  # concurrent votes are serialised
 
     def test_submit_feedback_message_not_found(self, feedback_service):
         """Test error when message doesn't exist."""
         message_id = uuid4()
         
         with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = None
+            mock_msg_cls.query.with_for_update.return_value.filter_by.return_value.first.return_value = None
             
             with pytest.raises(MessageNotFoundError):
                 feedback_service.submit_feedback(
@@ -79,7 +80,7 @@ class TestFeedbackService:
         mock_message.session.user_id = 456  # Different user
         
         with patch('indico_assistant.services.feedback.service.ChatMessage') as mock_msg_cls:
-            mock_msg_cls.query.get.return_value = mock_message
+            mock_msg_cls.query.with_for_update.return_value.filter_by.return_value.first.return_value = mock_message
             
             with pytest.raises(MessageAccessDeniedError):
                 feedback_service.submit_feedback(

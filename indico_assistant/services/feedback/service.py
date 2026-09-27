@@ -68,8 +68,8 @@ class FeedbackService:
             MessageNotFoundError: If message doesn't exist
             MessageAccessDeniedError: If user doesn't own the session
         """
-        # Verify message exists
-        message = ChatMessage.query.get(message_id)
+        # Verify message exists; locked, so concurrent votes on it cannot both switch thumbs
+        message = ChatMessage.query.with_for_update().filter_by(id=message_id).first()
         if not message:
             raise MessageNotFoundError(f"Message {message_id} not found")
         
