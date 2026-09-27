@@ -56,7 +56,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ### User Interface
 
-- **Embedded Chat Widget**: Chainlit Copilot widget injected on every page with JWT auth, theme sync, persistence, and feedback. See [Deployment Guide](docs/DEPLOYMENT.md)
+- **Embedded Chat Widget**: a launcher on every page for logged-in users (one cached script); the Chainlit Copilot, its config and JWT load only when it is opened. Theme sync, persistence, and feedback. See [Deployment Guide](docs/DEPLOYMENT.md)
   - JWT Authentication: Secure token-based auth per user
   - Theme Synchronization: Auto-detects Indico theme and applies matching styles
   - Session Persistence: Conversations persist across page reloads
@@ -133,7 +133,7 @@ Configured in **Admin → Plugins → Assistant → Settings** (must match Chain
 | Chainlit Auth Secret | Shared HS256 secret for JWT auth | (blank) |
 
 Widget behavior:
-- JWT issued per user via `get_vars_js()` and validated by Chainlit header_auth_callback
+- JWT issued per user by `GET /api/assistant/widget/config` (only when the widget is opened, `no-store`) and validated by Chainlit header_auth_callback
 - Theme auto-detected from Indico CSS vars / media queries; overrides via `IndicoAssistant.theme`
 - Session continuity via Chainlit threadId; feedback bridged to Indico API
 - Graceful degradation: loading/error bubble, hidden when not ready

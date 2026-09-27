@@ -50,9 +50,16 @@ class AssistantPlugin(IndicoPlugin):
         self.connect(attachment_signals.attachment_created, _on_attachment_created)
 
     def _setup_chat_widget(self):
-        """Inject the chat widget JavaScript bundle into all pages."""
-        # The widget script will check IndicoAssistant.enabled and exit early if disabled
-        self.inject_bundle("chat_widget.js")
+        """One deferred, cacheable <script> for logged-in users; it fetches its config only when opened."""
+        self.template_hook("html-head", self._render_widget_script)
+
+    def _render_widget_script(self, **kwargs):
+        from flask import session
+        from indico_assistant.blueprint import widget_script_url
+
+        if session.user is None or not self.settings.get("chat_widget_enabled"):
+            return None  # anonymous visitors (and a disabled widget) cost nothing
+        return f'<script src="{widget_script_url()}" defer></script>'
 
     @property
     def llm_client(self):
@@ -102,7 +109,7 @@ class AssistantPlugin(IndicoPlugin):
         return blueprint
 
     def widget_config(self, user, event_id=None):
-        """Per-user widget configuration, served only by the uncached /widget/config.js route.
+        """Per-user widget configuration, served only by the uncached /widget/config route.
 
         SECURITY: this must never be named ``get_vars_js``. Indico renders every plugin's
         ``get_vars_js()`` into the shared ``/assets/js-vars/global.js``, which is generated once
@@ -127,12 +134,6 @@ class AssistantPlugin(IndicoPlugin):
         except Exception:
             self.logger.warning("Failed to generate Chainlit token", exc_info=True)
         return config
-
-    def inject_bundle(self, name, *args, **kwargs):  # type: ignore[override]
-        # Ensure config (vars.js) loads before chat_widget.js so IndicoAssistant exists.
-        if name == "chat_widget.js":
-            super().inject_bundle("vars.js", *args, **kwargs)
-        super().inject_bundle(name, *args, **kwargs)
 
     def get_effective_setting(self, event, key):
         """Get a setting value with event → global fallback.

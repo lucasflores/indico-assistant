@@ -9,10 +9,11 @@ Feature: 005-langfuse-observability (T023 - request teardown flush)
 Feature: 006-vector-search-rag (search endpoints)
 """
 
+import functools
+import hashlib
 import os
-import json
 
-from flask import g, send_from_directory, current_app
+from flask import g, send_from_directory
 from indico.core.plugins import plugin_engine
 from indico.core.plugins import IndicoPluginBlueprint
 
@@ -23,47 +24,44 @@ blueprint = IndicoPluginBlueprint(
     url_prefix="/api/assistant",
 )
 
-_STATIC_DIST = os.path.join(os.path.dirname(__file__), "static", "dist")
+_STATIC_JS = os.path.join(os.path.dirname(__file__), "static", "js")
 _STATIC_CSS = os.path.join(os.path.dirname(__file__), "static", "css")
+_WIDGET_JS = "chat_widget.js"
+_ONE_YEAR = 365 * 24 * 3600
 
 
-@blueprint.route("/widget/<path:filename>")
-def widget_static(filename):
-    """Serve Chainlit widget assets from a stable absolute URL.
+@functools.cache
+def _widget_version():
+    with open(os.path.join(_STATIC_JS, _WIDGET_JS), "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:12]
 
-    This avoids relative-path 404s when the widget is injected on pages with
-    nested URLs (e.g., /event/123/...).
-    """
-    return send_from_directory(_STATIC_DIST, filename)
+
+def widget_script_url():
+    """Versioned URL of the widget script: browsers cache it for a year and refetch when it changes."""
+    return f"{blueprint.url_prefix}/widget/{_WIDGET_JS}?v={_widget_version()}"
+
+
+@blueprint.route(f"/widget/{_WIDGET_JS}")
+def widget_script():
+    return send_from_directory(_STATIC_JS, _WIDGET_JS, max_age=_ONE_YEAR)
 
 
 @blueprint.route("/widget/css/<path:filename>")
 def widget_static_css(filename):
-    """Serve widget CSS alongside the bundle."""
-    return send_from_directory(_STATIC_CSS, filename)
+    """Serve widget CSS alongside the script."""
+    return send_from_directory(_STATIC_CSS, filename, max_age=_ONE_YEAR)
 
 
-@blueprint.route("/widget/config.js")
+@blueprint.route("/widget/config")
 def widget_config():
-    """Serve dynamic configuration as JS (defines window.IndicoAssistant)."""
-    from flask import request
-    import re
-    
+    """Per-user widget config with a fresh Chainlit token; fetched only when the widget is opened."""
+    from flask import jsonify, request, session
+
+    if session.user is None:
+        return jsonify({"error": "UNAUTHORIZED"}), 401
     plugin = plugin_engine.get_plugin("assistant")
-    
-    # Extract event_id from Referer header (Feature 013: event context)
-    event_id = None
-    referer = request.headers.get("Referer", "")
-    if referer:
-        # Match /event/123/ in URL
-        match = re.search(r'/event/(\d+)/', referer)
-        if match:
-            event_id = int(match.group(1))
-    
-    from flask import session
-    config = plugin.widget_config(session.user, event_id=event_id) if plugin else {}
-    payload = f"window.IndicoAssistant = {json.dumps(config)};"
-    response = current_app.response_class(payload, mimetype="application/javascript")
+    event_id = request.args.get("event_id", type=int)  # scope of the page the widget was opened on
+    response = jsonify(plugin.widget_config(session.user, event_id=event_id))
     # Contains a per-user token: never cache it in the browser, a proxy, or a CDN
     response.headers["Cache-Control"] = "private, no-store"
     return response
