@@ -109,7 +109,7 @@ send it again, amend it twice, confirm — only the final version is created.
 
 When the user does not name a category, the plan asks for one: it lists the categories where the user may
 create events (their names and paths, most relevant first) and marks a suggestion with its reason ("your
-last 5 team syncs are in *Thoth › Engineering › Meetings*"). The user can pick from the list or name one in
+last 5 team syncs are in *Thoth » Engineering » Meetings*"). The user can pick from the list or name one in
 chat.
 
 **Why this priority**: Indico requires a category; guessing wrong puts a meeting where its audience cannot
@@ -123,7 +123,9 @@ meetings, ask for a meeting without a category: the plan lists the three and sug
 1. **Given** no category in the request, **Then** the plan lists only categories where
    `category.can_create_events(user)` is true, and suggests one with a stated reason.
 2. **Given** the user can only *propose* events in a category (`can_propose_events`), **Then** that category
-   is listed as "propose (needs approval)" and choosing it creates an event request instead.
+   is listed as "propose (needs approval)" and choosing it creates the meeting unlisted and requests its
+   publication in the category (Indico's own proposal path, which needs unlisted events enabled; when they are
+   not, the category is not offered and the assistant says why).
 3. **Given** the user names a category ("in Engineering"), **Then** it is matched against the allowed list; an
    ambiguous or unknown name is shown back with the closest matches.
 4. **Given** the user has no category they can create or propose events in, **Then** the assistant says so
@@ -296,7 +298,7 @@ contribution's material, logged as the user's upload.
   | `find_person` | `search_users` (+ EventPerson for guests) | Indico user search rules |
   | `list_categories` | category tree | `can_create_events` / `can_propose_events` |
   | `create_event` | `create_event(category, EventType.meeting, …)` | `category.can_create_events(user)` |
-  | `propose_event` | `create_event_request` | `category.can_propose_events(user)` |
+  | `propose_event` | unlisted `create_event` + `create_event_request` (Indico has no propose-on-create path) | `can_create_unlisted_events(user)` and `category.can_propose_events(user)` |
   | `update_event` | `update_event` (title, description, times, location) | `event.can_manage(user)` |
   | `add_contribution` | `create_contribution` + `schedule_contribution`, `person_link_data` (speakers) | `event.can_manage(user)` |
   | `update_contribution` | `update_contribution` / `update_timetable_entry` | `contribution.can_manage(user)` |
@@ -370,7 +372,9 @@ contribution's material, logged as the user's upload.
 **Chat uploads**
 
 - **FR-024**: Chainlit MUST accept file uploads again (disabled in Phase 1 because files were ignored), limited
-  to the document types and size the instance allows for attachments, and forward them to a new Indico
+  to pdf, docx, pptx, xlsx, txt, md, png, jpg and 25 MB per file (enforced by the plugin: Indico has no
+  attachment type allowlist and no default size limit; `MAX_UPLOAD_FILE_SIZE` applies when set), and forward
+  them immediately (Chainlit deletes its copies when the session ends) to a new Indico
   endpoint that stores them as unclaimed `File`s owned by the user and tied to the chat session.
 - **FR-025**: An uploaded file MUST only be usable by its uploader, and is claimed (copied into an
   `AttachmentFile`) only by a confirmed `attach_file` step; unused uploads are removed by Indico's own
