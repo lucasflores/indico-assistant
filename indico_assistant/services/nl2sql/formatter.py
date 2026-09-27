@@ -87,10 +87,10 @@ class ResultFormatter:
     """Formats query results with natural language summaries."""
 
     # Maximum number of result rows to include in the prompt
-    MAX_PREVIEW_ROWS = 50
+    MAX_PREVIEW_ROWS = 20  # prompt size: every row is sent to the LLM
     
     # Maximum length for string values (increased to show full descriptions)
-    MAX_STRING_LENGTH = 10000
+    MAX_STRING_LENGTH = 500  # per cell: MAX(n.html)/STRING_AGG cells were unbounded
 
     def __init__(self, llm_service: LLMService) -> None:
         """

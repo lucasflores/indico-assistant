@@ -12,6 +12,7 @@ Generates SQL queries from classified questions using LLM with
 schema context.
 """
 
+import logging
 from datetime import datetime
 
 from indico_assistant.services.llm import LLMService
@@ -25,6 +26,8 @@ from indico_assistant.services.nl2sql.schema import SchemaContext
 
 # SQL generation prompt template (T041-T042: enhanced for multi-table queries)
 # Feature 012: conversation history placeholder added (T005)
+logger = logging.getLogger(__name__)
+
 SQL_GENERATION_PROMPT = """You are a PostgreSQL expert tasked with generating a single executable SQL query for the Indico event management system.
 
 Use the chat history to understand context or references to previous queries. The user's latest question appears at the bottom.
@@ -422,9 +425,8 @@ class SQLGenerator:
         )
 
         # DEBUG: Print key prompt variables
-        print(f"[DEBUG SQL Generator] Intent: {classification.intent}", flush=True)
-        print(f"[DEBUG SQL Generator] Entities: {entities_str}", flush=True)
-        print(f"[DEBUG SQL Generator] Time Range: {time_range_str}", flush=True)
+        logger.debug("SQL generation: intent=%s entities=%s time_range=%s",
+                     classification.intent, entities_str, time_range_str)
 
         # Append validation feedback if this is a retry
         if validation_feedback:
@@ -503,7 +505,7 @@ class SQLGenerator:
         """Get the schema context."""
         return self._schema_context
 
-    def _truncate_message(self, content: str, max_chars: int = 15000) -> str:
+    def _truncate_message(self, content: str, max_chars: int = 1500) -> str:
         """Truncate message content to maximum length with ellipsis.
         
         Feature 012: Prevent token overflow in conversation history (T004, FR-012).

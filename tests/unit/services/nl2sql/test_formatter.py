@@ -246,7 +246,7 @@ class TestResultFormatterResultsPreview:
         mock_llm_service: MagicMock,
     ) -> None:
         """Long string values should be truncated."""
-        long_value = "A" * 200
+        long_value = "A" * (formatter.MAX_STRING_LENGTH + 100)
         results = [{"description": long_value}]
         formatter.format(
             question="Get description",
@@ -256,7 +256,7 @@ class TestResultFormatterResultsPreview:
 
         call_args = mock_llm_service.generate.call_args
         prompt = call_args[1]["prompt"]
-        # Should not contain full 200 chars
+        # Should not contain the full value
         assert long_value not in prompt
         assert "..." in prompt
 
