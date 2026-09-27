@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import threading
 import time
 from collections import deque
 from typing import TYPE_CHECKING, Any, Optional, Type, TypeVar
@@ -93,6 +94,7 @@ class LLMService:
         """
         self._plugin = plugin
         self._client = None
+        self._client_lock = threading.Lock()
         self._logger = logger
         self._tracer: Optional["Tracer"] = None
         # Recent completion_record()s across calls, for single-threaded callers such as the eval
@@ -102,7 +104,7 @@ class LLMService:
     
     def _record_completion(self, completion: Any) -> None:
         current = _current_calls.get()
-        if current is None:  # a completion outside generate() (e.g. health_check)
+        if current is None:  # a completion made outside generate()/health_check()
             return
         calls, stage, model = current
         record = completion_record(stage, model, completion)
@@ -162,7 +164,12 @@ class LLMService:
         """
         if self._client is not None:
             return self._client, None
-        
+        with self._client_lock:  # first calls from several threads build one client, not one each
+            if self._client is not None:
+                return self._client, None
+            return self._create_client_locked()
+
+    def _create_client_locked(self) -> tuple[Any | None, LLMError | None]:
         settings = self._get_settings()
         if not settings["provider"]:
             return None, LLMError(
@@ -379,6 +386,8 @@ class LLMService:
                 error=error.message
             )
         
+        # The health check is a billed completion too: recorded in call_log under its own stage
+        context_token = _current_calls.set(([], "health_check", settings["model"]))
         try:
             # Minimal health check model
             class HealthCheckResponse(BaseModel):
@@ -417,6 +426,8 @@ class LLMService:
                 model=model,
                 error=mapped_error.message
             )
+        finally:
+            _current_calls.reset(context_token)
 
 
 def create_llm_service(plugin: "AssistantPlugin") -> LLMService:

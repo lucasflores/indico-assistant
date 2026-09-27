@@ -141,3 +141,33 @@ def test_unsupported_provider_message_lists_ibis():
 
     with pytest.raises(ValueError, match="ollama, huggingface, openai, ibis"):
         factory.create_instructor_client("ibsi", "m")
+
+
+def test_health_check_completion_is_recorded(monkeypatch):
+    _fake_ibis(monkeypatch, lambda request: httpx.Response(
+        200, json=_ibis_reply('```json\n{"status": "ok"}\n```', "0.00001")))
+    llm = LLMService(_Plugin())
+    assert llm.health_check().status == "connected"
+    assert [(c["stage"], c["cost_usd"]) for c in llm.call_log] == [("health_check", "0.00001")]
+
+
+def test_first_calls_from_several_threads_build_one_client(monkeypatch):
+    import threading
+    import time
+    from unittest.mock import MagicMock
+
+    built = []
+
+    def slow_create(self):
+        time.sleep(0.05)  # widen the window in which a second thread could also build one
+        built.append(1)
+        return MagicMock()
+
+    monkeypatch.setattr(LLMService, "_create_client", slow_create)
+    llm = LLMService(_Plugin())
+    threads = [threading.Thread(target=llm._ensure_client) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1
