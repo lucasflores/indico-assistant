@@ -11,8 +11,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from indico_assistant.services.nl2sql.models import PipelineErrorType
+from indico_assistant.services.nl2sql.models import ExecutionResult, PipelineErrorType
 from indico_assistant.services.nl2sql.pipeline import NL2SQLPipeline
+
+
+def _fail_then_succeed(pipeline, error):
+    """First execution fails with ``error``; every later one returns one row."""
+    ok = ExecutionResult(success=True, rows=[{"id": 1}], row_count=1, columns=["id"], execution_time_ms=1)
+    bad = ExecutionResult(success=False, rows=[], row_count=0, columns=[], execution_time_ms=1, error_message=error)
+    pipeline._executor.execute = MagicMock(side_effect=[bad] + [ok] * 5)
+
+
+USER = MagicMock(id=1, is_admin=False)
 
 
 @pytest.fixture
@@ -109,14 +119,6 @@ class TestErrorRecoveryIntegration:
         # Execute returns different results on subsequent calls
         execute_calls = [0]
 
-        def mock_execute(sql, params=None):
-            execute_calls[0] += 1
-            if execute_calls[0] <= 2:  # First query execution (after SET timeout)
-                if "eventss" in str(sql):
-                    raise Exception("relation 'events.eventss' does not exist")
-            return result_success
-
-        mock_db_session.execute.side_effect = mock_execute
 
         pipeline = NL2SQLPipeline(
             llm_service=mock_llm_service,
@@ -124,8 +126,9 @@ class TestErrorRecoveryIntegration:
             db_session_factory=mock_db_session_factory,
             max_correction_attempts=3,
         )
+        _fail_then_succeed(pipeline, "relation 'events.eventss' does not exist")
 
-        result = pipeline.process("How many events?", user_id=1)
+        result = pipeline.process("How many events?", user_id=1, user=USER)
 
         # With proper mocking, should either succeed or fail gracefully
         # In a real integration test, we'd verify the correction flow
@@ -239,13 +242,6 @@ class TestErrorRecoveryCorrectionAttemptTracking:
         result_success.keys.return_value = ["id"]
         result_success.fetchall.return_value = [(1,)]
 
-        def mock_execute(sql, params=None):
-            exec_count[0] += 1
-            if exec_count[0] == 2:  # First actual query after timeout setting
-                raise Exception("Column 'bad' not found")
-            return result_success
-
-        mock_db_session.execute.side_effect = mock_execute
 
         pipeline = NL2SQLPipeline(
             llm_service=mock_llm_service,
@@ -253,8 +249,9 @@ class TestErrorRecoveryCorrectionAttemptTracking:
             db_session_factory=mock_db_session_factory,
             max_correction_attempts=3,
         )
+        _fail_then_succeed(pipeline, "Column 'bad' not found")
 
-        result = pipeline.process("Test query", user_id=1)
+        result = pipeline.process("Test query", user_id=1, user=USER)
 
         # Should track correction attempts
         assert result.correction_attempts >= 0
@@ -334,21 +331,15 @@ class TestErrorRecoveryCorrectedFlag:
         result.keys.return_value = ["id"]
         result.fetchall.return_value = [(1,)]
 
-        def mock_execute(sql, params=None):
-            call_count[0] += 1
-            if call_count[0] == 2:  # First query after timeout
-                raise Exception("Error")
-            return result
-
-        mock_db_session.execute.side_effect = mock_execute
 
         pipeline = NL2SQLPipeline(
             llm_service=mock_llm_service,
             schema_context=mock_schema_context,
             db_session_factory=mock_db_session_factory,
         )
+        _fail_then_succeed(pipeline, "Error")
 
-        result = pipeline.process("Test", user_id=1)
+        result = pipeline.process("Test", user_id=1, user=USER)
 
         # If successful with correction, corrected should be True
         if result.success:

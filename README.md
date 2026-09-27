@@ -192,6 +192,10 @@ Returns the health status of the plugin:
 }
 ```
 
+Any logged-in user may call it. Only admins trigger a live LLM check (which costs a request);
+everyone else gets `configured` from the settings alone. Anonymous requests to any assistant
+endpoint get 401.
+
 Status values:
 - `healthy`: All services operational
 - `degraded`: Plugin functional but LLM unavailable
@@ -318,6 +322,8 @@ pipeline = create_nl2sql_pipeline(plugin)
 result = pipeline.process(
     question="How many events are there this week?",
     user_id=current_user.id,
+    user=session.user,     # decides what the query can see; no user = no query
+    event_ids=[event.id],  # optional: one id limits the query to that event
 )
 
 if result.success:
@@ -332,7 +338,6 @@ else:
 |--------------|---------|
 | Event counts | "How many events are there this month?" |
 | Event lists | "Show me all workshops next week" |
-| Registrations | "Who registered for the physics conference?" |
 | Contributions | "List talks in the parallel sessions" |
 | Speakers | "Who are the speakers at tomorrow's event?" |
 | **Personal queries** | "What meetings do I have this week?" |
@@ -342,11 +347,53 @@ else:
 
 ### Security Features
 
-- **SELECT-only queries**: No data modification allowed
-- **Table allowlist**: Only approved tables can be queried
-- **Permission filtering**: Results filtered by user access
-- **Query timeout**: 30-second default timeout
-- **Row limit**: Maximum 1000 rows per query
+- **Read-only database role**: generated SQL runs as `indico_assistant_ro`, never as Indico's role
+  (see [NL2SQL database role](#nl2sql-database-role))
+- **Row security**: the database, not the prompt, decides which events the user can see
+- **Validator**: one SELECT statement, no comments, no system schemas or `pg_*`/`dblink`/`lo_*`
+  functions, no `SET`/`COPY`/locking, only allowlisted tables
+- **Table allowlist**: `config_modules/available_tables.yaml`; no users, registrations, emails,
+  phone numbers, access keys or assistant chat tables
+- **Query timeout**: 10 seconds per query (also the read-only role's own default)
+- **Row limit**: at most 1000 rows, applied around the generated query
+
+### NL2SQL database role
+
+Generated SQL runs through its own connection, as a Postgres role that can read only the allowlisted
+columns, and only rows the asking user may see. Each query carries a signed
+`user_id:event_id:is_admin` context; the policies reject queries without a valid one.
+
+Setup (a DBA, or anyone who owns the Indico tables):
+
+```bash
+# 1. Generate the script from available_tables.yaml and apply it as the Indico owner role
+indico assistant nl2sql-db-sql --password 'choose-one' > nl2sql_setup.sql
+psql -d indico -v ON_ERROR_STOP=1 -f nl2sql_setup.sql
+
+# 2. Point the Indico web server (and Celery workers) at the new role
+export ASSISTANT_NL2SQL_DATABASE_URI='postgresql://indico_assistant_ro:choose-one@dbhost/indico'
+```
+
+Omit `--password` for local peer/trust authentication. Re-run step 1 after editing
+`available_tables.yaml`; `--teardown` prints the script that removes the role and policies.
+Without `ASSISTANT_NL2SQL_DATABASE_URI`, event-data questions fail with an error naming it.
+
+The script creates `pgcrypto` (for the signature check) and `plugin_assistant.nl2sql_secret` (the
+signing key; the role cannot read it), and sets on the role: read-only transactions, a 10 s statement
+timeout, 1 s lock timeout, `work_mem` 16MB, no parallel workers, 20 connections.
+
+What a user can see: events that are public, plus events granted to them directly, through a local
+group, through read access to the event's category, or because they manage the category. Admins see
+everything. A question asked on an event page sees only that event, after Indico's own `can_access`
+check. Grants through **external (multipass) groups, IP networks, registrations or access keys are not
+recognised** by the policies, so those events stay hidden from the assistant (it fails closed).
+
+Check the setup against a real database:
+
+```bash
+ASSISTANT_NL2SQL_DATABASE_URI=postgresql://indico_assistant_ro@/indico \
+  pytest tests/integration/nl2sql/test_readonly_role.py
+```
 
 ### Pipeline Result
 

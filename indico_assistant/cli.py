@@ -120,3 +120,35 @@ def extend_cli(sender, **kwargs):
     This function is connected to signals.plugin.cli in the plugin's init().
     """
     return cli
+
+
+@cli.command("nl2sql-db-sql")
+@click.option("--password", help="Password for the read-only role (omit where local trust/peer auth is used).")
+@click.option("--teardown", is_flag=True, help="Print the SQL that removes the role, policies and functions.")
+@with_appcontext
+def nl2sql_db_sql(password, teardown):
+    """Print the SQL that sets up the read-only NL2SQL database role (run it with psql as a DBA)."""
+    from pathlib import Path
+
+    import yaml
+    from indico.core.db import db
+    from sqlalchemy import text
+
+    from indico_assistant.services.nl2sql import readonly_db
+
+    schema_file = Path(__file__).parent / "config_modules" / "available_tables.yaml"
+    tables = {name: list((spec or {}).get("columns") or {}) for name, spec in yaml.safe_load(schema_file.read_text()).items()}
+    if teardown:
+        click.echo(readonly_db.teardown_sql(tables), nl=False)
+        return
+    existing = {}
+    for schema, table, column in db.session.execute(text(
+            "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema IN ('events', 'attachments', 'categories', 'plugin_assistant')")):
+        existing.setdefault(f"{schema}.{table}", set()).add(column)
+    for table, columns in tables.items():
+        unknown = set(columns) - existing.get(table, set())
+        if unknown:
+            click.echo(f"-- note: {table} has no column(s) {', '.join(sorted(unknown))}; not granted", err=True)
+    indico_role = db.session.execute(text("SELECT current_user")).scalar()
+    click.echo(readonly_db.setup_sql(tables, existing, indico_role, password), nl=False)

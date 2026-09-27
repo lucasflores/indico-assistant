@@ -14,6 +14,7 @@ classification → generation → validation → execution → error correction 
 Feature: 005-langfuse-observability (T024-T031)
 """
 
+import logging
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Generator, Optional
@@ -42,16 +43,15 @@ from indico_assistant.services.nl2sql.models import (
     PipelineErrorType,
     PipelineResult,
 )
-from indico_assistant.services.nl2sql.permissions import (
-    filter_results_by_permission,
-    get_user_accessible_event_ids,
-)
+from indico_assistant.services.nl2sql.readonly_db import QueryContext
 from indico_assistant.services.nl2sql.schema import SchemaContext
 from indico_assistant.services.nl2sql.validator import SQLValidator
 
 if TYPE_CHECKING:
     from indico_assistant.services.observability.tracer import Tracer
     from indico_assistant.services.embedding.service import EmbeddingService
+
+logger = logging.getLogger(__name__)
 
 
 class NL2SQLPipeline:
@@ -76,12 +76,13 @@ class NL2SQLPipeline:
         db_session_factory: Callable[[], Any],
         cache: QueryCache | None = None,
         max_rows: int = 1000,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 10,
         max_correction_attempts: int = 3,
         max_validation_retries: int = 2,
         allowed_tables: list[str] | None = None,
         audit_enabled: bool = True,
         embedding_service: "EmbeddingService | None" = None,
+        connection_factory: Callable[[], Any] | None = None,
     ) -> None:
         """
         Initialize the NL2SQL pipeline.
@@ -92,7 +93,7 @@ class NL2SQLPipeline:
             db_session_factory: Factory function to get database session.
             cache: Optional query cache. If None, caching is disabled.
             max_rows: Maximum rows to return (default: 1000).
-            timeout_seconds: Query timeout in seconds (default: 30).
+            timeout_seconds: Query timeout in seconds (default: 10, the read-only role's own cap).
             max_correction_attempts: Max error correction attempts (default: 3).
             allowed_tables: Optional explicit list of allowed tables.
             audit_enabled: Whether to enable audit logging (default: True).
@@ -110,8 +111,10 @@ class NL2SQLPipeline:
         self._classifier = QueryClassifier(llm_service)
         self._generator = SQLGenerator(llm_service, schema_context)
         self._validator = SQLValidator(schema_context, allowed_tables)
+        # SQL runs as the read-only NL2SQL role, never on db_session_factory (Indico's session, which is
+        # only used for the audit log).
         self._executor = QueryExecutor(
-            db_session_factory,
+            connection_factory,
             max_rows,
             timeout_seconds,
             embedding_service=embedding_service,
@@ -170,7 +173,7 @@ class NL2SQLPipeline:
                         for word in reversed(words):
                             if word.lower() not in generic_words and len(word) > 2:
                                 keyword = word
-                                print(f"[DEBUG] Extracted distinctive keyword: '{entity.value}' -> '{keyword}'", flush=True)
+                                logger.debug(f"[DEBUG] Extracted distinctive keyword: '{entity.value}' -> '{keyword}'")
                                 break
                     break
         
@@ -190,7 +193,7 @@ class NL2SQLPipeline:
         
         # If query is missing broad search (notes/contributions), inject it
         if not (has_notes_join and has_contrib_join and has_notes_search and has_contrib_title_search):
-            print("[DEBUG] topic_search query missing broad search - injecting JOINs and OR conditions", flush=True)
+            logger.debug("[DEBUG] topic_search query missing broad search - injecting JOINs and OR conditions")
             
             # Find the FROM clause
             from_match = re.search(r'\bFROM\s+events\.events\s+e\b', sql, re.IGNORECASE)
@@ -206,7 +209,7 @@ class NL2SQLPipeline:
                     # Insert JOINs
                     insert_pos = from_match.end()
                     sql = sql[:insert_pos] + joins + "\n" + sql[insert_pos:]
-                    print("[DEBUG] Added missing JOINs", flush=True)
+                    logger.debug("[DEBUG] Added missing JOINs")
             
             # Now fix the WHERE clause to search all fields
             # Find the existing title search pattern
@@ -222,7 +225,7 @@ class NL2SQLPipeline:
         OR c.description ILIKE '%{keyword}%'
     )"""
                 sql = sql.replace(old_condition, new_condition)
-                print("[DEBUG] Expanded WHERE clause to search all fields", flush=True)
+                logger.debug("[DEBUG] Expanded WHERE clause to search all fields")
         
         # Even if the LLM generated the full template, replace the original keyword with our extracted one
         # E.g., replace '%Project Catalyst%' with '%Catalyst%' for broader matching
@@ -232,7 +235,7 @@ class NL2SQLPipeline:
             new_pattern = f"'%{keyword}%'"
             if old_pattern in sql:
                 sql = sql.replace(old_pattern, new_pattern)
-                print(f"[DEBUG] Replaced search term: '{original_keyword}' -> '{keyword}' for broader matching", flush=True)
+                logger.debug(f"[DEBUG] Replaced search term: '{original_keyword}' -> '{keyword}' for broader matching")
         
         # Add GROUP BY if we have JOINs
         if ("LEFT JOIN" in sql_upper or "JOIN" in sql_upper) and "GROUP BY" not in sql_upper:
@@ -244,11 +247,11 @@ class NL2SQLPipeline:
             if order_match:
                 insert_pos = order_match.start()
                 sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
-                print("[DEBUG] Added GROUP BY clause", flush=True)
+                logger.debug("[DEBUG] Added GROUP BY clause")
             elif limit_match:
                 insert_pos = limit_match.start()
                 sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
-                print("[DEBUG] Added GROUP BY clause", flush=True)
+                logger.debug("[DEBUG] Added GROUP BY clause")
         
         # Fix single-day date ranges: BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD' excludes all times except midnight
         # Replace with BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD 23:59:59' to include full day
@@ -264,7 +267,7 @@ class NL2SQLPipeline:
                     # Add time to end date to include full day
                     new_condition = f"e.start_dt BETWEEN '{classification.time_range.start}' AND '{classification.time_range.end} 23:59:59'"
                     sql = sql.replace(old_condition, new_condition)
-                    print(f"[DEBUG] Fixed single-day date range to include full day: {classification.time_range.start}", flush=True)
+                    logger.debug(f"[DEBUG] Fixed single-day date range to include full day: {classification.time_range.start}")
         
         return sql
 
@@ -357,10 +360,12 @@ class NL2SQLPipeline:
         )
 
         try:
-            # Step 1: Get user's accessible events for permission filtering
-            allowed_event_ids = event_ids
-            if user is not None:
-                allowed_event_ids = get_user_accessible_event_ids(user, event_ids)
+            # Step 1: Who is asking and about what. Visibility is enforced by the database (row-level
+            # security for the read-only role); a single event_id was already checked with can_access.
+            query_context = (QueryContext(user_id=user.id,
+                                          event_id=event_ids[0] if event_ids and len(event_ids) == 1 else None,
+                                          is_admin=bool(user.is_admin))
+                             if user is not None else None)
 
             # Step 2: Classify the question (T025)
             classify_start = time.time()
@@ -399,7 +404,7 @@ class NL2SQLPipeline:
             classification = classification_response.data
             
             # DEBUG: Print classification result
-            print(f"[DEBUG] Classification: intent={classification.intent}, entities={classification.entities}, time_range={classification.time_range}", flush=True)
+            logger.debug(f"[DEBUG] Classification: intent={classification.intent}, entities={classification.entities}, time_range={classification.time_range}")
             
             # Log classification result
             log_classification(
@@ -430,7 +435,7 @@ class NL2SQLPipeline:
                 sql_response = self._generator.generate(
                     question, 
                     classification, 
-                    allowed_event_ids,
+                    event_ids,
                     conversation_history=conversation_history,  # Feature 012: T007
                     user_id=user_id,
                     event_id=event_id_param,
@@ -477,7 +482,7 @@ class NL2SQLPipeline:
                 generated_sql = self._fix_topic_search_sql(generated_sql, classification)
             
             # DEBUG: Print full generated SQL
-            print(f"\n[DEBUG GENERATED SQL]\n{generated_sql}\n[/DEBUG SQL]\n", flush=True)
+            logger.debug(f"\n[DEBUG GENERATED SQL]\n{generated_sql}\n[/DEBUG SQL]\n")
             
             # Log generated SQL
             log_generation(audit_log, generated_sql)
@@ -505,7 +510,7 @@ class NL2SQLPipeline:
                     sql_response = self._generator.generate(
                         question,
                         classification,
-                        allowed_event_ids,
+                        event_ids,
                         conversation_history=conversation_history,
                         user_id=user_id,
                         event_id=event_id_param,
@@ -587,23 +592,23 @@ class NL2SQLPipeline:
                         exec_params["event_id"] = None
 
                 exec_result = self._executor.execute(
-                    generated_sql, params=exec_params, question=question
+                    generated_sql, params=exec_params, question=question, context=query_context
                 )
                 execution_time = int((time.time() - exec_start) * 1000)
                 
                 # DEBUG: Print execution results
                 row_count = len(exec_result.rows) if exec_result.rows else 0
-                print(f"[DEBUG SQL Execution] Success: {exec_result.success}, Rows returned: {row_count}", flush=True)
+                logger.debug(f"[DEBUG SQL Execution] Success: {exec_result.success}, Rows returned: {row_count}")
                 if not exec_result.success:
-                    print(f"[DEBUG SQL Execution] ERROR: {exec_result.error_message}", flush=True)
+                    logger.debug(f"[DEBUG SQL Execution] ERROR: {exec_result.error_message}")
                 if exec_result.rows and row_count > 0:
                     # Print first few event titles to see what matched
                     for i, row in enumerate(exec_result.rows[:5]):
                         event_title = row.get('event_title', row.get('title', 'N/A'))
                         match_loc = row.get('match_location', 'N/A')
-                        print(f"[DEBUG]   Row {i+1}: '{event_title}' (matched in: {match_loc})", flush=True)
+                        logger.debug(f"[DEBUG]   Row {i+1}: '{event_title}' (matched in: {match_loc})")
                     if row_count > 5:
-                        print(f"[DEBUG]   ... and {row_count - 5} more rows", flush=True)
+                        logger.debug(f"[DEBUG]   ... and {row_count - 5} more rows")
                 
                 # Update span with result (T030)
                 if exec_span is not None:
@@ -626,9 +631,10 @@ class NL2SQLPipeline:
             correction_attempts = 0
             corrected = False
 
-            while not exec_result.success and correction_attempts < self._max_correction_attempts:
+            while (not exec_result.success and exec_result.correctable
+                   and correction_attempts < self._max_correction_attempts):
                 correction_attempts += 1
-                print(f"[DEBUG] Correction attempt {correction_attempts}: error was '{exec_result.error_message}'", flush=True)
+                logger.debug(f"[DEBUG] Correction attempt {correction_attempts}: error was '{exec_result.error_message}'")
                 # T053: Log correction attempt
                 log_correction_attempt(audit_log)
 
@@ -655,7 +661,7 @@ class NL2SQLPipeline:
                 if correction_response.success and correction_response.data:
                     # Re-validate corrected SQL
                     corrected_sql = correction_response.data.corrected_query
-                    print(f"[DEBUG] Corrected SQL: {corrected_sql[:200]}...", flush=True)
+                    logger.debug(f"[DEBUG] Corrected SQL: {corrected_sql[:200]}...")
                     validation_result = self._validator.validate(corrected_sql)
 
                     if validation_result.valid:
@@ -670,15 +676,15 @@ class NL2SQLPipeline:
                                 exec_params["event_id"] = event_ids[0]
 
                         exec_result = self._executor.execute(
-                            corrected_sql, params=exec_params, question=question
+                            corrected_sql, params=exec_params, question=question, context=query_context
                         )
                         corrected_row_count = len(exec_result.rows) if exec_result.rows else 0
-                        print(f"[DEBUG] Corrected execution: Success={exec_result.success}, Rows={corrected_row_count}", flush=True)
+                        logger.debug(f"[DEBUG] Corrected execution: Success={exec_result.success}, Rows={corrected_row_count}")
                         if exec_result.success and exec_result.rows:
                             for i, row in enumerate(exec_result.rows[:10]):
                                 event_title = row.get('event_title', row.get('title', 'N/A'))
                                 match_loc = row.get('match_location', 'N/A')
-                                print(f"[DEBUG]   Result {i+1}: '{event_title}' (matched in: {match_loc})", flush=True)
+                                logger.debug(f"[DEBUG]   Result {i+1}: '{event_title}' (matched in: {match_loc})")
                         if exec_result.success:
                             generated_sql = corrected_sql
                             corrected = True
@@ -710,11 +716,7 @@ class NL2SQLPipeline:
                 )
 
             # Step 6: Post-execution permission verification (T020b)
-            filtered_results = exec_result.rows
-            if user is not None:
-                filtered_results = filter_results_by_permission(
-                    exec_result.rows, user, event_id_key="event_id"
-                )
+            filtered_results = exec_result.rows  # already limited to visible rows by the database
 
             # Feature 015: Extract event IDs for citations BEFORE formatting (T015)
             source_event_ids = self._extract_event_ids_from_results(

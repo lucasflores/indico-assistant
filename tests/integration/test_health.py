@@ -6,6 +6,13 @@ from unittest.mock import MagicMock, patch
 from indico_assistant.services.llm.models import HealthStatus
 
 
+@pytest.fixture(autouse=True)
+def admin_session():
+    """The live LLM check only runs for admins (non-admins: tests/unit/controllers/test_phase0_access.py)."""
+    with patch("flask.session", MagicMock(user=MagicMock(is_admin=True))):
+        yield
+
+
 class TestHealthEndpointIntegration:
     """Integration tests for the health check endpoint."""
 

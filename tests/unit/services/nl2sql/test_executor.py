@@ -1,488 +1,125 @@
-# This file is part of the Indico Assistant Plugin.
-# Copyright (C) 2024 - present CERN
-#
-# Indico Assistant Plugin is free software; you can redistribute it
-# and/or modify it under the terms of the MIT License; see the
-# LICENSE file for more details.
+"""QueryExecutor: runs validated SQL as the read-only NL2SQL role (readonly_db), never on Indico's session."""
 
-"""Unit tests for QueryExecutor component."""
-
-from unittest.mock import MagicMock, patch
+from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy.exc import SQLAlchemyError
-
-from indico_assistant.services.nl2sql.executor import QueryExecutor
-
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
-@pytest.fixture
-def mock_session() -> MagicMock:
-    """Create a mock database session."""
-    session = MagicMock()
-    return session
-
-
-@pytest.fixture
-def mock_result() -> MagicMock:
-    """Create a mock query result."""
-    result = MagicMock()
-    result.keys.return_value = ["id", "title", "created_at"]
-    result.fetchall.return_value = [
-        (1, "Event 1", "2024-01-01"),
-        (2, "Event 2", "2024-01-02"),
-        (3, "Event 3", "2024-01-03"),
-    ]
-    return result
-
-
-@pytest.fixture
-def db_session_factory(mock_session: MagicMock, mock_result: MagicMock):
-    """Create a mock database session factory."""
-    mock_session.execute.return_value = mock_result
-
-    def factory():
-        return mock_session
-
-    return factory
-
-
-@pytest.fixture
-def executor(db_session_factory) -> QueryExecutor:
-    """Create an executor instance."""
-    return QueryExecutor(
-        db_session_factory=db_session_factory,
-        max_rows=1000,
-        timeout_seconds=30,
-    )
-
-
-class TestQueryExecutorBasicExecution:
-    """Test basic query execution."""
-
-    def test_execute_returns_success_result(
-        self, executor: QueryExecutor
-    ) -> None:
-        """Successful execution should return success=True."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.success is True
-        assert result.error_message is None
-
-    def test_execute_returns_rows(
-        self, executor: QueryExecutor
-    ) -> None:
-        """Should return fetched rows as list of dicts."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert len(result.rows) == 3
-        assert result.rows[0]["id"] == 1
-        assert result.rows[0]["title"] == "Event 1"
-
-    def test_execute_returns_columns(
-        self, executor: QueryExecutor
-    ) -> None:
-        """Should return column names."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.columns == ["id", "title", "created_at"]
-
-    def test_execute_returns_row_count(
-        self, executor: QueryExecutor
-    ) -> None:
-        """Should return correct row count."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.row_count == 3
-
-    def test_execute_with_parameters(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Should pass parameters to query execution."""
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-        params = {"event_id": 123}
-
-        executor.execute(
-            "SELECT * FROM events.events WHERE id = :event_id",
-            params=params,
-        )
-
-        # Second call is the actual query (first is SET statement_timeout)
-        calls = mock_session.execute.call_args_list
-        query_call = calls[1]
-        assert query_call[0][1] == params
-
-
-class TestQueryExecutorTimeout:
-    """Test query timeout enforcement (FR-025)."""
-
-    def test_sets_statement_timeout(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Should set PostgreSQL statement timeout."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            timeout_seconds=30,
-        )
-
-        executor.execute("SELECT * FROM events.events")
-
-        # First execute call should be the timeout setting
-        first_call = mock_session.execute.call_args_list[0]
-        timeout_sql = str(first_call[0][0])
-        assert "statement_timeout" in timeout_sql.lower()
-        assert "30000" in timeout_sql  # 30 * 1000 ms
-
-    def test_custom_timeout_value(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Custom timeout should be applied."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            timeout_seconds=60,
-        )
-
-        executor.execute("SELECT * FROM events.events")
-
-        first_call = mock_session.execute.call_args_list[0]
-        timeout_sql = str(first_call[0][0])
-        assert "60000" in timeout_sql  # 60 * 1000 ms
-
-    def test_timeout_property(self, db_session_factory) -> None:
-        """timeout_seconds property should return configured value."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            timeout_seconds=45,
-        )
-
-        assert executor.timeout_seconds == 45
-
-    def test_timeout_error_handled(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Timeout errors should be converted to friendly message."""
-        mock_session.execute.side_effect = SQLAlchemyError(
-            "statement timeout"
-        )
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            timeout_seconds=30,
-        )
-
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.success is False
-        assert "timed out" in result.error_message.lower()
-        assert "30 seconds" in result.error_message
-
-
-class TestQueryExecutorRowLimit:
-    """Test row limit enforcement (FR-024)."""
-
-    def test_adds_limit_when_missing(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-        mock_result: MagicMock,
-    ) -> None:
-        """Should add LIMIT clause when not present."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=1000,
-        )
-
-        executor.execute("SELECT * FROM events.events")
-
-        # Second execute call is the query
-        query_call = mock_session.execute.call_args_list[1]
-        sql = str(query_call[0][0])
-        assert "LIMIT 1000" in sql.upper()
-
-    def test_preserves_existing_limit(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Should not modify query with existing LIMIT."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=1000,
-        )
-        sql = "SELECT * FROM events.events LIMIT 10"
-
-        executor.execute(sql)
-
-
-class TestQueryExecutorVectorParams:
-    """Test vector placeholder handling."""
-
-    def test_vector_placeholder_without_embedding_service(self, db_session_factory) -> None:
-        """Should return friendly error when embedding service is missing."""
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-        result = executor.execute(
-            "SELECT * FROM plugin_assistant.extracted_documents ORDER BY embedding <=> :query_vector",
-            question="test query",
-        )
-
-        assert result.success is False
-        assert "embedding service" in (result.error_message or "")
-
-    def test_vector_placeholder_without_question(self, db_session_factory) -> None:
-        """Should return friendly error when question is missing."""
-        embedding_service = MagicMock()
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            embedding_service=embedding_service,
-        )
-        result = executor.execute(
-            "SELECT * FROM plugin_assistant.extracted_documents ORDER BY embedding <=> :query_vector",
-        )
-
-        assert result.success is False
-        assert "no question" in (result.error_message or "").lower()
-
-    def test_truncated_flag_when_at_limit(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-        mock_result: MagicMock,
-    ) -> None:
-        """truncated should be True when rows equal max_rows."""
-        mock_result.fetchall.return_value = [(i,) for i in range(10)]
-        mock_result.keys.return_value = ["id"]
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=10,
-        )
-
-        result = executor.execute("SELECT id FROM events.events")
-
-        assert result.truncated is True
-
-    def test_not_truncated_when_under_limit(
-        self, executor: QueryExecutor
-    ) -> None:
-        """truncated should be False when rows under max_rows."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        # 3 rows returned, max is 1000
-        assert result.truncated is False
-
-    def test_max_rows_property(self, db_session_factory) -> None:
-        """max_rows property should return configured value."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=500,
-        )
-
-        assert executor.max_rows == 500
-
-    def test_rows_truncated_to_max(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-        mock_result: MagicMock,
-    ) -> None:
-        """Rows exceeding max should be truncated."""
-        mock_result.fetchall.return_value = [(i,) for i in range(20)]
-        mock_result.keys.return_value = ["id"]
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=10,
-        )
-
-        result = executor.execute("SELECT id FROM events.events")
-
-        assert result.row_count == 10
-        assert result.truncated is True
-
-    def test_handles_semicolon_when_adding_limit(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Should handle trailing semicolon when adding LIMIT."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=100,
-        )
-
-        executor.execute("SELECT * FROM events.events;")
-
-        query_call = mock_session.execute.call_args_list[1]
-        sql = str(query_call[0][0])
-        # Should not have ;LIMIT
-        assert "LIMIT 100" in sql.upper()
-
-
-class TestQueryExecutorErrorHandling:
-    """Test error handling."""
-
-    def test_sqlalchemy_error_returns_failure(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """SQLAlchemy errors should return failure result."""
-        mock_session.execute.side_effect = SQLAlchemyError("Database error")
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.success is False
-        assert "Database error" in result.error_message
-
-    def test_generic_error_returns_failure(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Generic errors should return failure result."""
-        mock_session.execute.side_effect = Exception("Unexpected error")
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.success is False
-        assert "Unexpected error" in result.error_message
-
-    def test_error_returns_empty_rows(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Error results should have empty rows."""
-        mock_session.execute.side_effect = SQLAlchemyError("Error")
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.rows == []
-        assert result.row_count == 0
-        assert result.columns == []
-
-
-class TestQueryExecutorExecutionTime:
-    """Test execution time tracking."""
-
-    def test_records_execution_time(
-        self, executor: QueryExecutor
-    ) -> None:
-        """Should record execution time in milliseconds."""
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.execution_time_ms >= 0
-
-    def test_execution_time_on_error(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """Should record execution time even on error."""
-        mock_session.execute.side_effect = SQLAlchemyError("Error")
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events")
-
-        assert result.execution_time_ms >= 0
-
-
-class TestQueryExecutorDefaultParams:
-    """Test default parameter handling."""
-
-    def test_none_params_converted_to_empty_dict(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-    ) -> None:
-        """None params should be converted to empty dict."""
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        executor.execute("SELECT * FROM events.events", params=None)
-
-        # Second call is the query
-        query_call = mock_session.execute.call_args_list[1]
-        # Params should be empty dict, not None
-        assert query_call[0][1] == {}
-
-
-class TestQueryExecutorEmptyResult:
-    """Test handling of empty results."""
-
-    def test_empty_result_returns_success(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-        mock_result: MagicMock,
-    ) -> None:
-        """Empty result set should still be successful."""
-        mock_result.fetchall.return_value = []
-        mock_result.keys.return_value = ["id", "title"]
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events WHERE 1=0")
-
-        assert result.success is True
-        assert result.rows == []
-        assert result.row_count == 0
-        assert result.columns == ["id", "title"]
-
-    def test_empty_result_not_truncated(
-        self,
-        db_session_factory,
-        mock_session: MagicMock,
-        mock_result: MagicMock,
-    ) -> None:
-        """Empty result should not be marked truncated."""
-        mock_result.fetchall.return_value = []
-        mock_result.keys.return_value = ["id"]
-        executor = QueryExecutor(db_session_factory=db_session_factory)
-
-        result = executor.execute("SELECT * FROM events.events WHERE 1=0")
-
-        assert result.truncated is False
-
-
-class TestQueryExecutorEnsureLimit:
-    """Test _ensure_limit helper method."""
-
-    def test_ensure_limit_adds_limit(self, db_session_factory) -> None:
-        """Should add LIMIT to query without one."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=100,
-        )
-
-        result = executor._ensure_limit("SELECT * FROM events")
-
-        assert "LIMIT 100" in result.upper()
-
-    def test_ensure_limit_preserves_existing(self, db_session_factory) -> None:
-        """Should not modify query with LIMIT."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=100,
-        )
-        sql = "SELECT * FROM events LIMIT 50"
-
-        result = executor._ensure_limit(sql)
-
-        assert result == sql
-
-    def test_ensure_limit_case_insensitive(self, db_session_factory) -> None:
-        """Should detect LIMIT regardless of case."""
-        executor = QueryExecutor(
-            db_session_factory=db_session_factory,
-            max_rows=100,
-        )
-
-        result = executor._ensure_limit("SELECT * FROM events limit 50")
-
-        assert result == "SELECT * FROM events limit 50"
+from indico_assistant.services.nl2sql.executor import QueryExecutor, is_timeout_error
+from indico_assistant.services.nl2sql.readonly_db import QueryContext
+
+
+CTX = QueryContext(user_id=7, event_id=None, is_admin=False)
+
+
+class FakeConnection:
+    def __init__(self, rows=(), columns=('id', 'title'), error=None):
+        self.statements = []
+        self._rows, self._columns, self._error = list(rows), list(columns), error
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append((sql, params))
+        if sql.startswith('SELECT * FROM ('):
+            if self._error:
+                raise self._error
+            result = MagicMock()
+            result.keys.return_value = self._columns
+            result.fetchmany.side_effect = lambda n: self._rows[:n]
+            return result
+        return MagicMock()
+
+    @contextmanager
+    def begin(self):
+        yield
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def make(conn, **kwargs):
+    return QueryExecutor(connection_factory=lambda: conn, signer=lambda ctx: f'signed:{ctx.payload()}', **kwargs)
+
+
+def test_returns_rows_and_columns():
+    conn = FakeConnection(rows=[(1, 'A'), (2, 'B')])
+    result = make(conn).execute('SELECT id, title FROM events.events', context=CTX)
+    assert result.success and result.row_count == 2 and result.columns == ['id', 'title']
+    assert result.rows == [{'id': 1, 'title': 'A'}, {'id': 2, 'title': 'B'}] and not result.truncated
+
+
+def test_sets_timeout_and_signed_context_before_the_query():
+    conn = FakeConnection()
+    make(conn, timeout_seconds=12).execute('SELECT id FROM events.events', context=CTX)
+    (timeout_sql, _), (ctx_sql, ctx_params), (query_sql, _) = conn.statements
+    assert timeout_sql == 'SET LOCAL statement_timeout = 12000'
+    assert "set_config('indico_assistant.ctx'" in ctx_sql and ctx_params == {'ctx': 'signed:7::0'}
+    assert query_sql.startswith('SELECT * FROM (')
+
+
+@pytest.mark.parametrize('sql', ['SELECT id FROM events.events;', 'SELECT id FROM events.events LIMIT 5000000',
+                                 "SELECT id FROM events.events WHERE title ILIKE '%time limit%'"])
+def test_row_cap_wraps_any_query(sql):
+    conn = FakeConnection()
+    make(conn, max_rows=50).execute(sql, context=CTX)
+    query_sql = conn.statements[-1][0]
+    assert query_sql == f"SELECT * FROM ({sql.rstrip(';')}) AS nl2sql_q LIMIT 51"
+
+
+def test_truncates_to_max_rows():
+    conn = FakeConnection(rows=[(i, str(i)) for i in range(10)])
+    result = make(conn, max_rows=3).execute('SELECT id, title FROM events.events', context=CTX)
+    assert result.row_count == 3 and result.truncated
+
+
+def test_refuses_without_a_context_and_never_connects():
+    factory = MagicMock()
+    result = QueryExecutor(connection_factory=factory, signer=str).execute('SELECT 1')
+    assert not result.success and 'user context is required' in result.error_message and not result.correctable
+    factory.assert_not_called()
+
+
+def test_timeout_is_reported_as_timeout():
+    conn = FakeConnection(error=OperationalError('q', {}, Exception('canceling statement due to statement timeout')))
+    result = make(conn, timeout_seconds=10).execute('SELECT 1 FROM events.events', context=CTX)
+    assert not result.success and result.error_message == 'Query timed out after 10 seconds'
+    assert is_timeout_error(result.error_message) and not result.correctable
+
+
+def test_sql_error_is_returned_and_correctable():
+    conn = FakeConnection(error=ProgrammingError('q', {}, Exception('column "nope" does not exist')))
+    result = make(conn).execute('SELECT nope FROM events.events', context=CTX)
+    assert not result.success and 'does not exist' in result.error_message and result.correctable
+
+
+@pytest.mark.parametrize('error', [OperationalError('q', {}, Exception('connection refused')), ValueError('boom')])
+def test_setup_and_connection_errors_are_not_correctable(error):
+    assert not make(FakeConnection(error=error)).execute('SELECT 1', context=CTX).correctable
+
+
+def test_unexpected_error_is_labelled():
+    conn = FakeConnection(error=ValueError('boom'))
+    assert make(conn).execute('SELECT 1', context=CTX).error_message == 'Unexpected error: boom'
+
+
+def test_params_are_passed_through():
+    conn = FakeConnection()
+    make(conn).execute('SELECT id FROM events.events WHERE id = :event_id', params={'event_id': 3}, context=CTX)
+    assert conn.statements[-1][1] == {'event_id': 3}
+
+
+def test_vector_placeholder_needs_an_embedding_service():
+    result = make(FakeConnection()).execute('SELECT 1 ORDER BY x <=> :query_vector', question='q', context=CTX)
+    assert not result.success and 'embedding service' in result.error_message
+
+
+def test_vector_placeholder_is_filled_from_the_question():
+    conn = FakeConnection()
+    embedder = MagicMock(embed_text=MagicMock(return_value=[0.5, 0.25]))
+    make(conn, embedding_service=embedder).execute('SELECT 1 ORDER BY x <=> :query_vector', question='q',
+                                                   context=CTX)
+    assert conn.statements[-1][1] == {'query_vector': '[0.5,0.25]'}

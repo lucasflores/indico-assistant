@@ -188,17 +188,21 @@ class TestChatService:
         
         mock_context_builder.build_context.return_value = []
         
-        with patch.object(chat_service, '_validate_event_access') as mock_validate:
-            with patch.object(chat_service, '_process_with_nl2sql') as mock_process:
-                mock_process.return_value = ("Response", {})
-                
-                chat_service.process_message(
-                    user_id=123,
-                    message="What events?",
-                    event_id=456
-                )
-                
-                mock_validate.assert_called_once_with(123, 456)
+        auth_user = MagicMock()
+        with patch.object(chat_service, '_load_user', return_value=auth_user) as mock_load, \
+                patch.object(chat_service, '_validate_event_access') as mock_validate, \
+                patch.object(chat_service, '_process_with_nl2sql') as mock_process:
+            mock_process.return_value = ("Response", {})
+
+            chat_service.process_message(
+                user_id=123,
+                message="What events?",
+                event_id=456
+            )
+
+            mock_load.assert_called_once_with(123)
+            mock_validate.assert_called_once_with(auth_user, 456)
+            assert mock_process.call_args.kwargs['auth_user'] is auth_user
 
     def test_process_message_commits_on_success(
         self, chat_service, mock_session_manager, mock_context_builder

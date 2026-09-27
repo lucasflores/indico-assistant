@@ -209,9 +209,11 @@ class ChatService:
             # Use resolved user_id for processing
             effective_user_id = identity.user_id
             
-            # Validate event access for event-scoped sessions
-            if session.event_id and effective_user_id:
-                self._validate_event_access(effective_user_id, session.event_id)
+            # SECURITY: access is always decided by the *authenticated* user. A claimed identity
+            # ("I am ...") only changes whose data "my ..." questions refer to, never what is visible.
+            auth_user = self._load_user(user_id)
+            if session.event_id:
+                self._validate_event_access(auth_user, session.event_id)
             
             # Save user message
             user_msg = self._session_manager.add_user_message(session, message)
@@ -221,7 +223,7 @@ class ChatService:
             
             # Process through NL2SQL pipeline (with RAG enhancement)
             response_text, metadata = self._process_with_nl2sql(
-                message, context, session.event_id, user_id=effective_user_id
+                message, context, session.event_id, user_id=effective_user_id, auth_user=auth_user
             )
             
             # Feature 016 (T012, T025): Add identity status to metadata
@@ -298,29 +300,32 @@ class ChatService:
         session = self._session_manager.create_session(user_id, event_id)
         return session, True
 
-    def _validate_event_access(self, user_id: int, event_id: int) -> None:
-        """Validate user has access to the event.
-        
-        Args:
-            user_id: User ID
-            event_id: Event ID
-            
+    @staticmethod
+    def _load_user(user_id: Optional[int]):
+        if user_id is None:
+            return None
+        from indico.modules.users import User
+        return User.get(user_id, is_deleted=False)
+
+    def _validate_event_access(self, user, event_id: int) -> None:
+        """Validate the authenticated user can access the event (Indico's own can_access).
+
         Raises:
             EventAccessDeniedError: If user can't access event
         """
         if event_id is None:
             return  # No event scoping, no validation needed
-            
+
         try:
             from indico.modules.events import Event
-            from flask import session as flask_session
-            
-            event = Event.get(event_id)
+
+            event = Event.get(event_id, is_deleted=False)
             if not event:
                 raise EventAccessDeniedError(event_id, "Event not found")
-            
-            user = flask_session.user
-            if not event.can_access(user):
+
+            # user comes from the Indico session OR the Chainlit token (flask's session.user is None
+            # for token requests, which made this check deny every Chainlit user before)
+            if user is None or not event.can_access(user):
                 raise EventAccessDeniedError(
                     event_id,
                     "You do not have access to this event"
@@ -453,7 +458,8 @@ class ChatService:
         message: str,
         context: list[dict[str, str]],
         event_id: Optional[int],
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        auth_user: Any = None,
     ) -> tuple[str, dict[str, Any]]:
         """Process message through NL2SQL pipeline with RAG enhancement.
         
@@ -489,6 +495,7 @@ class ChatService:
             result = pipeline.process(
                 question=message,
                 user_id=user_id,
+                user=auth_user,  # decides visibility (row-level security context)
                 event_ids=[event_id] if event_id else None,
                 conversation_history=context,  # Feature 012: T006
             )

@@ -72,7 +72,7 @@ class SettingsForm(IndicoForm):
     nl2sql_timeout = IntegerField(
         "NL2SQL Timeout (seconds)",
         validators=[Optional(), NumberRange(min=5, max=120)],
-        description="Timeout for SQL query execution (5-120 seconds, default: 30)",
+        description="Timeout for SQL query execution (5-120 seconds, default: 10)",
     )
 
     nl2sql_max_rows = IntegerField(
