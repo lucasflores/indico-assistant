@@ -28,8 +28,8 @@ _CLIENT_SETTINGS = ("provider", "model", "base_url", "api_key")  # what the clie
 # Holds (records, response model name, requested model).
 _current_calls: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("llm_current_calls", default=None)
 
-# Records of every generate()/health_check() inside a collect_calls() block (e.g. one chat question).
-_request_calls: contextvars.ContextVar[list | None] = contextvars.ContextVar("llm_request_calls", default=None)
+# The open collect_calls() lists (outermost first): every record goes to all of them.
+_request_calls: contextvars.ContextVar[tuple] = contextvars.ContextVar("llm_request_calls", default=())
 
 CALL_LOG_MAX = 1000  # the shared call_log keeps only the most recent records
 
@@ -40,13 +40,16 @@ def collect_calls():
 
     Thread-safe per-request cost accounting (one chat question makes several generate() calls):
     ``with collect_calls() as calls: pipeline work...`` then ``calls`` holds them all.
+    Blocks nest: a caller can collect around a pipeline that collects for itself, and both see the
+    records (the outer one even if the inner code raises).
     """
     calls: list[dict[str, Any]] = []
-    token = _request_calls.set(calls)
+    token = _request_calls.set(_request_calls.get() + (calls,))
     try:
         yield calls
     finally:
         _request_calls.reset(token)
+
 
 if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
@@ -148,7 +151,7 @@ class LLMService:
     def _store(self, calls: list[dict[str, Any]], record: dict[str, Any]) -> None:
         calls.append(record)
         self.call_log.append(record)
-        if (request := _request_calls.get()) is not None:
+        for request in _request_calls.get():
             request.append(record)
 
     def set_tracer(self, tracer: "Tracer") -> None:
