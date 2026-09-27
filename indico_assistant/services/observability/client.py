@@ -13,6 +13,7 @@ This module provides a LangfuseClient wrapper that:
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any, Generator, Optional
 
@@ -316,6 +317,7 @@ class LangfuseClient:
 # Module-level client instance (lazy initialization)
 _client_instance: Optional[LangfuseClient] = None
 _client_key: tuple | None = None
+_client_lock = threading.Lock()
 _CLIENT_SETTINGS = ('langfuse_enabled', 'langfuse_privacy_level', 'langfuse_host',
                     'langfuse_public_key', 'langfuse_secret_key')
 
@@ -325,12 +327,12 @@ def get_langfuse_client(settings: dict) -> LangfuseClient:
     global _client_instance, _client_key
 
     key = tuple(settings.get(name) for name in _CLIENT_SETTINGS)
-    if _client_instance is None or key != _client_key:
-        # ponytail: no lock; two threads seeing a settings change at once each build a client
-        if _client_instance is not None:
-            _client_instance.shutdown()
-        _client_instance, _client_key = LangfuseClient(settings), key
-    return _client_instance
+    with _client_lock:
+        if _client_instance is None or key != _client_key:
+            if _client_instance is not None:
+                _client_instance.shutdown()
+            _client_instance, _client_key = LangfuseClient(settings), key
+        return _client_instance
 
 
 def reset_client() -> None:
