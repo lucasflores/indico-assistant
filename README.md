@@ -245,6 +245,11 @@ changed in SQL without reading files, and queues only that. Text already indexed
 attachment (cloned events) is copied instead of re-embedded. A nightly task removes chunks of
 attachments deleted while the plugin was off and closes sync runs whose worker died.
 
+**Retention**: a nightly task (03:11, queue `assistant_bulk`, needs Celery beat) deletes chat sessions
+idle 90 days (with their messages and feedback), audit-log rows after 90 days, error records after 30
+days and sync logs after 90 days. Each period is an admin setting (Admin → Plugins → Assistant);
+0 keeps that data forever.
+
 ### Session Management
 
 #### GET /api/assistant/sessions

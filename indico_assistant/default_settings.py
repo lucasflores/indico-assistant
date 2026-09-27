@@ -39,6 +39,11 @@ DEFAULT_SETTINGS = {
     "chat_widget_enabled": True,
     "chainlit_server_url": "http://localhost:8000",
     "chainlit_auth_secret": "",  # Shared secret for JWT signing (must match CHAINLIT_AUTH_SECRET)
+    # Retention in days, applied nightly; 0 = keep forever
+    "retention_chat_days": 90,  # chat sessions idle this long (their messages and feedback go with them)
+    "retention_audit_days": 90,  # NL2SQL audit log: questions, emails, IP addresses
+    "retention_error_days": 30,
+    "retention_sync_log_days": 90,
     # Citation settings (Feature 015)
     "base_url": "http://localhost:8000",  # Base URL for citation links (event pages, attachments)
 }

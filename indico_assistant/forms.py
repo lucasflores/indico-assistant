@@ -5,7 +5,7 @@ including global settings and per-event settings.
 """
 
 from wtforms.fields import BooleanField, IntegerField, PasswordField, SelectField, StringField, TextAreaField
-from wtforms.validators import DataRequired, NumberRange, Optional, URL, ValidationError
+from wtforms.validators import DataRequired, InputRequired, NumberRange, Optional, URL, ValidationError
 
 from indico.web.forms.base import IndicoForm
 
@@ -97,6 +97,27 @@ class SettingsForm(IndicoForm):
         "NL2SQL Allowed Tables",
         validators=[Optional()],
         description="Comma-separated list of tables allowed for NL2SQL queries (leave empty for default set)",
+    )
+
+    # Retention (applied nightly by the indico_assistant.retention task)
+    retention_chat_days = IntegerField(
+        "Keep chats (days)",
+        validators=[InputRequired(), NumberRange(min=0)],
+        description="Chat sessions idle longer than this are deleted with their messages and feedback. "
+                    "0 keeps them forever.",
+    )
+    retention_audit_days = IntegerField(
+        "Keep query audit log (days)",
+        validators=[InputRequired(), NumberRange(min=0)],
+        description="The audit log holds users' questions, emails and IP addresses. 0 keeps it forever.",
+    )
+    retention_error_days = IntegerField(
+        "Keep error records (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="0 keeps them forever.",
+    )
+    retention_sync_log_days = IntegerField(
+        "Keep document sync logs (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="0 keeps them forever.",
     )
 
     # Chat Widget Settings (Feature 008)
