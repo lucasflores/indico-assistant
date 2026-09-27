@@ -13,7 +13,7 @@ This module provides a LangfuseClient wrapper that:
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any, Generator, Optional
 
 from indico_assistant.services.observability import get_observability_logger
@@ -198,18 +198,21 @@ class LangfuseClient:
             yield NoOpSpan(name)
             return
 
-        try:
-            with self._client.start_as_current_observation(
-                as_type="span",
-                name=name,
-                user_id=user_id,
-                session_id=session_id,
-                **kwargs
-            ) as span:
-                yield span
-        except Exception as e:
-            logger.warning(f"Tracing error for '{name}': {e}")
-            yield NoOpSpan(name)
+        # Only failures to *open* the observation fall back to a no-op; errors raised by the traced block
+        # propagate unchanged (yielding a second time turned them into "generator didn't stop").
+        with ExitStack() as stack:
+            try:
+                observation = stack.enter_context(self._client.start_as_current_observation(
+                    as_type="span",
+                    name=name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    **kwargs
+                ))
+            except Exception as e:
+                logger.warning(f"Tracing error for '{name}': {e}")
+                observation = NoOpSpan(name)
+            yield observation
 
     @contextmanager
     def generation(
@@ -232,17 +235,20 @@ class LangfuseClient:
             yield NoOpSpan(name)
             return
 
-        try:
-            with self._client.start_as_current_observation(
-                as_type="generation",
-                name=name,
-                model=model,
-                **kwargs
-            ) as gen:
-                yield gen
-        except Exception as e:
-            logger.warning(f"Generation tracing error for '{name}': {e}")
-            yield NoOpSpan(name)
+        # Only failures to *open* the observation fall back to a no-op; errors raised by the traced block
+        # propagate unchanged (yielding a second time turned them into "generator didn't stop").
+        with ExitStack() as stack:
+            try:
+                observation = stack.enter_context(self._client.start_as_current_observation(
+                    as_type="generation",
+                    name=name,
+                    model=model,
+                    **kwargs
+                ))
+            except Exception as e:
+                logger.warning(f"Generation tracing error for '{name}': {e}")
+                observation = NoOpSpan(name)
+            yield observation
 
     @contextmanager
     def span(
@@ -263,16 +269,19 @@ class LangfuseClient:
             yield NoOpSpan(name)
             return
 
-        try:
-            with self._client.start_as_current_observation(
-                as_type="span",
-                name=name,
-                **kwargs
-            ) as s:
-                yield s
-        except Exception as e:
-            logger.warning(f"Span tracing error for '{name}': {e}")
-            yield NoOpSpan(name)
+        # Only failures to *open* the observation fall back to a no-op; errors raised by the traced block
+        # propagate unchanged (yielding a second time turned them into "generator didn't stop").
+        with ExitStack() as stack:
+            try:
+                observation = stack.enter_context(self._client.start_as_current_observation(
+                    as_type="span",
+                    name=name,
+                    **kwargs
+                ))
+            except Exception as e:
+                logger.warning(f"Span tracing error for '{name}': {e}")
+                observation = NoOpSpan(name)
+            yield observation
 
     def flush(self) -> None:
         """Flush pending traces to Langfuse (T022).
