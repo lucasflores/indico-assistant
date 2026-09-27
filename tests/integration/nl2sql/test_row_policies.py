@@ -33,12 +33,12 @@ def ro(db, monkeypatch):
     secret = conn.execute(text('SELECT secret FROM plugin_assistant.nl2sql_secret')).scalar()
     monkeypatch.setattr(readonly_db, '_get_secret', lambda: secret)
 
-    def query(sql, event_id=None):
+    def query(sql, event_id=None, user_id=NOBODY, admin=False):
         db.session.flush()
         conn.exec_driver_sql(f'SET LOCAL ROLE {RO_ROLE}')
         try:
             conn.execute(text("SELECT set_config('indico_assistant.ctx', :ctx, true)"),
-                         {'ctx': readonly_db.sign(QueryContext(NOBODY, event_id, False))})
+                         {'ctx': readonly_db.sign(QueryContext(user_id, event_id, admin))})
             return {row[0] for row in conn.execute(text(sql))}
         finally:
             conn.exec_driver_sql('RESET ROLE')
@@ -50,10 +50,11 @@ def test_contribution_inherits_its_sessions_protection(ro, dummy_event, create_s
     protected_session = create_session(dummy_event, 'Closed', protection_mode=ProtectionMode.protected)
     visible = create_contribution(dummy_event, 'In the open session', session=public_session)
     hidden = create_contribution(dummy_event, 'In the closed session', session=protected_session)
-    hidden_folder = AttachmentFolder(object=hidden, title='Slides')
+    folders = {c: AttachmentFolder(object=c, title='Slides') for c in (visible, hidden)}
 
     assert ro('SELECT id FROM events.contributions') == {visible.id}
-    assert hidden_folder.id not in ro('SELECT id FROM attachments.folders')
+    visible_folders = ro('SELECT id FROM attachments.folders')  # flushes: the folder ids exist from here
+    assert folders[visible].id in visible_folders and folders[hidden].id not in visible_folders
 
 
 def test_subcontribution_material_follows_its_contribution(ro, dummy_event, dummy_user, create_contribution,
@@ -82,6 +83,35 @@ def test_events_follow_indicos_protection_modes(ro, create_category, create_even
     visible = ro('SELECT id FROM events.events')
     assert {public.id, listed.id} <= visible and inheriting.id not in visible
     assert ro('SELECT id FROM categories.categories') & {closed.id, inside.id} == set()
+
+
+def test_each_grant_path_makes_protected_events_visible(ro, create_category, create_event, create_user,
+                                                       create_group):
+    group = create_group(1)
+    reader, member, category_reader, manager = (create_user(2001), create_user(2002, groups=[group]),
+                                                create_user(2003), create_user(2004))
+    closed = create_category(title='Closed', protection_mode=ProtectionMode.protected)
+    in_closed = create_event(title='Inherits from Closed', category=closed)
+    protected_in_closed = create_event(title='Protected in Closed', category=closed,
+                                       protection_mode=ProtectionMode.protected)
+    protected = create_event(title='Protected', protection_mode=ProtectionMode.protected)
+    protected.update_principal(reader, read_access=True)
+    protected.update_principal(group, read_access=True)
+    closed.update_principal(category_reader, read_access=True)
+    closed.update_principal(manager, full_access=True)
+
+    def events(user_id, admin=False):
+        return ro('SELECT id FROM events.events', user_id=user_id, admin=admin) & {
+            in_closed.id, protected_in_closed.id, protected.id}
+
+    assert events(NOBODY) == set()
+    assert events(reader.id) == {protected.id}  # direct event grant
+    assert events(member.id) == {protected.id}  # through a local group
+    assert events(category_reader.id) == {in_closed.id}  # category read: inheriting events only
+    assert events(manager.id) == {in_closed.id, protected_in_closed.id}  # category managers see all below
+    assert events(NOBODY, admin=True) == {in_closed.id, protected_in_closed.id, protected.id}
+    assert closed.id in ro('SELECT id FROM categories.categories', user_id=category_reader.id)
+    assert closed.id not in ro('SELECT id FROM categories.categories')
 
 
 def test_unlisted_events_are_not_listed(ro, create_event):

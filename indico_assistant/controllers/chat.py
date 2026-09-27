@@ -104,6 +104,12 @@ class RHChat(RHChatBase):
 class RHChatJob(RHChatBase):
     """GET /chat/jobs/<job_id>: the queued answer, once a worker has produced it."""
 
+    def _check_access(self) -> None:
+        super()._check_access()
+        rate_result = get_rate_limiter().check_rate(self.user.id, "read")  # clients poll this
+        if not rate_result.allowed:
+            raise self._rate_limit_error(rate_result.retry_after)
+
     def _process(self):
         job = jobs.get(request.view_args["job_id"])
         if job is None or job.get("user_id") != self.user.id:

@@ -9,8 +9,10 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from werkzeug.exceptions import TooManyRequests
 
 import indico_assistant.controllers.chat as chat_module
+from indico_assistant.controllers.base import RHChatBase
 from indico_assistant.controllers.chat import RHChat, RHChatJob
 from indico_assistant.services.chat import EventAccessDeniedError, SessionAccessDeniedError, SessionNotFoundError
 
@@ -127,6 +129,13 @@ class TestChatJob:
                            'message': 'Too long'}
         response, status = self._get(request_)
         assert status == expected and response.get_json()['error'] == error
+
+    def test_polling_counts_against_the_read_limit(self):
+        with patch.object(RHChatBase, '_check_access'), patch.object(chat_module, 'get_rate_limiter') as limiter:
+            limiter.return_value.check_rate.return_value = MagicMock(allowed=False, retry_after=5)
+            with pytest.raises(TooManyRequests):
+                _controller(RHChatJob)._check_access()
+        limiter.return_value.check_rate.assert_called_once_with(123, 'read')
 
     @pytest.mark.parametrize('job', [None, {'status': 'done', 'user_id': 999, 'session_id': 's'}])
     def test_unknown_or_someone_elses_job(self, request_, jobs, job):
