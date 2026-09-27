@@ -101,7 +101,7 @@ class RHVectorSearch(RHSearchBase):
                 event_ids=data.get("event_ids"),
                 top_k=data.get("top_k", 5),
                 threshold=data.get("threshold", 0.7),
-                user_id=self.user.id if self.user else None
+                user=self.user,
             )
         except Exception as e:
             logger.exception("Search failed")

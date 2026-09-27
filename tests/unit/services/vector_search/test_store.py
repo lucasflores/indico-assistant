@@ -22,7 +22,9 @@ Tests the vector storage functionality:
 import pytest
 from unittest.mock import MagicMock, Mock, patch, PropertyMock
 from uuid import uuid4
+from contextlib import contextmanager, nullcontext
 
+from indico_assistant.services.nl2sql.readonly_db import QueryContext
 from indico_assistant.services.vector_search.store import VectorStore
 
 
@@ -302,118 +304,65 @@ class TestVectorStoreGetChunkCount:
         assert result == 5
 
 
+CTX = QueryContext(user_id=7, event_id=None, is_admin=False)
+
+
+def _row(i=0, similarity=0.95):
+    return MagicMock(id=uuid4(), event_id=1, attachment_id=100, chunk_index=i, content_text=f"Chunk {i}",
+                     metadata_json={}, similarity=similarity)
+
+
+@contextmanager
+def _read_only(rows, calls):
+    """Stand-in for readonly_db.scoped_connection: records (context, sql, params)."""
+    def scoped(context):
+        conn = MagicMock()
+        conn.execute.side_effect = lambda sql, params: (calls.append((context, str(sql), params))
+                                                        or MagicMock(fetchall=MagicMock(return_value=rows)))
+        return nullcontext(conn)
+    with patch('indico_assistant.services.vector_search.store.readonly_db.scoped_connection', scoped):
+        yield
+
+
 class TestVectorStoreSimilaritySearch:
-    """Tests for VectorStore.similarity_search method."""
-    
-    @patch('indico_assistant.services.vector_search.store.db')
+    """similarity_search runs as the read-only role under the caller's context (row policies apply)."""
+
     @patch('indico_assistant.services.vector_search.store.check_pgvector_available', return_value=False)
-    def test_similarity_search_without_pgvector(self, mock_check, mock_db):
-        """Test similarity search when pgvector not available."""
-        store = VectorStore()
-        
-        result = store.similarity_search(
-            query_embedding=[0.1] * 384,
-            event_id=1
-        )
-        
-        assert result == []
-    
-    @patch('indico_assistant.services.vector_search.store.db')
+    def test_similarity_search_without_pgvector(self, mock_check):
+        assert VectorStore().similarity_search(query_embedding=[0.1] * 384, context=CTX, event_id=1) == []
+
     @patch('indico_assistant.services.vector_search.store.check_pgvector_available', return_value=True)
-    def test_similarity_search_basic(self, mock_check, mock_db):
-        """Test basic similarity search."""
-        store = VectorStore()
-        
-        # Mock query result
-        mock_row = MagicMock()
-        mock_row.id = uuid4()
-        mock_row.event_id = 1
-        mock_row.attachment_id = 100
-        mock_row.chunk_index = 0
-        mock_row.content_text = "Test content"
-        mock_row.metadata_json = {"filename": "test.pdf"}
-        mock_row.similarity = 0.95
-        
-        mock_db.session.execute.return_value = [mock_row]
-        
-        result = store.similarity_search(
-            query_embedding=[0.1] * 384,
-            event_id=1,
-            top_k=5,
-            threshold=0.7
-        )
-        
-        assert len(result) == 1
-        assert result[0]["event_id"] == 1
-        assert result[0]["attachment_id"] == 100
-        assert result[0]["content_text"] == "Test content"
-        assert result[0]["similarity"] == 0.95
-    
-    @patch('indico_assistant.services.vector_search.store.db')
+    def test_runs_under_the_context_with_bound_parameters(self, mock_check):
+        calls = []
+        with _read_only([_row()], calls):
+            result = VectorStore().similarity_search(query_embedding=[0.1, 0.2], context=CTX, event_id=1,
+                                                     top_k=5, threshold=0.7)
+        assert result == [{"id": result[0]["id"], "event_id": 1, "attachment_id": 100, "chunk_index": 0,
+                           "content_text": "Chunk 0", "metadata_json": {}, "similarity": 0.95}]
+        (context, sql, params), = calls
+        assert context is CTX
+        assert params == {"top_k": 5, "threshold": 0.7, "embedding": "[0.1,0.2]", "event_ids": [1]}
+        assert "0.1" not in sql  # the embedding is a parameter, not spliced into the SQL
+
     @patch('indico_assistant.services.vector_search.store.check_pgvector_available', return_value=True)
-    def test_similarity_search_with_event_ids(self, mock_check, mock_db):
-        """Test similarity search with multiple event IDs."""
-        store = VectorStore()
-        
-        mock_db.session.execute.return_value = []
-        
-        store.similarity_search(
-            query_embedding=[0.1] * 384,
-            event_ids=[1, 2, 3],
-            top_k=10
-        )
-        
-        # Verify execute was called
-        mock_db.session.execute.assert_called_once()
-        call_args = mock_db.session.execute.call_args
-        params = call_args[0][1]
-        assert params["event_ids"] == [1, 2, 3]
-    
-    @patch('indico_assistant.services.vector_search.store.db')
+    def test_similarity_search_with_event_ids(self, mock_check):
+        calls = []
+        with _read_only([], calls):
+            VectorStore().similarity_search(query_embedding=[0.1] * 384, context=CTX, event_ids=[1, 2, 3])
+        assert calls[0][2]["event_ids"] == [1, 2, 3] and "ANY(:event_ids)" in calls[0][1]
+
     @patch('indico_assistant.services.vector_search.store.check_pgvector_available', return_value=True)
-    def test_similarity_search_no_results(self, mock_check, mock_db):
-        """Test similarity search with no matching results."""
-        store = VectorStore()
-        
-        mock_db.session.execute.return_value = []
-        
-        result = store.similarity_search(
-            query_embedding=[0.1] * 384,
-            event_id=999
-        )
-        
-        assert result == []
-    
-    @patch('indico_assistant.services.vector_search.store.db')
+    def test_no_event_filter_searches_everything_visible(self, mock_check):
+        calls = []
+        with _read_only([], calls):
+            VectorStore().similarity_search(query_embedding=[0.1] * 384, context=CTX)
+        assert "event_ids" not in calls[0][2] and "ANY(" not in calls[0][1]
+
     @patch('indico_assistant.services.vector_search.store.check_pgvector_available', return_value=True)
-    def test_similarity_search_multiple_results(self, mock_check, mock_db):
-        """Test similarity search returning multiple results."""
-        store = VectorStore()
-        
-        mock_rows = []
-        for i in range(3):
-            mock_row = MagicMock()
-            mock_row.id = uuid4()
-            mock_row.event_id = 1
-            mock_row.attachment_id = 100
-            mock_row.chunk_index = i
-            mock_row.content_text = f"Chunk {i}"
-            mock_row.metadata_json = {}
-            mock_row.similarity = 0.95 - (i * 0.05)
-            mock_rows.append(mock_row)
-        
-        mock_db.session.execute.return_value = mock_rows
-        
-        result = store.similarity_search(
-            query_embedding=[0.1] * 384,
-            event_id=1,
-            top_k=5
-        )
-        
-        assert len(result) == 3
-        # Results should maintain order (by similarity)
-        assert result[0]["similarity"] >= result[1]["similarity"]
-        assert result[1]["similarity"] >= result[2]["similarity"]
+    def test_similarity_search_multiple_results(self, mock_check):
+        with _read_only([_row(i, 0.95 - i * 0.05) for i in range(3)], []):
+            result = VectorStore().similarity_search(query_embedding=[0.1] * 384, context=CTX, event_id=1)
+        assert [r["chunk_index"] for r in result] == [0, 1, 2]
 
 
 class TestVectorStoreGetStats:

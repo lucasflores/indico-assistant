@@ -157,7 +157,7 @@ class RAGService:
         query: str,
         event_id: Optional[int] = None,
         event_ids: Optional[list[int]] = None,
-        user_id: Optional[int] = None,
+        user: Any = None,
         force: bool = False
     ) -> RAGResult:
         """Get document context for a query.
@@ -166,7 +166,7 @@ class RAGService:
             query: User's question.
             event_id: Optional single event to search.
             event_ids: Optional list of events to search.
-            user_id: Optional user for permission filtering.
+            user: The authenticated Indico user (search refuses without one).
             force: Force retrieval even if query doesn't seem document-related.
             
         Returns:
@@ -198,7 +198,7 @@ class RAGService:
             query=query,
             event_id=event_id,
             event_ids=event_ids,
-            user_id=user_id,
+            user=user,
             top_k=self._context_max_chunks,
             threshold=self._min_similarity
         )
