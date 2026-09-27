@@ -9,118 +9,42 @@ import pytest
 
 
 class TestWidgetConfig:
-    """Tests for widget configuration via get_vars_js."""
+    """widget_config(): per-user config for the uncached /widget/config.js route."""
 
-    def test_returns_enabled_setting(self):
-        """Should return enabled setting from plugin settings."""
+    def _config(self, user, **settings):
         from indico_assistant.plugin import AssistantPlugin
 
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {"chat_widget_enabled": True, "chainlit_server_url": "http://localhost:8000"}
+        values = {"chat_widget_enabled": True, "chainlit_server_url": "http://chainlit.test",
+                  "chainlit_auth_secret": "s3cret", **settings}
 
-        with patch("indico_assistant.plugin.current_user", None):
-            config = plugin.get_vars_js()
+        class Plugin(AssistantPlugin):  # settings/logger are class properties that need a loaded plugin
+            settings = MagicMock(get=values.get)
+            logger = MagicMock()
 
-        assert config["enabled"] is True
+        return Plugin.__new__(Plugin).widget_config(user)
 
-    def test_returns_chainlit_url(self):
-        """Should return Chainlit server URL from settings."""
+    def test_anonymous_gets_no_token(self):
+        config = self._config(None)
+        assert config == {"enabled": True, "chainlitUrl": "http://chainlit.test", "authToken": None, "theme": "auto"}
+
+    def test_logged_in_user_gets_a_token(self):
+        user = MagicMock(id=7, full_name="Ada", email="ada@example.test")
+        with patch("indico_assistant.services.jwt_service.create_chainlit_token", return_value="tok") as mint:
+            config = self._config(user)
+        assert config["authToken"] == "tok"
+        assert mint.call_args.args[0] is user
+
+    def test_no_secret_no_token(self):
+        assert self._config(MagicMock(), chainlit_auth_secret="")["authToken"] is None
+
+    def test_never_feeds_the_shared_global_js(self):
+        """Indico renders get_vars_js() into global.js, cached for every visitor. Must stay unoverridden."""
+        from indico.core.plugins import IndicoPlugin
+
         from indico_assistant.plugin import AssistantPlugin
 
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {
-            "chat_widget_enabled": True,
-            "chainlit_server_url": "http://custom-chainlit:9000",
-        }
-
-        with patch("indico_assistant.plugin.current_user", None):
-            config = plugin.get_vars_js()
-
-        assert config["chainlitUrl"] == "http://custom-chainlit:9000"
-
-    def test_returns_null_auth_token_when_not_authenticated(self):
-        """Should return null authToken when user is not authenticated."""
-        from indico_assistant.plugin import AssistantPlugin
-
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {"chat_widget_enabled": True, "chainlit_server_url": "http://localhost:8000"}
-
-        mock_user = MagicMock()
-        mock_user.is_authenticated = False
-
-        with patch("indico_assistant.plugin.current_user", mock_user):
-            config = plugin.get_vars_js()
-
-        assert config["authToken"] is None
-
-    def test_returns_auth_token_when_authenticated(self):
-        """Should return JWT authToken when user is authenticated."""
-        from indico_assistant.plugin import AssistantPlugin
-
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {
-            "chat_widget_enabled": True,
-            "chainlit_server_url": "http://localhost:8000",
-            "chainlit_auth_secret": "test-secret",
-        }
-
-        mock_user = MagicMock()
-        mock_user.is_authenticated = True
-        mock_user.id = 123
-        mock_user.full_name = "Test User"
-        mock_user.email = "test@example.com"
-
-        with patch("indico_assistant.plugin.current_user", mock_user):
-            config = plugin.get_vars_js()
-
-        assert config["authToken"] is not None
-        assert len(config["authToken"]) > 0
-
-    def test_returns_null_auth_token_when_no_secret(self):
-        """Should return null authToken when secret is not configured."""
-        from indico_assistant.plugin import AssistantPlugin
-
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {
-            "chat_widget_enabled": True,
-            "chainlit_server_url": "http://localhost:8000",
-            "chainlit_auth_secret": "",  # Empty secret
-        }
-
-        mock_user = MagicMock()
-        mock_user.is_authenticated = True
-        mock_user.id = 456
-        mock_user.full_name = "No Secret User"
-        mock_user.email = "nosecret@example.com"
-
-        with patch("indico_assistant.plugin.current_user", mock_user):
-            config = plugin.get_vars_js()
-
-        assert config["authToken"] is None
-
-    def test_returns_auto_theme_by_default(self):
-        """Should return 'auto' theme by default."""
-        from indico_assistant.plugin import AssistantPlugin
-
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {"chat_widget_enabled": True, "chainlit_server_url": "http://localhost:8000"}
-
-        with patch("indico_assistant.plugin.current_user", None):
-            config = plugin.get_vars_js()
-
-        assert config["theme"] == "auto"
-
-    def test_disabled_when_setting_is_false(self):
-        """Should return enabled=False when widget is disabled."""
-        from indico_assistant.plugin import AssistantPlugin
-
-        plugin = AssistantPlugin(None, None)
-        plugin._settings = {"chat_widget_enabled": False, "chainlit_server_url": "http://localhost:8000"}
-
-        with patch("indico_assistant.plugin.current_user", None):
-            config = plugin.get_vars_js()
-
-        assert config["enabled"] is False
+        assert AssistantPlugin.get_vars_js is IndicoPlugin.get_vars_js
+        assert AssistantPlugin.inject_vars_js is IndicoPlugin.inject_vars_js
 
 
 class TestWidgetDefaultSettings:
