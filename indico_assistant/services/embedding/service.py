@@ -10,6 +10,7 @@ Default model: BAAI/bge-small-en-v1.5 (384 dimensions)
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
@@ -19,6 +20,11 @@ if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
 
 logger = logging.getLogger(__name__)
+
+# Loaded models, per process: {model_name: (model, dimensions)}. Loading costs ~2 s and ~375 MB, so
+# every EmbeddingService instance in a process shares one copy (instances stay cheap to create).
+_models: dict[str, tuple["SentenceTransformer", int]] = {}
+_models_lock = threading.Lock()
 
 
 class EmbeddingService:
@@ -88,25 +94,22 @@ class EmbeddingService:
             return self._model
         
         try:
-            from sentence_transformers import SentenceTransformer
-            
-            logger.info(f"Loading embedding model: {self._model_name}")
-            self._model = SentenceTransformer(self._model_name)
-            
-            # Verify dimensions match expected
-            test_embedding = self._model.encode(["test"], normalize_embeddings=True)
-            actual_dims = test_embedding.shape[1]
+            with _models_lock:  # one load per process, even when threads ask at the same time
+                if self._model_name not in _models:
+                    from sentence_transformers import SentenceTransformer
+
+                    logger.info(f"Loading embedding model: {self._model_name}")
+                    model = SentenceTransformer(self._model_name)
+                    dims = model.encode(["test"], normalize_embeddings=True).shape[1]
+                    _models[self._model_name] = (model, dims)
+                    logger.info(f"Embedding model loaded: {self._model_name} ({dims} dimensions)")
+                self._model, actual_dims = _models[self._model_name]
             if actual_dims != self._dimensions:
                 logger.warning(
                     f"Model dimensions ({actual_dims}) differ from configured "
                     f"({self._dimensions}). Using actual dimensions."
                 )
                 self._dimensions = actual_dims
-            
-            logger.info(
-                f"Embedding model loaded: {self._model_name} "
-                f"({self._dimensions} dimensions)"
-            )
             return self._model
             
         except ImportError as e:
@@ -200,21 +203,14 @@ class EmbeddingService:
                 "error": None
             }
         
-        try:
-            model = self._load_model()
-            return {
-                "status": "healthy",
-                "model": self._model_name,
-                "dimensions": self._dimensions,
-                "error": None
-            }
-        except Exception as e:
-            return {
-                "status": "unhealthy",
-                "model": self._model_name,
-                "dimensions": self._dimensions,
-                "error": str(e)
-            }
+        # Never loads the model: a status probe must not cost seconds and hundreds of MB.
+        loaded = self._model_name in _models
+        return {
+            "status": "healthy" if loaded else "not_loaded",
+            "model": self._model_name,
+            "dimensions": _models[self._model_name][1] if loaded else self._dimensions,
+            "error": None
+        }
 
 
 def create_embedding_service(plugin: "AssistantPlugin") -> EmbeddingService:

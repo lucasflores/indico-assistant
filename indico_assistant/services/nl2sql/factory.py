@@ -119,7 +119,6 @@ def create_nl2sql_pipeline_from_plugin(
     - nl2sql_timeout
     - nl2sql_max_rows
     - nl2sql_max_corrections
-    - nl2sql_cache_ttl
     - nl2sql_allowed_tables
 
     Args:
@@ -128,25 +127,22 @@ def create_nl2sql_pipeline_from_plugin(
     Returns:
         Configured NL2SQLPipeline instance.
     """
-    from indico_assistant.services.llm import create_llm_service
-
-    # Get LLM service from plugin
-    llm_service = create_llm_service(plugin)
+    llm_service = plugin.llm_service  # one per process: keeps the HTTP connection pool across chats
 
     # Read settings with defaults
     settings = plugin.settings
     timeout = settings.get("nl2sql_timeout", 10)
     max_rows = settings.get("nl2sql_max_rows", 1000)
     max_corrections = settings.get("nl2sql_max_corrections", 3)
-    cache_ttl = settings.get("nl2sql_cache_ttl", 600)
     allowed_tables = settings.get("nl2sql_allowed_tables")
 
     embedding_service = create_embedding_service(plugin)
 
     return create_nl2sql_pipeline(
         llm_service=llm_service,
-        enable_cache=cache_ttl > 0,
-        cache_ttl_seconds=cache_ttl,
+        # ponytail: no result cache. Its key (user, SQL) ignores the event scope, and a per-chat pipeline
+        # never hits it anyway; a shared cache would need the full QueryContext in the key.
+        enable_cache=False,
         max_rows=max_rows,
         timeout_seconds=timeout,
         max_correction_attempts=max_corrections,

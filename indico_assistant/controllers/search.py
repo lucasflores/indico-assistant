@@ -139,7 +139,7 @@ class RHVectorSearch(RHSearchBase):
 
 
 class RHSearchStatus(RHSearchBase):
-    """Handler for GET /api/assistant/search/status.
+    """Handler for GET /api/assistant/search/status (admins: it scans the chunk table).
     
     Returns vector search availability and statistics.
     
@@ -156,6 +156,8 @@ class RHSearchStatus(RHSearchBase):
         }
     """
     
+    ADMIN_ONLY = True
+
     def _process(self) -> "Response":
         """Get search status."""
         # Check pgvector availability

@@ -15,7 +15,14 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 import numpy as np
 
+from indico_assistant.services.embedding import service as service_module
 from indico_assistant.services.embedding.service import EmbeddingService, create_embedding_service
+
+
+@pytest.fixture(autouse=True)
+def fresh_model_cache(monkeypatch):
+    """Loaded models are shared per process; each test starts with none loaded."""
+    monkeypatch.setattr(service_module, "_models", {})
 
 
 class TestEmbeddingService:
@@ -255,6 +262,7 @@ class TestEmbeddingServiceHealthCheck:
             return_value=mock_model
         ):
             service = EmbeddingService(mock_plugin)
+            service.embed_text("warm up")  # health only reports; loading happens on real use
             health = service.health_check()
             
             assert health["status"] == "healthy"
@@ -277,17 +285,22 @@ class TestEmbeddingServiceHealthCheck:
         assert health["status"] == "disabled"
         assert health["model"] is None
 
-    def test_health_check_unhealthy(self, mock_plugin):
-        """Test health_check returns unhealthy status on error."""
-        with patch(
-            "sentence_transformers.SentenceTransformer",
-            side_effect=Exception("Model load failed")
-        ):
-            service = EmbeddingService(mock_plugin)
-            health = service.health_check()
-            
-            assert health["status"] == "unhealthy"
-            assert health["error"] == "Model load failed"
+    def test_health_check_never_loads_the_model(self, mock_plugin):
+        """A status probe must not cost a model load (seconds, hundreds of MB)."""
+        with patch("sentence_transformers.SentenceTransformer") as st:
+            health = EmbeddingService(mock_plugin).health_check()
+        st.assert_not_called()
+        assert health["status"] == "not_loaded"
+
+    def test_model_loaded_once_per_process(self, mock_plugin):
+        """Every service instance (one per request/task) shares the loaded model."""
+        with patch("sentence_transformers.SentenceTransformer") as st:
+            st.return_value.encode.return_value = np.zeros((1, 384))
+            EmbeddingService(mock_plugin).embed_text("a")
+            EmbeddingService(mock_plugin).embed_text("b")
+            health = EmbeddingService(mock_plugin).health_check()
+        st.assert_called_once()
+        assert health["status"] == "healthy"
 
 
 class TestCreateEmbeddingServiceFactory:

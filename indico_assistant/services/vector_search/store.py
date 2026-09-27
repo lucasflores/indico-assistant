@@ -352,35 +352,20 @@ class VectorStore:
         Returns:
             Dictionary with statistics.
         """
-        query = ExtractedDocument.query
-        if event_id is not None:
-            query = query.filter_by(event_id=event_id)
-        
-        total_chunks = query.count()
-        
-        # Count by status
-        status_counts = {}
-        for status in ExtractionStatus:
-            count = query.filter_by(extraction_status=status.value).count()
-            status_counts[status.value] = count
-        
-        # Count unique documents
-        doc_query = db.session.query(
-            ExtractedDocument.attachment_id
-        ).distinct()
-        if event_id is not None:
-            doc_query = doc_query.filter(ExtractedDocument.event_id == event_id)
-        total_documents = doc_query.count()
-        
-        # Count with embeddings (if pgvector available)
-        indexed_count = 0
-        if self._pgvector_available:
-            result = db.session.execute(text("""
-                SELECT COUNT(*) FROM plugin_assistant.extracted_documents
-                WHERE embedding IS NOT NULL
-                AND (:event_id IS NULL OR event_id = :event_id)
-            """), {"event_id": event_id})
-            indexed_count = result.scalar() or 0
+        # One pass over the table (it used to be 8 separate COUNT(*) scans).
+        indexed = "count(embedding)" if self._pgvector_available else "0"  # no column without pgvector
+        rows = db.session.execute(text(f"""
+            SELECT extraction_status, count(*) AS chunks,
+                   count(DISTINCT attachment_id) AS documents, {indexed} AS indexed
+            FROM plugin_assistant.extracted_documents
+            WHERE (CAST(:event_id AS integer) IS NULL OR event_id = :event_id)
+            GROUP BY ROLLUP (extraction_status)
+        """), {"event_id": event_id}).fetchall()
+        totals = next((r for r in rows if r.extraction_status is None), None)
+        status_counts = {r.extraction_status: r.chunks for r in rows if r.extraction_status is not None}
+        total_chunks = totals.chunks if totals else 0
+        total_documents = totals.documents if totals else 0
+        indexed_count = totals.indexed if totals else 0
         
         return {
             "total_documents": total_documents,

@@ -195,25 +195,22 @@ class TestCreateNL2SQLPipelineFromPlugin:
         self, mock_create_llm, mock_create_pipeline, mock_plugin
     ):
         """Test creating pipeline from plugin settings."""
-        mock_llm = MagicMock()
-        mock_create_llm.return_value = mock_llm
-        
         mock_pipeline = MagicMock()
         mock_create_pipeline.return_value = mock_pipeline
         
         result = create_nl2sql_pipeline_from_plugin(mock_plugin)
         
         assert result == mock_pipeline
-        mock_create_llm.assert_called_once_with(mock_plugin)
+        mock_create_llm.assert_not_called()  # reuses the per-process service on the plugin
         mock_create_pipeline.assert_called_once()
         
         # Verify settings were passed
         call_kwargs = mock_create_pipeline.call_args[1]
-        assert call_kwargs['llm_service'] == mock_llm
+        assert call_kwargs['llm_service'] is mock_plugin.llm_service
         assert call_kwargs['timeout_seconds'] == 45
         assert call_kwargs['max_rows'] == 2000
         assert call_kwargs['max_correction_attempts'] == 5
-        assert call_kwargs['cache_ttl_seconds'] == 1200
+        assert call_kwargs['enable_cache'] is False  # results depend on the viewer's scope
         assert call_kwargs['allowed_tables'] == ['events', 'categories']
     
     @patch('indico_assistant.services.nl2sql.factory.create_nl2sql_pipeline')
@@ -236,7 +233,6 @@ class TestCreateNL2SQLPipelineFromPlugin:
         assert call_kwargs['timeout_seconds'] == 10
         assert call_kwargs['max_rows'] == 1000
         assert call_kwargs['max_correction_attempts'] == 3
-        assert call_kwargs['cache_ttl_seconds'] == 600
     
     @patch('indico_assistant.services.nl2sql.factory.create_nl2sql_pipeline')
     @patch('indico_assistant.services.llm.create_llm_service')
@@ -251,20 +247,6 @@ class TestCreateNL2SQLPipelineFromPlugin:
         
         call_kwargs = mock_create_pipeline.call_args[1]
         assert call_kwargs['enable_cache'] is False
-    
-    @patch('indico_assistant.services.nl2sql.factory.create_nl2sql_pipeline')
-    @patch('indico_assistant.services.llm.create_llm_service')
-    def test_create_pipeline_cache_enabled_when_ttl_positive(
-        self, mock_create_llm, mock_create_pipeline
-    ):
-        """Test that cache is enabled when TTL is positive."""
-        mock_plugin = MagicMock()
-        mock_plugin.settings = {'nl2sql_cache_ttl': 300}
-        
-        result = create_nl2sql_pipeline_from_plugin(mock_plugin)
-        
-        call_kwargs = mock_create_pipeline.call_args[1]
-        assert call_kwargs['enable_cache'] is True
     
     @patch('indico_assistant.services.nl2sql.factory.create_nl2sql_pipeline')
     @patch('indico_assistant.services.llm.create_llm_service')
@@ -336,15 +318,6 @@ class TestFactoryEdgeCases:
                 schema_file_path="/nonexistent/schema.yaml"
             )
     
-    @patch('indico_assistant.services.llm.create_llm_service')
-    def test_llm_service_creation_error(self, mock_create_llm):
-        """Test handling of LLM service creation errors."""
-        mock_plugin = MagicMock()
-        mock_create_llm.side_effect = RuntimeError("LLM service unavailable")
-        
-        with pytest.raises(RuntimeError, match="LLM service unavailable"):
-            create_nl2sql_pipeline_from_plugin(mock_plugin)
-
 
 class TestFactoryIntegration:
     """Integration-style tests for factory functions."""
