@@ -162,7 +162,7 @@ class TestSchemaContextAllowedTables:
     def test_get_all_allowed_tables_with_explicit_list(self):
         """Should return explicit allowlist when provided."""
         context = SchemaContext()
-        allowlist = ["events.events", "events.registrations"]
+        allowlist = ["events.events", "events.notes"]
         
         allowed = context.get_all_allowed_tables(allowlist)
         
@@ -191,10 +191,10 @@ class TestSchemaContextAllowedTables:
     def test_is_table_allowed_with_explicit_list(self):
         """Should check if table is in explicit allowlist."""
         context = SchemaContext()
-        allowlist = ["events.events", "events.registrations"]
+        allowlist = ["events.events", "events.notes"]
         
         assert context.is_table_allowed("events.events", allowlist) is True
-        assert context.is_table_allowed("events.registrations", allowlist) is True
+        assert context.is_table_allowed("events.notes", allowlist) is True
         assert context.is_table_allowed("events.contributions", allowlist) is False
 
     def test_is_table_allowed_without_list_checks_schema(self):
@@ -303,3 +303,15 @@ class TestSchemaContextSchemaPrompt:
             assert "registrations via event_id" in prompt
         finally:
             Path(schema_file).unlink()
+
+
+@pytest.mark.parametrize(("setting", "expected"), [
+    (None, None), ("", None), ([], None),                       # empty = the default set
+    ("events.events, events.notes", ["events.events", "events.notes"]),
+    (["events.events", "users.users"], ["events.events"]),     # cannot widen past the YAML
+])
+def test_admin_allowlist_only_narrows(setting, expected):
+    context = SchemaContext()
+    everything = context.get_all_allowed_tables()
+    assert "events.events" in everything and "users.users" not in everything
+    assert context.get_all_allowed_tables(setting) == (expected or everything)
