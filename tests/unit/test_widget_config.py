@@ -9,7 +9,7 @@ import pytest
 
 
 class TestWidgetConfig:
-    """widget_config(): per-user config for the uncached /widget/config.js route."""
+    """widget_config(): per-user config for the uncached /widget/config route."""
 
     def _config(self, user, **settings):
         from indico_assistant.plugin import AssistantPlugin
@@ -75,3 +75,43 @@ class TestWidgetDefaultSettings:
         from indico_assistant.default_settings import DEFAULT_SETTINGS
 
         assert DEFAULT_SETTINGS["chainlit_auth_secret"] == ""
+
+
+class TestWidgetLoading:
+    """Page views pay for the widget only when a logged-in user has it enabled, and then one cached file."""
+
+    def _script(self, user, enabled=True):
+        from indico_assistant.plugin import AssistantPlugin
+
+        class Plugin(AssistantPlugin):
+            settings = MagicMock(get={"chat_widget_enabled": enabled}.get)
+
+        with patch("flask.session", MagicMock(user=user)):
+            return Plugin.__new__(Plugin)._render_widget_script()
+
+    def test_anonymous_and_disabled_get_nothing(self):
+        assert self._script(None) is None
+        assert self._script(MagicMock(), enabled=False) is None
+
+    def test_logged_in_gets_one_deferred_versioned_script(self):
+        from indico_assistant.blueprint import widget_script_url
+
+        html = self._script(MagicMock())
+        assert html == f'<script src="{widget_script_url()}" defer></script>'
+        assert "?v=" in widget_script_url()
+
+    def test_config_route_needs_a_user_and_is_never_cached(self, app):
+        from indico_assistant import blueprint as bp
+
+        with app.test_request_context("/api/assistant/widget/config?event_id=5"), \
+                patch("flask.session", MagicMock(user=None)):
+            assert bp.widget_config()[1] == 401
+
+        plugin = MagicMock(widget_config=MagicMock(return_value={"authToken": "tok"}))
+        user = MagicMock()
+        with app.test_request_context("/api/assistant/widget/config?event_id=5"), \
+                patch("flask.session", MagicMock(user=user)), \
+                patch.object(bp.plugin_engine, "get_plugin", return_value=plugin):
+            response = bp.widget_config()
+        plugin.widget_config.assert_called_once_with(user, event_id=5)
+        assert response.headers["Cache-Control"] == "private, no-store"

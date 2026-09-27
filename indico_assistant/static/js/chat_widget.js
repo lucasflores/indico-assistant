@@ -1,8 +1,10 @@
 /**
  * Indico Assistant Chat Widget
  *
- * This script loads the Chainlit Copilot widget and configures it with
- * settings from the IndicoAssistant global (provided by the uncached /widget/config.js route).
+ * Injected (deferred, cacheable) only for logged-in users with the widget enabled. It shows a small
+ * launcher; nothing else is loaded until the user clicks it: then the per-user config (with the
+ * Chainlit token) is fetched from /api/assistant/widget/config and the Chainlit Copilot is loaded,
+ * mounted and opened. Page views that never open the assistant cost no extra requests.
  *
  * Features:
  * - Dynamic script loading of Chainlit Copilot
@@ -16,21 +18,11 @@
 (function () {
   "use strict";
 
-  // Check if IndicoAssistant config is available
-  if (typeof IndicoAssistant === "undefined") {
-    console.warn("[IndicoAssistant] Configuration not found, widget disabled");
-    return;
-  }
-
-  // Check if widget is enabled
-  if (!IndicoAssistant.enabled || !IndicoAssistant.authToken) {  // the API requires a logged-in user
-    return;
-  }
-
-  // Check for Chainlit server URL
-  if (!IndicoAssistant.chainlitUrl) {
-    return;
-  }
+  // currentScript is only set while this file first runs, so capture it now
+  const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || "";
+  const CONFIG_URL = "/api/assistant/widget/config";
+  const LAUNCHER_ID = "assistant-launcher";
+  let IndicoAssistant = null;  // fetched on first open: {enabled, chainlitUrl, authToken, theme}
 
   const THEME_DATA_ATTR = "data-chainlit-theme";
   const LIVE_REGION_ID = "assistant-live-region";
@@ -212,13 +204,12 @@
       document.head.appendChild(style);
     }
 
-    const scriptEl = document.currentScript;
-    if (!scriptEl || !scriptEl.src) {
+    if (!SCRIPT_SRC) {
       return;
     }
 
     try {
-      const scriptUrl = new URL(scriptEl.src, window.location.href);
+      const scriptUrl = new URL(SCRIPT_SRC, window.location.href);
       const cssUrl = `${scriptUrl.origin}/api/assistant/widget/css/chat_widget.css`;
       const link = document.createElement("link");
       link.rel = "stylesheet";
@@ -802,11 +793,71 @@
     }
   }
 
-  // Initialize when DOM is ready
+  function eventIdFromPage() {
+    const match = window.location.pathname.match(/^\/event\/(\d+)(\/|$)/);
+    return match ? match[1] : null;
+  }
+
+  function openCopilot(retries = 20) {
+    // the copilot renders asynchronously after mount; its toggle only works once it listens
+    if (typeof window.toggleChainlitCopilot === "function" && document.getElementById("chainlit-copilot")) {
+      window.toggleChainlitCopilot();
+    } else if (retries > 0) {
+      setTimeout(() => openCopilot(retries - 1), 150);
+    }
+  }
+
+  async function openAssistant(launcher) {
+    launcher.disabled = true;
+    try {
+      const eventId = eventIdFromPage();
+      const response = await fetch(CONFIG_URL + (eventId ? `?event_id=${eventId}` : ""), {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`config ${response.status}`);
+      }
+      IndicoAssistant = await response.json();
+      if (!IndicoAssistant.enabled || !IndicoAssistant.authToken || !IndicoAssistant.chainlitUrl) {
+        throw new Error("assistant unavailable");
+      }
+      await initWidget();
+      if (document.documentElement.getAttribute("data-assistant-ready") !== "true") {
+        throw new Error("mount failed");
+      }
+      launcher.remove();  // Chainlit's own button takes over from here
+      openCopilot();
+    } catch (error) {
+      launcher.disabled = false;
+      setStatus("error", "Assistant not reachable");
+      setTimeout(() => setStatus("none"), 4000);
+    }
+  }
+
+  function addLauncher() {
+    if (document.getElementById(LAUNCHER_ID)) {
+      return;
+    }
+    const launcher = document.createElement("button");
+    launcher.type = "button";
+    launcher.id = LAUNCHER_ID;
+    launcher.title = ACCESSIBILITY_LABEL;
+    launcher.setAttribute("aria-label", `Open ${ACCESSIBILITY_LABEL}`);
+    launcher.textContent = "\u{1F4AC}";
+    Object.assign(launcher.style, {
+      position: "fixed", right: "24px", bottom: "24px", zIndex: "2147483000",
+      width: "56px", height: "56px", borderRadius: "999px", border: "none", cursor: "pointer",
+      fontSize: "24px", background: "#1f77d0", color: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+    });
+    launcher.addEventListener("click", () => openAssistant(launcher));
+    document.body.appendChild(launcher);
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initWidget);
+    document.addEventListener("DOMContentLoaded", addLauncher);
   } else {
-    initWidget();
+    addLauncher();
   }
 
   /**
