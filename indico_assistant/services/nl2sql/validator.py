@@ -27,7 +27,27 @@ class SQLValidator:
         "dml": ["INSERT", "UPDATE", "DELETE", "MERGE"],
         "transaction": ["COMMIT", "ROLLBACK", "SAVEPOINT"],
         "advanced": ["WITH"],  # CTEs
+        # Session/lock/copy/procedural statements, and SELECT ... INTO (which creates a table)
+        "other": ["SET", "RESET", "LOCK", "COPY", "DO", "CALL", "EXECUTE", "PREPARE", "DEALLOCATE",
+                  "GRANT", "REVOKE", "VACUUM", "ANALYZE", "LISTEN", "NOTIFY", "DISCARD", "INTO"],
     }
+
+    # Functions that read files, signal/kill backends, change settings, take advisory locks, open
+    # connections or run SQL from a string. Matched on the query with literals removed and
+    # identifier quotes stripped, so "set_config"( or pg_catalog.pg_sleep( are caught too.
+    FORBIDDEN_FUNCTION_PATTERN: Pattern[str] = re.compile(
+        r"\b(pg_\w+|set_config|dblink\w*|lo_\w+|(?:query|table|cursor|schema|database)_to_xml\w*)\s*\(",
+        re.IGNORECASE,
+    )
+    SYSTEM_SCHEMA_PATTERN: Pattern[str] = re.compile(r"\b(pg_catalog|information_schema|pg_toast)\s*\.",
+                                                     re.IGNORECASE)
+    ROW_LOCK_PATTERN: Pattern[str] = re.compile(r"\bFOR\s+(UPDATE|SHARE|NO\s+KEY|KEY)\b", re.IGNORECASE)
+    # Everything after FROM up to the next clause: catches comma-joined tables ("FROM a x, b y")
+    FROM_LIST_PATTERN: Pattern[str] = re.compile(
+        r"\bFROM\s+(.+?)(?=\b(?:WHERE|JOIN|LEFT|RIGHT|INNER|FULL|CROSS|NATURAL|GROUP|ORDER|LIMIT|OFFSET|"
+        r"HAVING|UNION|INTERSECT|EXCEPT|ON|USING)\b|\)|$)",
+        re.IGNORECASE | re.DOTALL,
+    )
 
     # Pattern to detect subqueries (nested SELECT)
     SUBQUERY_PATTERN: Pattern[str] = re.compile(
@@ -81,7 +101,22 @@ class SQLValidator:
             ValidationResult with validity status and any violations.
         """
         violations: list[str] = []
-        sql_upper = sql.upper().strip()
+        sql = sql.strip()
+        # Rules below run on the code only: literals blanked, identifier quotes removed
+        code = self._code_only(sql)
+        if code is None:
+            return self._result(sql, [], ["Unterminated quote in query"])
+        if "--" in code or "/*" in code:
+            violations.append("SQL comments are not allowed")
+        if ";" in code.rstrip().rstrip(";"):
+            violations.append("Only a single statement is allowed")
+        if self.FORBIDDEN_FUNCTION_PATTERN.search(code):
+            violations.append("System functions (pg_*, set_config, dblink, large objects, *_to_xml) are not allowed")
+        if self.SYSTEM_SCHEMA_PATTERN.search(code):
+            violations.append("System catalogs are not allowed")
+        if self.ROW_LOCK_PATTERN.search(code):
+            violations.append("Row locking (FOR UPDATE/SHARE) is not allowed")
+        sql_upper = code.upper().strip()
 
         # Rule 1: Must start with SELECT (FR-012)
         if not sql_upper.startswith("SELECT"):
@@ -117,6 +152,10 @@ class SQLValidator:
                     f"'{keyword}' clause (CTEs) not supported; use JOINs instead"
                 )
 
+        for keyword in self.FORBIDDEN_KEYWORDS["other"]:
+            if self._has_keyword(sql_upper, keyword):
+                violations.append(f"'{keyword}' is not allowed in read-only queries")
+
         # Rule 6: No subqueries (FR-016)
         if self.SUBQUERY_PATTERN.search(sql):
             violations.append(
@@ -129,8 +168,8 @@ class SQLValidator:
                 "Window functions (OVER clause) not supported; use ORDER BY + LIMIT instead"
             )
 
-        # Extract tables from SQL
-        tables = self._extract_tables(sql)
+        # Extract tables from SQL (JOIN targets and every entry of comma-separated FROM lists)
+        tables = self._extract_tables(code)
 
         # Rule 8: All tables must be in allowlist (FR-018)
         disallowed_tables = self._check_table_allowlist(tables)
@@ -139,6 +178,10 @@ class SQLValidator:
                 f"Table '{table}' not in allowed list; choose from approved event data"
             )
 
+        return self._result(sql, tables, violations)
+
+    @staticmethod
+    def _result(sql: str, tables: list[str], violations: list[str]) -> ValidationResult:
         return ValidationResult(
             valid=len(violations) == 0,
             sql=sql,
@@ -146,6 +189,39 @@ class SQLValidator:
             violations=violations,
             sanitized_sql=sql if len(violations) == 0 else None,
         )
+
+    @staticmethod
+    def _code_only(sql: str) -> str | None:
+        """The query with string literals blanked and double-quoted identifiers unquoted.
+
+        Returns None on an unterminated quote. Keeps positions roughly aligned; only used for checks.
+        """
+        out, i, n = [], 0, len(sql)
+        while i < n:
+            ch = sql[i]
+            if ch in ("'", '"'):
+                j = i + 1
+                while True:
+                    j = sql.find(ch, j)
+                    if j == -1:
+                        return None
+                    if j + 1 < n and sql[j + 1] == ch:  # doubled quote = escaped
+                        j += 2
+                        continue
+                    break
+                inner = sql[i + 1:j]
+                out.append("''" if ch == "'" else inner.replace('""', '"'))
+                i = j + 1
+            elif ch == "$" and (m := re.match(r"\$(\w*)\$", sql[i:])):  # dollar-quoted literal
+                end = sql.find(m.group(0), i + len(m.group(0)))
+                if end == -1:
+                    return None
+                out.append("''")
+                i = end + len(m.group(0))
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
 
     def _has_keyword(self, sql_upper: str, keyword: str) -> bool:
         """
@@ -175,6 +251,10 @@ class SQLValidator:
             List of table names found in the query.
         """
         matches = self.TABLE_PATTERN.findall(sql)
+        for from_list in self.FROM_LIST_PATTERN.findall(sql):
+            for item in from_list.split(","):
+                if m := re.match(r"\s*([a-zA-Z_][a-zA-Z0-9_.]*)", item):
+                    matches.append(m.group(1))
         # Remove duplicates while preserving order
         seen = set()
         tables = []
@@ -199,7 +279,7 @@ class SQLValidator:
             self._allowed_tables
         )
         if not allowed_tables:
-            return []
+            return list(tables)  # fail closed: an empty allowlist allows nothing
         disallowed = []
         for table in tables:
             if not self._schema_context.is_table_allowed(

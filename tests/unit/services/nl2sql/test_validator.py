@@ -9,6 +9,11 @@
 
 from unittest.mock import MagicMock
 
+
+def _has(result, prefix):
+    """Violation messages carry a hint after the rule text; match on the rule text."""
+    return any(v.startswith(prefix) for v in result.violations)
+
 import pytest
 
 from indico_assistant.services.nl2sql.validator import SQLValidator
@@ -65,8 +70,8 @@ class TestSQLValidatorSelectOnly:
         )
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
-        assert "DML statement 'INSERT' not allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
+        assert _has(result, "DML statement 'INSERT' not allowed")
 
     def test_update_rejected(self, validator: SQLValidator) -> None:
         """UPDATE query should be rejected."""
@@ -75,8 +80,8 @@ class TestSQLValidatorSelectOnly:
         )
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
-        assert "DML statement 'UPDATE' not allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
+        assert _has(result, "DML statement 'UPDATE' not allowed")
 
     def test_delete_rejected(self, validator: SQLValidator) -> None:
         """DELETE query should be rejected."""
@@ -85,8 +90,8 @@ class TestSQLValidatorSelectOnly:
         )
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
-        assert "DML statement 'DELETE' not allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
+        assert _has(result, "DML statement 'DELETE' not allowed")
 
 
 class TestSQLValidatorDDLRejection:
@@ -99,7 +104,7 @@ class TestSQLValidatorDDLRejection:
         )
 
         assert result.valid is False
-        assert "DDL statement 'CREATE' not allowed" in result.violations
+        assert _has(result, "DDL statement 'CREATE' not allowed")
 
     def test_drop_rejected(self, validator: SQLValidator) -> None:
         """DROP statement should be rejected."""
@@ -108,7 +113,7 @@ class TestSQLValidatorDDLRejection:
         )
 
         assert result.valid is False
-        assert "DDL statement 'DROP' not allowed" in result.violations
+        assert _has(result, "DDL statement 'DROP' not allowed")
 
     def test_alter_rejected(self, validator: SQLValidator) -> None:
         """ALTER statement should be rejected."""
@@ -117,7 +122,7 @@ class TestSQLValidatorDDLRejection:
         )
 
         assert result.valid is False
-        assert "DDL statement 'ALTER' not allowed" in result.violations
+        assert _has(result, "DDL statement 'ALTER' not allowed")
 
     def test_truncate_rejected(self, validator: SQLValidator) -> None:
         """TRUNCATE statement should be rejected."""
@@ -126,7 +131,7 @@ class TestSQLValidatorDDLRejection:
         )
 
         assert result.valid is False
-        assert "DDL statement 'TRUNCATE' not allowed" in result.violations
+        assert _has(result, "DDL statement 'TRUNCATE' not allowed")
 
     def test_created_at_allowed(self, validator: SQLValidator) -> None:
         """Column named 'created_at' should NOT trigger CREATE rejection."""
@@ -148,7 +153,7 @@ class TestSQLValidatorDMLRejection:
         )
 
         assert result.valid is False
-        assert "DML statement 'MERGE' not allowed" in result.violations
+        assert _has(result, "DML statement 'MERGE' not allowed")
 
 
 class TestSQLValidatorCTERejection:
@@ -161,7 +166,7 @@ class TestSQLValidatorCTERejection:
         )
 
         assert result.valid is False
-        assert "'WITH' clause (CTEs) not supported" in result.violations
+        assert _has(result, "'WITH' clause (CTEs) not supported")
 
     def test_within_allowed(self, validator: SQLValidator) -> None:
         """Word 'within' should NOT trigger WITH rejection."""
@@ -182,7 +187,7 @@ class TestSQLValidatorSubqueryRejection:
         )
 
         assert result.valid is False
-        assert "Subqueries (nested SELECT) not supported" in result.violations
+        assert _has(result, "Subqueries (nested SELECT) not supported")
 
     def test_subquery_in_from_rejected(self, validator: SQLValidator) -> None:
         """Subquery in FROM clause should be rejected."""
@@ -191,7 +196,7 @@ class TestSQLValidatorSubqueryRejection:
         )
 
         assert result.valid is False
-        assert "Subqueries (nested SELECT) not supported" in result.violations
+        assert _has(result, "Subqueries (nested SELECT) not supported")
 
     def test_subquery_in_select_rejected(self, validator: SQLValidator) -> None:
         """Subquery in SELECT clause should be rejected."""
@@ -200,7 +205,7 @@ class TestSQLValidatorSubqueryRejection:
         )
 
         assert result.valid is False
-        assert "Subqueries (nested SELECT) not supported" in result.violations
+        assert _has(result, "Subqueries (nested SELECT) not supported")
 
 
 class TestSQLValidatorWindowFunctionRejection:
@@ -213,7 +218,7 @@ class TestSQLValidatorWindowFunctionRejection:
         )
 
         assert result.valid is False
-        assert "Window functions (OVER clause) not supported" in result.violations
+        assert _has(result, "Window functions (OVER clause) not supported")
 
     def test_over_with_partition_rejected(self, validator: SQLValidator) -> None:
         """OVER with PARTITION BY should be rejected."""
@@ -222,7 +227,7 @@ class TestSQLValidatorWindowFunctionRejection:
         )
 
         assert result.valid is False
-        assert "Window functions (OVER clause) not supported" in result.violations
+        assert _has(result, "Window functions (OVER clause) not supported")
 
     def test_rank_function_rejected(self, validator: SQLValidator) -> None:
         """RANK window function should be rejected."""
@@ -231,7 +236,7 @@ class TestSQLValidatorWindowFunctionRejection:
         )
 
         assert result.valid is False
-        assert "Window functions (OVER clause) not supported" in result.violations
+        assert _has(result, "Window functions (OVER clause) not supported")
 
 
 class TestSQLValidatorTableAllowlist:
@@ -258,7 +263,7 @@ class TestSQLValidatorTableAllowlist:
         result = validator.validate("SELECT * FROM secret_table")
 
         assert result.valid is False
-        assert "Table 'secret_table' not in allowed list" in result.violations
+        assert _has(result, "Table 'secret_table' not in allowed list")
 
     def test_multiple_tables_all_allowed(
         self, mock_schema_context: MagicMock
@@ -293,7 +298,7 @@ class TestSQLValidatorTableAllowlist:
         )
 
         assert result.valid is False
-        assert "Table 'users.users' not in allowed list" in result.violations
+        assert _has(result, "Table 'users.users' not in allowed list")
 
 
 class TestSQLValidatorTableExtraction:
@@ -359,21 +364,21 @@ class TestSQLValidatorTransactionRejection:
         result = validator.validate("COMMIT")
 
         assert result.valid is False
-        assert "Transaction statement 'COMMIT' not allowed" in result.violations
+        assert _has(result, "Transaction statement 'COMMIT' not allowed")
 
     def test_rollback_rejected(self, validator: SQLValidator) -> None:
         """ROLLBACK statement should be rejected."""
         result = validator.validate("ROLLBACK")
 
         assert result.valid is False
-        assert "Transaction statement 'ROLLBACK' not allowed" in result.violations
+        assert _has(result, "Transaction statement 'ROLLBACK' not allowed")
 
     def test_savepoint_rejected(self, validator: SQLValidator) -> None:
         """SAVEPOINT statement should be rejected."""
         result = validator.validate("SAVEPOINT my_savepoint")
 
         assert result.valid is False
-        assert "Transaction statement 'SAVEPOINT' not allowed" in result.violations
+        assert _has(result, "Transaction statement 'SAVEPOINT' not allowed")
 
 
 class TestSQLValidatorValidationResult:
@@ -455,21 +460,21 @@ class TestSQLValidatorEdgeCases:
         result = validator.validate("")
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
 
     def test_whitespace_only_query(self, validator: SQLValidator) -> None:
         """Whitespace-only query should fail."""
         result = validator.validate("   \n\t  ")
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
 
     def test_comment_only_query(self, validator: SQLValidator) -> None:
         """Comment-only query should fail."""
         result = validator.validate("-- SELECT * FROM events.events")
 
         assert result.valid is False
-        assert "Only SELECT queries are allowed" in result.violations
+        assert _has(result, "Only SELECT queries are allowed")
 
     def test_multiline_select(self, validator: SQLValidator) -> None:
         """Multiline SELECT should be valid."""
