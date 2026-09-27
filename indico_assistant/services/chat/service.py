@@ -144,7 +144,8 @@ class ChatService:
         user = self._load_user(user_id)
         if session is None or user is None:
             raise SessionNotFoundError(f"Session {session_id} not found")
-        event_id = session.event_id  # checked with can_access when the message was submitted
+        event_id = session.event_id
+        self._validate_event_access(user, event_id)  # again: access may have been revoked while queued
         # plain values: touching expired ORM objects later would open a transaction mid-pipeline
         viewer = SimpleNamespace(id=user.id, is_admin=bool(user.is_admin))
         context = self._context_builder.build_context(session.id)
@@ -192,7 +193,10 @@ class ChatService:
             
             if not self._session_manager.validate_session_ownership(session, user_id):
                 raise SessionAccessDeniedError("Session belongs to another user")
-            
+            if event_id is not None and session.event_id != event_id:
+                # the session's scope is what gets answered; a different one would be silently ignored
+                raise EventAccessDeniedError(event_id, "This chat belongs to a different event scope")
+
             return session, False
         
         # Create new session

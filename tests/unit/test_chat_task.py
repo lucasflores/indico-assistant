@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from celery.exceptions import SoftTimeLimitExceeded
 
-from indico_assistant.services.chat.service import ChatResult, QueryProcessingError
+from indico_assistant.services.chat.service import ChatResult, EventAccessDeniedError, QueryProcessingError
 from indico_assistant.tasks.chat import CHAT_QUEUE, answer_chat
 
 
@@ -39,6 +39,7 @@ def test_done(finish, service):
 
 @pytest.mark.parametrize(('error', 'code'), [
     (SoftTimeLimitExceeded(), 'TIMEOUT'),
+    (EventAccessDeniedError(456), 'ACCESS_DENIED'),
     (QueryProcessingError('Unable to process your query'), 'QUERY_PROCESSING_ERROR'),
     (RuntimeError('boom'), 'INTERNAL_ERROR'),
 ])

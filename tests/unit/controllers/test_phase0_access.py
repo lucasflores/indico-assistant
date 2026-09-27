@@ -52,3 +52,12 @@ def test_health_live_check_for_admins():
     with patch("flask.session", MagicMock(user=MagicMock(is_admin=True))):
         RHHealth.__new__(RHHealth)._check_llm_status(plugin)
     plugin.llm_service.health_check.assert_called_once()
+
+
+def test_every_response_is_private_and_uncached():
+    from flask import Response
+    from indico.web.rh import RH
+    from indico_assistant.controllers.base import RHAssistantBase
+    with patch.object(RH, 'process', return_value=Response('{}')):
+        response = RHAssistantBase.process(RHAssistantBase.__new__(RHAssistantBase))
+    assert response.headers['Cache-Control'] == 'private, no-store'

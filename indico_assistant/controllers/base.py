@@ -32,6 +32,11 @@ class RHAssistantBase(RH):
     ADMIN_ONLY = False  # Override to True for admin-only endpoints
     CSRF_ENABLED = False  # API auth is handled via JWT header
 
+    def process(self):
+        response = super().process()
+        response.headers["Cache-Control"] = "private, no-store"  # every answer is per user
+        return response
+
     def _check_access(self):
         """Enforce authentication for all Assistant API endpoints.
         

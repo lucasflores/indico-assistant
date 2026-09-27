@@ -19,7 +19,7 @@ SOFT_TIME_LIMIT = 120
              soft_time_limit=SOFT_TIME_LIMIT, time_limit=SOFT_TIME_LIMIT + 30)
 def answer_chat(job_id, user_id, session_id, message):
     from indico_assistant.services.chat import get_chat_service, jobs
-    from indico_assistant.services.chat.service import ChatServiceError
+    from indico_assistant.services.chat.service import ChatServiceError, EventAccessDeniedError
 
     try:
         result = get_chat_service().answer(user_id, session_id, message)
@@ -27,6 +27,9 @@ def answer_chat(job_id, user_id, session_id, message):
         db.session.rollback()
         jobs.finish(job_id, status='failed', error='TIMEOUT',
                     message='That took too long to answer. Try a narrower question.')
+    except EventAccessDeniedError:
+        db.session.rollback()
+        jobs.finish(job_id, status='failed', error='ACCESS_DENIED', message='You no longer have access to this event')
     except ChatServiceError as exc:
         db.session.rollback()
         jobs.finish(job_id, status='failed', error='QUERY_PROCESSING_ERROR', message=str(exc))

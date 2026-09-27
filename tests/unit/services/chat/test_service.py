@@ -118,15 +118,33 @@ class TestChatService:
             return "Answer", {"confidence": 0.9}
 
         with patch.object(chat_service, '_load_user', return_value=user), \
+                patch.object(chat_service, '_validate_event_access') as validate, \
                 patch.object(chat_service, '_process_with_nl2sql', side_effect=pipeline), \
                 patch('indico_assistant.services.chat.service.db') as db:
             db.session.commit.side_effect = lambda: calls.append('commit')
             result = chat_service.answer(123, session_id, "hi")
 
         assert calls == ['commit', 'pipeline']  # reads committed before any LLM call
+        validate.assert_called_once_with(user, 456)
         assert result.response == "Answer" and result.session_id == session_id
         mock_session_manager.add_assistant_message.assert_called_once()
         mock_session_manager.commit.assert_called_once()
+
+    def test_submit_refuses_another_event_scope(self, chat_service, mock_session_manager, user):
+        mock_session_manager.get_session.return_value = MagicMock(event_id=None)
+        mock_session_manager.validate_session_ownership.return_value = True
+        with pytest.raises(EventAccessDeniedError):
+            chat_service.submit_message(user, "hi", session_id=uuid4(), event_id=456)
+        mock_session_manager.add_user_message.assert_not_called()
+
+    def test_answer_refuses_if_access_was_revoked_while_queued(self, chat_service, mock_session_manager):
+        mock_session_manager.get_session.return_value = MagicMock(event_id=456)
+        with patch.object(chat_service, '_load_user', return_value=MagicMock()), \
+                patch.object(chat_service, '_validate_event_access', side_effect=EventAccessDeniedError(456)), \
+                patch.object(chat_service, '_process_with_nl2sql') as pipeline:
+            with pytest.raises(EventAccessDeniedError):
+                chat_service.answer(123, uuid4(), "hi")
+        pipeline.assert_not_called()
 
     def test_answer_for_vanished_session(self, chat_service, mock_session_manager):
         mock_session_manager.get_session.return_value = None
