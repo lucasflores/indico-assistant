@@ -4,6 +4,7 @@ Feature: 004-chat-api
 """
 
 import random
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -34,6 +35,13 @@ def test_shared_between_limiter_instances(user_id):
     first, second = RateLimiter({'chat': ('1 per minute',)}), RateLimiter({'chat': ('1 per minute',)})
     assert first.check_rate(user_id).allowed
     assert not second.check_rate(user_id).allowed
+
+
+def test_concurrent_requests_cannot_overshoot(user_id):
+    limiter = RateLimiter({'chat': ('5 per minute',)})
+    with ThreadPoolExecutor(20) as pool:
+        allowed = list(pool.map(lambda _: limiter.check_rate(user_id).allowed, range(20)))
+    assert allowed.count(True) == 5
 
 
 def test_endpoint_types_are_independent_and_unknown_means_chat(user_id):

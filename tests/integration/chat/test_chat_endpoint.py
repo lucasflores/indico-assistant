@@ -41,8 +41,9 @@ def service():
 def jobs():
     store = {}
     with patch.object(chat_module.jobs, 'create', side_effect=lambda user_id, session_id: 'job1') as create, \
-            patch.object(chat_module.jobs, 'get', side_effect=store.get):
-        yield store, create
+            patch.object(chat_module.jobs, 'get', side_effect=store.get), \
+            patch.object(chat_module.jobs, 'finish') as finish:
+        yield store, create, finish
 
 
 @pytest.fixture
@@ -66,6 +67,16 @@ class TestPostChat:
                                                        session_id=None, event_id=7)
         jobs[1].assert_called_once_with(123, session_id)
         answer_task.delay.assert_called_once_with("job1", 123, session_id, "What events are tomorrow?")
+
+    def test_broker_down_fails_the_job(self, request_, service, jobs, answer_task):
+        request_.get_json.return_value = {"message": "hi"}
+        service.submit_message.return_value = (uuid4(), False)
+        answer_task.delay.side_effect = ConnectionError('broker down')
+
+        response, status = _controller(RHChat)._process()
+
+        assert (status, response.get_json()["error"]) == (503, "QUEUE_UNAVAILABLE")
+        assert jobs[2].call_args.kwargs['status'] == 'failed'
 
     @pytest.mark.parametrize('body', [{}, {"message": ""}])
     def test_validation(self, request_, service, body):

@@ -85,7 +85,14 @@ class RHChat(RHChatBase):
         from indico_assistant.tasks.chat import answer_chat
 
         job_id = jobs.create(self.user.id, session_id)
-        answer_chat.delay(job_id, self.user.id, session_id, chat_request.message)
+        try:
+            answer_chat.delay(job_id, self.user.id, session_id, chat_request.message)
+        except Exception:
+            # the message is saved; the answer never queued
+            logger.exception("Could not queue chat answer %s", job_id)
+            jobs.finish(job_id, status="failed", error="QUEUE_UNAVAILABLE", message="The assistant is busy")
+            return self._error_response("QUEUE_UNAVAILABLE", "The assistant is unavailable, try again shortly",
+                                        status=503)
         return jsonify({
             "job_id": job_id,
             "session_id": str(session_id),
