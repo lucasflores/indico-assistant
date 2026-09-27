@@ -36,6 +36,7 @@ from indico_assistant.services.nl2sql.corrector import ErrorCorrector
 from indico_assistant.services.nl2sql.executor import QueryExecutor
 from indico_assistant.services.nl2sql.formatter import ResultFormatter
 from indico_assistant.services.nl2sql.generator import SQLGenerator
+from indico_assistant.services.llm.service import collect_calls
 from indico_assistant.services.nl2sql.models import (
     PipelineError,
     PipelineErrorType,
@@ -287,7 +288,17 @@ class NL2SQLPipeline:
         else:
             yield None
 
-    def process(
+    def process(self, *args: Any, **kwargs: Any) -> PipelineResult:
+        """Answer one question (arguments as in _process); the result lists every LLM call it made.
+
+        Collected per thread/task (collect_calls), so concurrent questions never mix their costs.
+        """
+        with collect_calls() as calls:
+            result = self._process(*args, **kwargs)
+        result.llm_calls = calls
+        return result
+
+    def _process(
         self,
         question: str,
         user_id: int | None,

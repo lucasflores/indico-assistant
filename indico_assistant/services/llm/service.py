@@ -8,6 +8,7 @@ Feature: 005-langfuse-observability (T019) - Added tracing instrumentation
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import threading
@@ -20,12 +21,32 @@ from pydantic import BaseModel
 from indico_assistant.services.llm.errors import LLMError, ErrorType, _map_exception_to_error
 from indico_assistant.services.llm.models import LLMResponse, HealthStatus
 
+_CLIENT_SETTINGS = ("provider", "model", "base_url", "api_key")  # what the client is built from
+
 # Completion records of the generate() call running in this thread/task. Instructor calls hooks in the
 # calling thread, so concurrent calls on one shared client each see only their own completions.
 # Holds (records, response model name, requested model).
 _current_calls: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("llm_current_calls", default=None)
 
+# Records of every generate()/health_check() inside a collect_calls() block (e.g. one chat question).
+_request_calls: contextvars.ContextVar[list | None] = contextvars.ContextVar("llm_request_calls", default=None)
+
 CALL_LOG_MAX = 1000  # the shared call_log keeps only the most recent records
+
+
+@contextlib.contextmanager
+def collect_calls():
+    """Collect the completion records of every LLM call made inside the block, in this thread/task.
+
+    Thread-safe per-request cost accounting (one chat question makes several generate() calls):
+    ``with collect_calls() as calls: pipeline work...`` then ``calls`` holds them all.
+    """
+    calls: list[dict[str, Any]] = []
+    token = _request_calls.set(calls)
+    try:
+        yield calls
+    finally:
+        _request_calls.reset(token)
 
 if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
@@ -95,11 +116,12 @@ class LLMService:
         self._plugin = plugin
         self._client = None
         self._client_lock = threading.Lock()
+        self._client_key: tuple | None = None
         self._logger = logger
         self._tracer: Optional["Tracer"] = None
-        # Recent completion_record()s across calls, for single-threaded callers such as the eval
-        # harness (clear, run, read). Bounded: the service lives as long as the process. Per-call
-        # records are on each LLMResponse (.calls), which is what concurrent callers should use.
+        # Recent completion_record()s across all calls in this process, for debugging. Bounded (the
+        # service lives as long as the process) and mixed across threads: per-call records are on each
+        # LLMResponse (.calls), per-request ones come from collect_calls() (e.g. PipelineResult.llm_calls).
         self.call_log: deque[dict[str, Any]] = deque(maxlen=CALL_LOG_MAX)
     
     def _record_completion(self, completion: Any) -> None:
@@ -107,9 +129,27 @@ class LLMService:
         if current is None:  # a completion made outside generate()/health_check()
             return
         calls, stage, model = current
-        record = completion_record(stage, model, completion)
+        self._store(calls, completion_record(stage, model, completion))
+
+    def _record_failed_attempt(self, error: Exception, **_: Any) -> None:
+        """An attempt that died in transport (timeout, dropped connection) leaves no completion, but the
+        router may still have run and billed it: record it with unknown cost. Validation failures are
+        already recorded through their completion."""
+        import openai
+
+        current = _current_calls.get()
+        if current is None or not isinstance(error, openai.APIConnectionError):  # includes APITimeoutError
+            return
+        calls, stage, model = current
+        self._store(calls, {"stage": stage, "requested_model": model, "served_model": None,
+                            "prompt_tokens": None, "completion_tokens": None, "cost_usd": None,
+                            "error": type(error).__name__})
+
+    def _store(self, calls: list[dict[str, Any]], record: dict[str, Any]) -> None:
         calls.append(record)
         self.call_log.append(record)
+        if (request := _request_calls.get()) is not None:
+            request.append(record)
 
     def set_tracer(self, tracer: "Tracer") -> None:
         """Set tracer for observability instrumentation (T019).
@@ -136,7 +176,7 @@ class LLMService:
             "max_retries": settings.get("max_retries", 2),
         }
     
-    def _create_client(self):
+    def _create_client(self, settings: dict[str, Any]):
         """Create an Instructor client based on current settings.
         
         Returns:
@@ -148,7 +188,6 @@ class LLMService:
         """
         from indico_assistant.services.llm.factory import create_instructor_client
         
-        settings = self._get_settings()
         return create_instructor_client(
             provider=settings["provider"],
             model=settings["model"],
@@ -156,21 +195,22 @@ class LLMService:
             api_key=settings["api_key"],
         )
     
-    def _ensure_client(self) -> tuple[Any | None, LLMError | None]:
-        """Ensure client is initialized, returning error if not.
-        
+    def _ensure_client(self, settings: dict[str, Any] | None = None) -> tuple[Any | None, LLMError | None]:
+        """The client for the current settings, (re)built when provider, model, URL or key change.
+
         Returns:
             Tuple of (client, error). If client is None, error is set.
         """
-        if self._client is not None:
+        settings = settings or self._get_settings()
+        key = tuple(settings[k] for k in _CLIENT_SETTINGS)
+        if self._client is not None and self._client_key == key:
             return self._client, None
         with self._client_lock:  # first calls from several threads build one client, not one each
-            if self._client is not None:
+            if self._client is not None and self._client_key == key:
                 return self._client, None
-            return self._create_client_locked()
+            return self._create_client_locked(settings, key)
 
-    def _create_client_locked(self) -> tuple[Any | None, LLMError | None]:
-        settings = self._get_settings()
+    def _create_client_locked(self, settings: dict[str, Any], key: tuple) -> tuple[Any | None, LLMError | None]:
         if not settings["provider"]:
             return None, LLMError(
                 error_type=ErrorType.NOT_CONFIGURED,
@@ -178,10 +218,13 @@ class LLMService:
             )
         
         try:
-            self._client = self._create_client()
-            # One hook for the client's lifetime; it records into the calling generate()'s own list.
-            self._client.on("completion:response", self._record_completion)
-            return self._client, None
+            client = self._create_client(settings)
+            # Hooks for the client's lifetime; they record into the calling generate()'s own list.
+            # Registered before the client is cached: a client without them would never record costs.
+            client.on("completion:response", self._record_completion)
+            client.on("completion:error", self._record_failed_attempt)
+            self._client, self._client_key = client, key
+            return client, None
         except Exception as e:
             self._logger.warning(
                 "Failed to create LLM client",
@@ -227,7 +270,7 @@ class LLMService:
         effective_timeout = timeout if timeout is not None else settings["timeout_seconds"]
         
         # Ensure client is ready
-        client, error = self._ensure_client()
+        client, error = self._ensure_client(settings)
         if error is not None:
             latency_ms = int((time.time() - start_time) * 1000)
             return LLMResponse.error_response(error=error, latency_ms=latency_ms, retries=0)
@@ -291,7 +334,7 @@ class LLMService:
                     "provider": settings["provider"],
                     "model": settings["model"],
                     "latency_ms": latency_ms,
-                    "retries": retries,
+                    "retries": max(len(calls) - 1, 0),
                     "response_model": response_model.__name__,
                     "served_model": calls[-1]["served_model"] if calls else None,
                 }
@@ -300,7 +343,7 @@ class LLMService:
             return LLMResponse.success_response(
                 result=result,
                 latency_ms=latency_ms,
-                retries=retries,
+                retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
                 calls=calls,
             )
             
@@ -341,7 +384,7 @@ class LLMService:
             return LLMResponse.error_response(
                 error=error,
                 latency_ms=latency_ms,
-                retries=retries,
+                retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
                 calls=calls,
             )
         finally:
@@ -377,7 +420,7 @@ class LLMService:
         start_time = time.time()
         
         # Ensure client is ready
-        client, error = self._ensure_client()
+        client, error = self._ensure_client(settings)
         if error is not None:
             return HealthStatus(
                 status="unavailable",
@@ -398,7 +441,8 @@ class LLMService:
                 messages=[{"role": "user", "content": "Reply with exactly: ok"}],
                 model=settings["model"],
                 response_model=HealthCheckResponse,
-                timeout=5.0,  # Short timeout for health check
+                timeout=settings["timeout_seconds"],  # a routed call can take longer than a fixed 5 s
+                max_tokens=16,  # never an uncapped completion for a probe
             )
             
             latency_ms = int((time.time() - start_time) * 1000)

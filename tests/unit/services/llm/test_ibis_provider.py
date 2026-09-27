@@ -1,9 +1,13 @@
 """ibis provider: real instructor + openai client against a fake ibis transport."""
 
 import json
+import threading
+import time
+from unittest.mock import MagicMock
 
 import httpx
 import openai
+import pytest
 from pydantic import BaseModel
 
 from indico_assistant.services.llm import factory
@@ -14,12 +18,8 @@ class Answer(BaseModel):
     city: str
 
 
-class _Settings(dict):
-    pass
-
-
 class _Plugin:
-    settings = _Settings(
+    settings = dict(
         llm_provider="ibis",
         llm_model="ibis/Balanced",
         llm_base_url="http://ibis.test",
@@ -54,14 +54,11 @@ def test_ibis_generate_records_every_billed_attempt(monkeypatch):
         requests.append((request.url.path, json.loads(request.content)))
         return httpx.Response(200, json=replies[len(requests) - 1])
 
-    real_openai = openai.OpenAI
-    monkeypatch.setattr(
-        factory, "OpenAI",
-        lambda **kw: real_openai(http_client=httpx.Client(transport=httpx.MockTransport(handler)), **kw),
-    )
+    _fake_ibis(monkeypatch, handler)
 
     llm = LLMService(_Plugin())
     response = llm.generate("Capital of Portugal?", Answer)
+    assert response.retries == 1 and len(response.calls) == 2  # retries agree with the records
 
     assert response.success and response.result.city == "Lisbon"
     # ibis refuses these fields with a 400; MD_JSON must never send them
@@ -95,8 +92,6 @@ def _fake_ibis(monkeypatch, handler):
 def test_concurrent_calls_on_one_service_keep_their_own_records(monkeypatch):
     """The service (and its client) is shared per process; overlapping calls must not see each other's
     completions (they used to: each call hooked the shared client, so every hook saw every completion)."""
-    import threading
-
     both_in_flight = threading.Barrier(2, timeout=5)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -137,8 +132,6 @@ def test_call_log_is_bounded(monkeypatch):
 
 
 def test_unsupported_provider_message_lists_ibis():
-    import pytest
-
     with pytest.raises(ValueError, match="ollama, huggingface, openai, ibis"):
         factory.create_instructor_client("ibsi", "m")
 
@@ -152,13 +145,9 @@ def test_health_check_completion_is_recorded(monkeypatch):
 
 
 def test_first_calls_from_several_threads_build_one_client(monkeypatch):
-    import threading
-    import time
-    from unittest.mock import MagicMock
-
     built = []
 
-    def slow_create(self):
+    def slow_create(self, settings):
         time.sleep(0.05)  # widen the window in which a second thread could also build one
         built.append(1)
         return MagicMock()
@@ -171,3 +160,61 @@ def test_first_calls_from_several_threads_build_one_client(monkeypatch):
     for t in threads:
         t.join()
     assert len(built) == 1
+
+
+def test_a_client_whose_hooks_fail_is_not_cached(monkeypatch):
+    """Otherwise every later call would run without recording any cost."""
+    broken = MagicMock()
+    broken.on.side_effect = RuntimeError("no hooks in this instructor")
+    good = MagicMock()
+    clients = iter([broken, good])
+    monkeypatch.setattr(LLMService, "_create_client", lambda self, settings: next(clients))
+    llm = LLMService(_Plugin())
+    assert llm._ensure_client()[0] is None
+    assert llm._ensure_client()[0] is good
+
+
+def test_switching_provider_rebuilds_the_client(monkeypatch):
+    monkeypatch.setattr(LLMService, "_create_client", lambda self, settings: MagicMock())
+    plugin = _Plugin()
+    plugin.settings = dict(_Plugin.settings)
+    llm = LLMService(plugin)
+    first = llm._ensure_client()[0]
+    assert llm._ensure_client()[0] is first
+    plugin.settings.update(llm_provider="openai", llm_base_url="https://openrouter.test/v1")
+    assert llm._ensure_client()[0] is not first  # mode and base URL follow the admin's change
+
+
+def test_attempt_lost_in_transport_is_recorded(monkeypatch):
+    def handler(request):
+        raise httpx.ReadTimeout("slow dial", request=request)
+
+    _fake_ibis(monkeypatch, handler)
+    response = LLMService(_Plugin()).generate("Capital of Portugal?", Answer)
+    assert not response.success
+    assert response.calls and response.calls[0]["cost_usd"] is None
+    assert response.calls[0]["error"] in ("APITimeoutError", "APIConnectionError")
+
+
+def test_collect_calls_gathers_a_request_across_generate_calls(monkeypatch):
+    from indico_assistant.services.llm.service import collect_calls
+
+    _fake_ibis(monkeypatch, lambda request: httpx.Response(
+        200, json=_ibis_reply('```json\n{"city": "Lisbon"}\n```', "0.00010")))
+    llm = LLMService(_Plugin())
+    with collect_calls() as calls:
+        llm.generate("Capital of Portugal?", Answer)
+        llm.generate("Capital of Portugal, again?", Answer)
+    assert [c["cost_usd"] for c in calls] == ["0.00010", "0.00010"]
+
+
+def test_health_check_is_bounded(monkeypatch):
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=_ibis_reply('```json\n{"status": "ok"}\n```', "0.00001"))
+
+    _fake_ibis(monkeypatch, handler)
+    LLMService(_Plugin()).health_check()
+    assert bodies[0]["max_tokens"] == 16

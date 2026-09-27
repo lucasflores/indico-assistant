@@ -56,6 +56,10 @@ class PipelineResult(BaseModel):
     answer: str | None = Field(
         default=None, description="Natural language answer to the question"
     )
+    llm_calls: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="One record per LLM completion made for this question (model, tokens, cost)",
+    )
     confidence: float | None = Field(
         default=None,
         ge=0.0,
