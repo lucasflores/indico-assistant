@@ -114,8 +114,9 @@ def _register_routes():
     blueprint.add_url_rule("/chat/jobs/<job_id>", "chat_job", RHChatJob, methods=["GET"])
 
     # Chat actions: plans to confirm (Feature 019)
-    from indico_assistant.controllers.actions import RHPlan, RHPlanCancel, RHPlanConfirm
+    from indico_assistant.controllers.actions import RHChatUpload, RHPlan, RHPlanCancel, RHPlanConfirm
 
+    blueprint.add_url_rule("/chat/uploads", "chat_upload", RHChatUpload, methods=["POST"])
     blueprint.add_url_rule("/plans/<plan_id>", "plan", RHPlan, methods=["GET"])
     blueprint.add_url_rule("/plans/<plan_id>/confirm", "plan_confirm", RHPlanConfirm, methods=["POST"])
     blueprint.add_url_rule("/plans/<plan_id>/cancel", "plan_cancel", RHPlanCancel, methods=["POST"])

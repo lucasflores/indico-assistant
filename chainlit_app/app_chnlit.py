@@ -239,10 +239,28 @@ async def starters():
 @cl.on_message
 async def on_message(message: cl.Message):
     """Forward message to Indico assistant API and return response."""
-    await _ask(message.content)
+    await _ask(message.content, files=[e for e in (message.elements or []) if getattr(e, "path", None)])
 
 
-async def _ask(text: str):
+async def _upload(client: httpx.AsyncClient, auth_token: str, element) -> str:
+    """Hand a file sent in the chat to Indico (Chainlit deletes its own copy when the session ends)."""
+    with open(element.path, "rb") as data:
+        response = await client.post(
+            "/api/assistant/chat/uploads",
+            files={"file": (element.name, data, getattr(element, "mime", None) or "application/octet-stream")},
+            data={"session_id": cl.user_session.get("indico_session_id") or ""},
+            headers={"X-Assistant-Auth": auth_token},
+        )
+    if response.status_code != 201:
+        try:
+            reason = response.json().get("message")
+        except Exception:
+            reason = None
+        raise ValueError(f"{element.name} was not accepted: {reason or 'upload failed'}")
+    return response.json()["uuid"]
+
+
+async def _ask(text: str, files=()):
     """Send ``text`` to the Indico assistant as the user's next message and show the answer."""
     indico_api_url = _get_indico_api_url()
     if not indico_api_url:
@@ -269,6 +287,13 @@ async def _ask(text: str):
     
     client = await _get_http_client(indico_api_url)
     payload: dict[str, object] = {"message": text}
+    if files:
+        try:
+            payload["uploads"] = [await _upload(client, auth_token, element) for element in files]
+        except (ValueError, httpx.RequestError) as exc:
+            loading_msg.content = str(exc) if isinstance(exc, ValueError) else "The file could not be uploaded."
+            await loading_msg.send()
+            return
     session_id = cl.user_session.get("indico_session_id")
     if session_id:
         payload["session_id"] = session_id

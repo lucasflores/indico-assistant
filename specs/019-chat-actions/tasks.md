@@ -278,24 +278,24 @@ builds on these.
 
 ### Tests first
 
-- [ ] T061 [P] [US9] `tests/integration/actions/test_uploads.py`, for `POST /chat/uploads`:
+- [x] T061 [P] [US9] `tests/integration/actions/test_uploads.py`, for `POST /chat/uploads`:
   - the allowlist is checked by extension **and** content (a renamed exe is refused);
   - 25 MB and `MAX_UPLOAD_FILE_SIZE`;
   - the `File` is unclaimed with `meta.assistant_user_id`;
   - another user's uuid is refused in `POST /chat` `uploads`;
   - more than 5 files → 422.
-- [ ] T062 [P] [US9] Parity test `tests/integration/actions/test_parity_attachments.py`. `attach_link` / `attach_file` `check` matches `can_manage_attachments`: manager, submitter speaker, the `managers_only` event setting, and a subcontribution speaker with `subcontrib_speakers_can_submit`.
-- [ ] T063 [P] [US9] `tests/integration/actions/test_attach.py`:
+- [x] T062 [P] [US9] Parity test `tests/integration/actions/test_parity_attachments.py`. `attach_link` / `attach_file` `check` matches `can_manage_attachments`: manager, submitter speaker, the `managers_only` event setting, and a subcontribution speaker with `subcontrib_speakers_can_submit`.
+- [x] T063 [P] [US9] `tests/integration/actions/test_attach.py`:
   - a confirmed `attach_file` copies the bytes into an `AttachmentFile` in the default folder, fires `attachment_created` (event log entry, and our indexer queued), and leaves the chat `File` unclaimed;
   - on rollback the copied blob is deleted;
   - "my contribution" resolves to contributions where the user is a speaker, asking when there are several.
 
 ### Implementation
 
-- [ ] T064 [US9] `RHChatUpload` in `indico_assistant/controllers/actions.py` + route. Uses `File.create_from_stream`, the allowlist with content sniffing (magic bytes for pdf / zip-based office formats / png / jpg; utf-8 for txt / md), and the size limits. `ChatRequest.uploads` is validated in `indico_assistant/schemas/chat.py` + `controllers/chat.py`.
-- [ ] T065 [P] [US9] `AttachLink` and `AttachFile` in `indico_assistant/services/actions/materials.py` (R7). Copied blobs are registered with the executor for deletion on rollback.
-- [ ] T066 [US9] `Attach` → steps in `indico_assistant/services/actions/resolve.py`: resolve the target (the event, "my contribution" among speaker contributions, the contribution just created) and the uploads of the message.
-- [ ] T067 [US9] Chainlit: in `chainlit_app/.chainlit/config.toml`, enable `spontaneous_file_upload` with the dict `accept` (MIME → extensions), `max_files = 5` and `max_size_mb = 25`. In `chainlit_app/app_chnlit.py`, `on_message` uploads each `message.elements[i].path` to `/chat/uploads` first, then posts with `uploads`, and shows upload refusals with their limits (AS-4).
+- [x] T064 [US9] `RHChatUpload` in `indico_assistant/controllers/actions.py` + route. Uses `File.create_from_stream`, the allowlist with content sniffing (magic bytes for pdf / zip-based office formats / png / jpg; utf-8 for txt / md), and the size limits. `ChatRequest.uploads` is validated in `indico_assistant/schemas/chat.py` + `controllers/chat.py`.
+- [x] T065 [P] [US9] `AttachLink` and `AttachFile` in `indico_assistant/services/actions/materials.py` (R7). Copied blobs are registered with the executor for deletion on rollback.
+- [x] T066 [US9] `Attach` → steps in `indico_assistant/services/actions/resolve.py`: resolve the target (the event, "my contribution" among speaker contributions, the contribution just created) and the uploads of the message.
+- [x] T067 [US9] Chainlit: in `chainlit_app/.chainlit/config.toml`, enable `spontaneous_file_upload` with the dict `accept` (MIME → extensions), `max_files = 5` and `max_size_mb = 25`. In `chainlit_app/app_chnlit.py`, `on_message` uploads each `message.elements[i].path` to `/chat/uploads` first, then posts with `uploads`, and shows upload refusals with their limits (AS-4).
 
 ---
 

@@ -70,7 +70,7 @@ class TestChatService:
         assert chat_service.submit_message(user, "What events?") == (
             session.id, True, mock_session_manager.add_user_message.return_value.id)
         mock_session_manager.create_session.assert_called_once_with(123, None)
-        mock_session_manager.add_user_message.assert_called_once_with(session, "What events?")
+        mock_session_manager.add_user_message.assert_called_once_with(session, "What events?", None)
         mock_session_manager.commit.assert_called_once()
 
     def test_submit_to_existing_session(self, chat_service, mock_session_manager, user):

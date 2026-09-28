@@ -69,7 +69,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
                       (open_plan.draft or {}).get('topic', ''))
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
-        response = llm.generate(_prompt(user, message, open_plan, enabled), PlanDraft,
+        response = llm.generate(_prompt(user, message, open_plan, enabled, chat_session_id), PlanDraft,
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
@@ -168,7 +168,11 @@ def answered_draft(open_plan, message):
             if said in (choice['label'].lower(), str(choice['value']).lower()):
                 draft = PlanDraft.model_validate(open_plan.draft)
                 step = draft.steps[0]
-                if question['id'] == 'event':
+                if question['id'] == 'talk_target':
+                    step.target = choice['value']  # '#c<contribution id>'
+                elif question['id'] == 'event' and hasattr(step, 'target'):
+                    step.target = choice['value']
+                elif question['id'] == 'event':
                     step.meeting = choice['value']  # '#<event id>'
                 elif question['id'].startswith('talk:'):
                     for change in getattr(step, 'change_slots', ()):
@@ -193,13 +197,16 @@ def answered_draft(open_plan, message):
     return None
 
 
-def _prompt(user, message, open_plan, enabled):
+def _prompt(user, message, open_plan, enabled, chat_session_id=None):
     tz = user_timezone(user)
     lines = [
         f'User: {user.full_name} <{user.email}>',
         f'Now: {datetime.now(tz):%A %Y-%m-%d %H:%M} ({tz.zone})',
         f'Available changes: {", ".join(sorted(enabled))}',
     ]
+    from indico_assistant.services.actions.resolve import chat_uploads
+    if files := chat_uploads(chat_session_id, user):
+        lines.append('Files sent in this chat: ' + ', '.join(f.filename for f in files))
     if open_plan is not None:
         # the plan's text holds Indico content (titles, category paths): data, fenced
         shown = [open_plan.summary]

@@ -100,3 +100,21 @@ class RHPlanCancel(RHPlanBase):
                                         details={"status": ActionPlan.query.get(plan.id).effective_status},
                                         status=409)
         return jsonify({"plan_id": str(plan.id), "status": "cancelled"}), 200
+
+
+class RHChatUpload(RHPlanBase):
+    """POST /chat/uploads: keep a file sent in the chat for a later attach_file step (US9)."""
+
+    def _process(self):
+        from indico_assistant.services.actions.uploads import UploadRefused, store
+
+        upload = request.files.get("file")
+        if upload is None or not upload.filename:
+            return self._validation_error("A file is required", field="file")
+        try:
+            file = store(self.user, upload.stream, upload.filename, request.form.get("session_id"))
+        except UploadRefused as exc:
+            status = {"FILE_TOO_LARGE": 413, "UNSUPPORTED_FILE_TYPE": 415}.get(exc.code, 422)
+            return self._error_response(exc.code, str(exc), status=status)
+        return jsonify({"uuid": file.uuid, "filename": file.filename, "size": file.size,
+                        "content_type": file.content_type}), 201

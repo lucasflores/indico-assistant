@@ -113,7 +113,8 @@ class ChatService:
         user: Any,
         message: str,
         session_id: Optional[UUID] = None,
-        event_id: Optional[int] = None
+        event_id: Optional[int] = None,
+        uploads: Optional[list[dict[str, Any]]] = None
     ) -> tuple[UUID, bool, UUID]:
         """Web-request half: check access, save the user's message, commit.
 
@@ -130,7 +131,8 @@ class ChatService:
             session, created = self._get_or_create_session(session_id, user.id, event_id)
             if session.event_id:
                 self._validate_event_access(user, session.event_id)
-            user_message = self._session_manager.add_user_message(session, message)
+            user_message = self._session_manager.add_user_message(
+                session, message, {"uploads": uploads} if uploads else None)
             self._session_manager.commit()
             return session.id, created, user_message.id
         except Exception:

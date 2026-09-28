@@ -68,12 +68,20 @@ class RHChat(RHChatBase):
                 status=422
             )
 
+        from indico_assistant.services.actions.uploads import usable_upload
+
+        uploads = []
+        for uuid in chat_request.uploads:  # only the sender's own, unused uploads (FR-025)
+            if (file := usable_upload(uuid, self.user)) is None:
+                return self._validation_error("Unknown or already used upload", field="uploads")
+            uploads.append({"uuid": str(file.uuid), "filename": file.filename})
         try:
             session_id, created, message_id = get_chat_service().submit_message(
                 user=self.user,
                 message=chat_request.message,
                 session_id=chat_request.session_id,
                 event_id=chat_request.event_id,
+                uploads=uploads,
             )
         except SessionNotFoundError:
             return self._error_response("SESSION_NOT_FOUND", "Session not found", status=404)

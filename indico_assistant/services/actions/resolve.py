@@ -24,7 +24,7 @@ from indico_assistant.default_settings import DEFAULT_SETTINGS
 from indico_assistant.services.actions import ACTIONS
 from indico_assistant.services.actions.base import category_path, format_dt
 from indico_assistant.services.actions.context import local_today, user_timezone
-from indico_assistant.services.llm.models.plan import ChangeMeeting, CreateMeeting
+from indico_assistant.services.llm.models.plan import Attach, ChangeMeeting, CreateMeeting
 
 
 DEFAULT_DURATION = 30  # minutes, when neither the meeting nor its talks have one
@@ -50,7 +50,9 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
         return _create_meeting(step, user, settings, topic or step.title or '')
     if isinstance(step, ChangeMeeting):
         return _change_meeting(step, user, settings, chat_session_id)
-    raise NotImplementedError  # Attach: T066; Undo: T076
+    if isinstance(step, Attach):
+        return _attach(step, user, chat_session_id)
+    raise NotImplementedError  # Undo: T076
 
 
 # --- people (research R8) ------------------------------------------------------------------------------
@@ -628,3 +630,90 @@ def _change_meeting(step, user, settings, chat_session_id):
     _describe(steps)
     return Resolved(steps=steps, questions=questions,
                     summary=' '.join([f'Change the meeting “{event.title}” ({format_dt(event.start_dt, tz)}).', *notes]))
+
+
+# --- attaching material (US9) --------------------------------------------------------------------------
+
+TALK_WORDS = ('contribution', 'talk', 'presentation', 'slot', 'slides')
+
+
+def chat_uploads(chat_session_id, user):
+    """The files of the latest message with uploads in this chat, still usable by the user."""
+    from indico_assistant.models import ChatMessage
+    from indico_assistant.services.actions.uploads import usable_upload
+
+    if chat_session_id is None:
+        return []
+    messages = (ChatMessage.query.filter_by(session_id=chat_session_id, role='user')
+                .order_by(ChatMessage.created_at.desc()))
+    for message in messages:
+        if uploads := (message.metadata_json or {}).get('uploads'):
+            return [f for f in (usable_upload(u['uuid'], user) for u in uploads) if f is not None]
+    return []
+
+
+def my_talks(user, event=None):
+    """Talks where ``user`` is a speaker (in ``event``, else in their meetings from a month ago on)."""
+    from indico.modules.events.contributions.models.contributions import Contribution
+    from indico.modules.events.contributions.models.persons import ContributionPersonLink
+    from indico.modules.events.models.persons import EventPerson
+
+    query = (Contribution.query.filter(~Contribution.is_deleted)
+             .join(ContributionPersonLink).join(EventPerson)
+             .filter(EventPerson.user_id == user.id, ContributionPersonLink.is_speaker))
+    if event is not None:
+        query = query.filter(Contribution.event_id == event.id)
+    talks = [c for c in query if not c.event.is_deleted and c.event.end_dt > now_utc() - timedelta(days=30)]
+    return sorted(talks, key=lambda c: (c.start_dt or c.event.start_dt))
+
+
+def _attach(step, user, chat_session_id):
+    tz = user_timezone(user)
+    wanted = step.target.strip().lower()
+    wants_talk = any(word in wanted for word in TALK_WORDS)
+    here = made_in_chat(chat_session_id, user)
+    questions = []
+    target = None
+    if wants_talk:
+        talks = my_talks(user, here) or my_talks(user)
+        if len(talks) == 1:
+            target = ('contribution', talks[0])
+        elif talks:
+            questions.append({'id': 'talk_target', 'kind': 'choice', 'text': 'Which talk?',
+                              'choices': [{'value': f'#c{t.id}', 'label': f'{t.title} ({_event_label(t.event, tz)})',
+                                           'note': None} for t in talks[:MAX_CHOICES]]})
+        else:
+            return Resolved(refusal='I could not find a talk where you are a speaker.')
+    elif wanted.startswith('#c') and wanted[2:].isdigit():
+        from indico.modules.events.contributions.models.contributions import Contribution
+        target = ('contribution', Contribution.get(int(wanted[2:]), is_deleted=False))
+    else:
+        name = wanted.removeprefix('the ').removesuffix(' meeting') if wanted not in IT else wanted
+        event, question = find_meeting(name, user, chat_session_id)
+        if question:
+            questions.append(question)
+        elif event is None:
+            return Resolved(refusal=f'I could not find the meeting “{step.target}”.')
+        else:
+            target = ('event', event)
+
+    files = chat_uploads(chat_session_id, user) if step.upload or not step.url else []
+    if not files and not step.url:
+        return Resolved(refusal='I did not find a file to attach. Send it in the chat together with your message.')
+    steps = []
+    if target is not None:
+        kind, obj = target
+        for file in files:
+            steps.append(_step(len(steps) + 1, 'attach_file', {'target_type': kind, 'target_id': obj.id,
+                                                               'upload_uuid': str(file.uuid), 'title': step.title}))
+        if step.url:
+            steps.append(_step(len(steps) + 1, 'attach_link', {'target_type': kind, 'target_id': obj.id,
+                                                               'url': step.url, 'title': step.title}))
+        for s in steps:  # the material page's own check, before anything is shown (US9 AS-2)
+            action = ACTIONS[s['action']]
+            if reason := action.check(user, action.Args.model_validate(s['args'])):
+                return Resolved(refusal=reason)
+    _describe(steps)
+    what = ', '.join(f.filename for f in files) or step.url
+    where = f' to “{target[1].title}”' if target else ''
+    return Resolved(steps=steps, questions=questions, summary=f'Attach {what}{where}.')
