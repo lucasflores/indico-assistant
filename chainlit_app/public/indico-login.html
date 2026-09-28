@@ -25,9 +25,6 @@
     fetch("/auth/jwt", { method: "POST", headers: { Authorization: "Bearer " + data.token }, credentials: "include" })
       .then(function (response) {
         if (!response.ok) { post({ type: "login_failed", status: response.status }); return; }
-        if (data.theme === "light" || data.theme === "dark") {
-          try { localStorage.setItem("vite-ui-theme", data.theme); } catch (e) {}
-        }
         location.replace(data.threadId ? "/thread/" + encodeURIComponent(data.threadId) : "/");
       }, function () { post({ type: "login_failed", status: 0 }); });
   });

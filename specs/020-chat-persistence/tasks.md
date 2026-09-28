@@ -338,17 +338,17 @@ and waiting plans come back. Focus is not stolen.
 
 ## Phase 8: Polish and cross-cutting
 
-- [ ] T048 [P] Rework `chainlit_app/public/widget.css` as the full app's `custom_css`, toned to Indico:
+- [x] T048 [P] Rework `chainlit_app/public/widget.css` as the full app's `custom_css`, toned to Indico:
   - header, colours and fonts in light and dark (FR-006e);
   - the page's `theme` message switches the frame's theme.
 
   Check against an Indico event page in both modes.
-- [ ] T049 Retire the Copilot paths:
+- [x] T049 Retire the Copilot paths:
   - set `CHAINLIT_CUSTOM_AUTH=true` next to `CHAINLIT_AUTH_SECRET` for the Chainlit server (R3), in the
     `indico-dev-server` skill and in `docs/DEPLOYMENT.md`;
   - then remove `header_auth_callback`, the `auth_token` fallback and `getPersistedThreadId`;
   - confirm that a request without the cookie is refused (a websocket connect without the cookie → refused).
-- [ ] T050 [P] Documentation:
+- [x] T050 [P] Documentation:
   - `README.md` "Chat widget" section: the panel, Past Chats, "this event" follows the page;
   - `docs/DEPLOYMENT.md`: same-site hosting, or `CHAINLIT_COOKIE_SAMESITE=none` with HTTPS (the requirement
     for Makoto); `allow_origins` set to the Indico origin; `CHAINLIT_CUSTOM_AUTH`; the 2.12.0 upgrade;
