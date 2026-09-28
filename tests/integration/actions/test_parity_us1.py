@@ -79,3 +79,24 @@ def test_create_event(action_allows, create_category, create_user, setup, expect
     assert category.can_create_events(user) is expected
     assert action_allows(ACTIONS['create_event'], user, category_id=category.id, title='Sync', start_dt=LATER,
                          end_dt=LATER + __import__('datetime').timedelta(minutes=30), timezone='UTC') is expected
+
+
+@pytest.mark.parametrize('unlisted', [False, True])
+@pytest.mark.parametrize('setup', ['admin', 'moderated', 'move_request_permission', 'can_create', 'restricted'])
+def test_propose_event(action_allows, create_category, create_user, dummy_event, unlisted, setup):
+    # RHMoveEvent's rule for the target category (create or propose), plus creating the unlisted event first
+    from indico.modules.categories.util import can_create_unlisted_events
+    from indico.modules.events.settings import unlisted_events_settings
+    unlisted_events_settings.set('enabled', unlisted)
+    category = create_category(title='Board', event_creation_mode=EventCreationMode.restricted)
+    user = create_user(21, admin=setup == 'admin')
+    if setup == 'moderated':
+        category.event_creation_mode = EventCreationMode.moderated
+    elif setup == 'move_request_permission':
+        category.update_principal(user, permissions={'event_move_request'})
+    elif setup == 'can_create':
+        category.update_principal(user, permissions={'create'})
+    page = can_create_unlisted_events(user) and (category.can_create_events(user) or category.can_propose_events(user))
+    ours = action_allows(ACTIONS['propose_event'], user, category_id=category.id, title='Sync', start_dt=LATER,
+                         end_dt=LATER + __import__('datetime').timedelta(minutes=30), timezone='UTC')
+    assert ours == page

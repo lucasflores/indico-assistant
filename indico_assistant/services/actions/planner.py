@@ -59,7 +59,8 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
         return PlanTurn(NOT_AVAILABLE)
     if open_plan is not None and (draft := answered_draft(open_plan, message)) is not None:
         # a choice offered in the plan (a button, or its label typed): no LLM needed
-        return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings)
+        return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
+                      (open_plan.draft or {}).get('topic', ''))
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
         response = llm.generate(_prompt(user, message, open_plan, enabled), PlanDraft,
@@ -67,12 +68,12 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
-    turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls, settings)
+    turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls, settings, message)
     turn.llm_calls = calls
     return turn
 
 
-def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings):
+def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, topic=''):
     from indico_assistant.services.actions import resolve
     from indico_assistant.tasks.actions import outcome_message
 
@@ -95,7 +96,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings):
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
-                                         settings=settings)
+                                         settings=settings, topic=topic)
     except NotImplementedError:
         return PlanTurn(NOT_SUPPORTED)
     if resolved.refusal:
@@ -105,7 +106,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings):
     plan, token = executor.create_plan(user, chat_session_id, steps=resolved.steps, summary=resolved.summary,
                                        questions=resolved.questions, suggestions=resolved.suggestions,
                                        supersedes=open_plan if open_plan is not None else None,
-                                       llm_calls=calls, draft=draft.model_dump(mode='json'))
+                                       llm_calls=calls, draft={**draft.model_dump(mode='json'), 'topic': topic})
     from indico_assistant.schemas.actions import PlanView
 
     reply = draft.reply or ('Here is the plan. ' + ('Please answer the questions below.' if plan.questions

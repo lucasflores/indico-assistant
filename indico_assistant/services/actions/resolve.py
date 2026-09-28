@@ -2,6 +2,7 @@
 permissions (research R8-R11). Anything ambiguous becomes a question; nothing here writes.
 """
 
+import difflib
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
@@ -12,8 +13,11 @@ from sqlalchemy.orm import undefer
 from indico.core.db import db
 from indico.modules.categories import Category
 from indico.modules.categories.models.categories import EventCreationMode
+from indico.core.db.sqlalchemy.principals import PrincipalType
 from indico.modules.categories.models.principals import CategoryPrincipal
+from indico.modules.categories.util import can_create_unlisted_events
 from indico.modules.users.util import search_users
+from indico.util.date_time import now_utc
 
 from indico_assistant.default_settings import DEFAULT_SETTINGS
 from indico_assistant.services.actions import ACTIONS
@@ -38,11 +42,11 @@ class Resolved:
     refusal: str | None = None  # the user cannot do this at all (the reason, as Indico would give it)
 
 
-def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None):
+def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None, topic=''):
     settings = {**DEFAULT_SETTINGS, **(settings or {})}
     step = draft.steps[0]
     if isinstance(step, CreateMeeting):
-        return _create_meeting(step, user, settings)
+        return _create_meeting(step, user, settings, topic or step.title or '')
     raise NotImplementedError  # ChangeMeeting: T060; Attach: T066; Undo: T076
 
 
@@ -69,34 +73,122 @@ def _person_label(user):
 # --- categories (research R9) ------------------------------------------------------------------------
 
 
-def creatable_categories(user):
-    """Categories where ``user`` may create events, as Indico decides it (``can_create_events``).
+def _candidates(user, permission, modes):
+    """Categories where ``user`` might be allowed ``permission``, to be filtered with Indico's own check.
 
     Indico has no helper for this list; candidates come from the user's category permissions (and the
-    subcategories of those they fully manage) and from open categories, then Indico's own check filters
-    them. ponytail: grants through multipass groups are not candidates; add them if an instance uses them.
+    subcategories of those they fully manage) and from categories whose mode allows it to everyone.
+    ponytail: grants through multipass groups are not candidates; add them if an instance uses them.
     """
     query = Category.query.filter(~Category.is_deleted).options(undefer('chain_titles'))
-    if not user.is_admin:
-        groups = [g.id for g in user.local_groups]
-        roles = [r.id for r in user.category_roles]
-        principals = CategoryPrincipal.query.filter(
-            or_(CategoryPrincipal.user_id == user.id,
-                CategoryPrincipal.local_group_id.in_(groups) if groups else False,
-                CategoryPrincipal.category_role_id.in_(roles) if roles else False),
-            or_(CategoryPrincipal.full_access, CategoryPrincipal.permissions.any('create'))).all()
-        ids = {p.category_id for p in principals}
-        if managed := [p.category_id for p in principals if p.full_access]:
-            subtree = Category.get_subtree_ids_cte(managed)
-            ids |= {row.id for row in db.session.query(subtree.c.id)}
-        query = query.filter(or_(Category.id.in_(ids), Category.event_creation_mode == EventCreationMode.open))
-    return sorted((c for c in query if c.can_create_events(user)), key=category_path)
+    if user.is_admin:
+        return query
+    groups = [g.id for g in user.local_groups]
+    roles = [r.id for r in user.category_roles]
+    principals = CategoryPrincipal.query.filter(
+        or_(CategoryPrincipal.user_id == user.id,
+            CategoryPrincipal.local_group_id.in_(groups) if groups else False,
+            CategoryPrincipal.category_role_id.in_(roles) if roles else False),
+        or_(CategoryPrincipal.full_access, CategoryPrincipal.permissions.any(permission))).all()
+    ids = {p.category_id for p in principals}
+    if managed := [p.category_id for p in principals if p.full_access]:
+        subtree = Category.get_subtree_ids_cte(managed)
+        ids |= {row.id for row in db.session.query(subtree.c.id)}
+    return query.filter(or_(Category.id.in_(ids), Category.event_creation_mode.in_(modes)))
 
 
-def _match_category(name, categories):
+def creatable_categories(user):
+    """Categories where ``user`` may create events, as Indico decides it (``can_create_events``)."""
+    candidates = _candidates(user, 'create', [EventCreationMode.open])
+    return sorted((c for c in candidates if c.can_create_events(user)), key=category_path)
+
+
+def proposable_categories(user):
+    """Categories where ``user`` may only propose events (``can_propose_events``, research R4)."""
+    candidates = _candidates(user, 'event_move_request', [EventCreationMode.moderated])
+    return sorted((c for c in candidates if c.can_propose_events(user) and not c.can_create_events(user)),
+                  key=category_path)
+
+
+@dataclass(eq=False)  # (options are de-duplicated by identity)
+class CategoryOption:
+    category: Category
+    propose: bool = False
+    reason: str | None = None
+
+
+def _embed(texts):
+    """Sentence embeddings with the plugin's local model, or None when it is not available."""
+    try:
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.embedding import EmbeddingService
+        return EmbeddingService(AssistantPlugin.instance).embed_batch(texts)
+    except Exception:
+        return None
+
+
+def _cosine(a, b):
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = (sum(x * x for x in a) * sum(y * y for y in b)) ** 0.5
+    return dot / norm if norm else 0.0
+
+
+TOPIC_MATCH = 0.6  # similarity above which a past meeting counts as "on the same topic"
+
+
+def category_options(user, topic=''):
+    """Where ``user`` can put a meeting, most relevant first (FR-013): categories holding more of their
+    meetings of the last year first, then the one whose past meeting is most like this request."""
+    from indico.modules.users.util import get_linked_events
+
+    create = creatable_categories(user)
+    propose = proposable_categories(user) if can_create_unlisted_events(user) else []
+    mine = {}
+    for event in get_linked_events(user, dt=now_utc() - timedelta(days=365)):
+        if not event.is_deleted and event.category_id is not None:
+            mine.setdefault(event.category_id, []).append(event.title)
+    similar = {}
+    if topic and (titles := sorted({t for ts in mine.values() for t in ts})):
+        if (vectors := _embed([topic, *titles])) is not None:
+            scores = {t: _cosine(vectors[0], v) for t, v in zip(titles, vectors[1:])}
+            for category_id, ts in mine.items():
+                best = max(ts, key=scores.get)
+                if scores[best] >= TOPIC_MATCH:
+                    similar[category_id] = (scores[best], best)
+    options = [CategoryOption(c) for c in create] + [CategoryOption(c, propose=True) for c in propose]
+    options.sort(key=lambda o: (-len(mine.get(o.category.id, ())), -similar.get(o.category.id, (0, ''))[0],
+                                o.propose, category_path(o.category)))
+    if options and (count := len(mine.get(options[0].category.id, ()))):
+        reason = f'{count} of your meetings in the last year {"is" if count == 1 else "are"} here'
+        if like := similar.get(options[0].category.id):
+            reason += f', like “{like[1]}”'
+        options[0].reason = reason
+    return options
+
+
+def _match_category(name, options):
+    """(options, certain): certain only for a name that is in the category's title or path; a spelling
+    that is merely close is offered back, never picked (US3 AS-3)."""
     wanted = name.strip().lower()
-    exact = [c for c in categories if wanted in (c.title.lower(), category_path(c).lower())]
-    return exact or [c for c in categories if wanted in category_path(c).lower()]
+    paths = {category_path(o.category).lower(): o for o in options}
+    exact = [o for o in options if wanted in (o.category.title.lower(), category_path(o.category).lower())]
+    if exact:
+        return exact, True
+    if partial := [o for p, o in paths.items() if wanted in p]:
+        return partial, True
+    titles = {o.category.title.lower(): o for o in options}
+    close = difflib.get_close_matches(wanted, list(titles) + list(paths), n=MAX_CHOICES, cutoff=0.6)
+    return list(dict.fromkeys(titles.get(c) or paths[c] for c in close)), False
+
+
+def _who_to_ask():
+    """The managers of the top category (who can grant creation rights), else the admins."""
+    root = Category.get_root()
+    managers = sorted({entry.principal for entry in root.acl_entries
+                       if entry.full_access and entry.type == PrincipalType.user}, key=lambda u: u.full_name)
+    if managers:
+        return ', '.join(f'{u.full_name} <{u.email}>' for u in managers[:3])
+    return 'an Indico administrator'
 
 
 # --- times (research R11) ----------------------------------------------------------------------------
@@ -130,13 +222,17 @@ def resolve_time(text):
 # --- a new meeting -----------------------------------------------------------------------------------
 
 
-def _create_meeting(step, user, settings):
+def _create_meeting(step, user, settings, topic):
     from indico_assistant.services.actions.teams import teams_plugin, tenant_email
 
-    categories = creatable_categories(user)
-    if not categories:
-        return Resolved(refusal='You cannot create events in any category of this Indico. A category manager '
-                                'can give you that right.')
+    options = category_options(user, topic)
+    if not options:
+        if blocked := proposable_categories(user):
+            where = ', '.join(category_path(c) for c in blocked[:3])
+            return Resolved(refusal=f'You can only propose events in {where}, and proposing needs unlisted events, '
+                                    f'which are not enabled for you on this Indico. Ask {_who_to_ask()}.')
+        return Resolved(refusal=f'You cannot create events in any category of this Indico. To get that right, ask '
+                                f'{_who_to_ask()}.')
     questions, notes = [], []
 
     # who
@@ -167,15 +263,16 @@ def _create_meeting(step, user, settings):
         slots = [(slot, who) for (slot, _), who in zip(slots, [user, *invitees])]
 
     # where
-    category = None
+    chosen = None
     if step.category:
-        matches = _match_category(step.category, categories)
-        category = matches[0] if len(matches) == 1 else None
-        if category is None:
-            questions.append(_category_question(matches or categories,
+        matches, certain = _match_category(step.category, options)
+        chosen = matches[0] if certain and len(matches) == 1 else None
+        if chosen is None:
+            questions.append(_category_question(matches or options,
                                                 f'Which category did you mean by “{step.category}”?'))
     else:
-        questions.append(_category_question(categories, 'Which category should the meeting go in?'))
+        questions.append(_category_question(options, 'Which category should the meeting go in?'))
+    category = chosen.category if chosen else None
 
     # when
     tz = user_timezone(user)
@@ -196,7 +293,7 @@ def _create_meeting(step, user, settings):
 
     others = [*invitees, *(s for _, s in slots if s and s != user and s not in invitees)]
     title = step.title or _default_title(others, user)
-    steps = [_step(1, 'create_event', {
+    steps = [_step(1, 'propose_event' if chosen and chosen.propose else 'create_event', {
         'category_id': category.id if category else None, 'title': title, 'description': step.description or '',
         'start_dt': start, 'end_dt': start + timedelta(minutes=minutes) if start else None, 'timezone': tz.zone,
     })]
@@ -231,13 +328,21 @@ def _create_meeting(step, user, settings):
     when = f', {format_dt(start, tz)}' if start else ''
     where = f' in {category_path(category)}' if category else ''
     kind = 'Teams meeting' if step.teams and teams_plugin() else 'meeting'
-    summary = ' '.join([f'Create the {kind} “{title}”{when}{where}.', *notes])
+    verb = 'Propose' if chosen and chosen.propose else 'Create'
+    if chosen and chosen.propose:
+        notes.insert(0, 'It needs approval by the category\'s managers, and stays unlisted until then.')
+    summary = ' '.join([f'{verb} the {kind} “{title}”{when}{where}.', *notes])
     return Resolved(steps=steps, summary=summary, questions=questions)
 
 
-def _category_question(categories, text):
+def _category_question(options, text):
+    def note(option):
+        if option.reason:
+            return f'suggested: {option.reason}'
+        return 'propose (needs approval)' if option.propose else None
     return {'id': 'category', 'kind': 'choice', 'text': text,
-            'choices': [{'value': str(c.id), 'label': category_path(c), 'note': None} for c in categories[:MAX_CHOICES]]}
+            'choices': [{'value': str(o.category.id), 'label': category_path(o.category), 'note': note(o)}
+                        for o in options[:MAX_CHOICES]]}
 
 
 def _default_title(invitees, user):
