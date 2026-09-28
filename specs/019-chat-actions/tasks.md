@@ -254,19 +254,19 @@ builds on these.
 
 ### Tests first
 
-- [ ] T056 [P] [US6] Parity tests in `tests/integration/actions/test_parity_updates.py`:
+- [x] T056 [P] [US6] Parity tests in `tests/integration/actions/test_parity_updates.py`:
   - `update_event` matches `RHEditEventData` / `RHEditEventDates` / `RHEditEventLocation`, including the `EventDatesForm` boundary rules;
   - `update_contribution` matches `RHLegacyTimetableEditEntry`.
-- [ ] T057 [P] [US6] `tests/integration/actions/test_adjust.py`:
+- [x] T057 [P] [US6] `tests/integration/actions/test_adjust.py`:
   - "it" = the event created in this chat; otherwise `find_event` among managed events, asking when ambiguous;
   - a time change moves the contributions (`update_timetable=True`) and queues the vc_teams move (the `times_changed` signal);
   - a user who does not manage the event is refused (AS-2).
 
 ### Implementation
 
-- [ ] T058 [P] [US6] `UpdateEvent` + `FindEvent` in `indico_assistant/services/actions/events.py`. Record `before` / `after` in `StepResult`.
-- [ ] T059 [P] [US6] `UpdateContribution` in `indico_assistant/services/actions/contributions.py`: time, duration, title, speakers.
-- [ ] T060 [US6] `ChangeMeeting` → steps in `indico_assistant/services/actions/resolve.py`. The plan text shows the contributions moving with the event (AS-3).
+- [x] T058 [P] [US6] `UpdateEvent` + `FindEvent` in `indico_assistant/services/actions/events.py`. Record `before` / `after` in `StepResult`.
+- [x] T059 [P] [US6] `UpdateContribution` in `indico_assistant/services/actions/contributions.py`: time, duration, title, speakers.
+- [x] T060 [US6] `ChangeMeeting` → steps in `indico_assistant/services/actions/resolve.py`. The plan text shows the contributions moving with the event (AS-3).
 
 ---
 

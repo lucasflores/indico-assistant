@@ -189,3 +189,17 @@ def test_refs_pass_results_forward(chat, dummy_user, dummy_event, monkeypatch):
     plan, token = executor.create_plan(dummy_user, chat.id, steps=steps, summary='test')
     executor.confirm(plan.id, dummy_user, token)
     assert executor.run(plan.id).status == 'done' and seen == [dummy_event.id]
+
+
+def test_nothing_waiting_for_the_commit_starts_before_it(run, monkeypatch):
+    # releasing a begin_nested() savepoint counts as a commit for SQLAlchemy, and Indico then sends
+    # after_commit: vc_teams would move a Teams meeting before the plan was committed
+    from indico.core import signals
+    fired = []
+    receiver = lambda sender, **kw: fired.append(1)  # noqa: E731
+    signals.core.after_commit.connect(receiver)
+    try:
+        plan, _ = run('test_note', 'test_move')
+    finally:
+        signals.core.after_commit.disconnect(receiver)
+    assert plan.status == 'done' and fired == []  # (commits are flushes in tests: only a savepoint could fire it)

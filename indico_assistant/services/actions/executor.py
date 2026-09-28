@@ -8,12 +8,12 @@ steps that call other systems (Teams) last, with their side effects undone if an
 import hashlib
 import logging
 import secrets
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 
 from flask import g
 from pydantic_core import to_jsonable_python
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from indico.core.db import db
 from indico.modules.events.util import track_location_changes, track_time_changes
@@ -138,12 +138,34 @@ def run(plan_id):
     return _finish(plan_id, 'done', result=results)
 
 
+@contextmanager
+def _savepoint():
+    """A savepoint around the steps: a failure anywhere undoes every step (in tests too, where Indico's
+    fixture makes session.rollback a no-op).
+
+    Plain SQL, not ``begin_nested()``: SQLAlchemy reports releasing a nested transaction as a commit, and
+    Indico then sends ``after_commit``, so work meant for after the commit (vc_teams moving the Teams
+    meeting, attachment indexing) would start before the plan is committed.
+    """
+    db.session.flush()
+    db.session.execute(text('SAVEPOINT assistant_plan'))
+    try:
+        yield
+        db.session.flush()
+    except BaseException:
+        db.session.execute(text('ROLLBACK TO SAVEPOINT assistant_plan'))
+        for obj in list(db.session.new):
+            db.session.expunge(obj)
+        db.session.expire_all()
+        raise
+    db.session.execute(text('RELEASE SAVEPOINT assistant_plan'))
+
+
 def _execute(plan, user):
     results = {}
-    # One savepoint: a failure anywhere undoes every step (and makes that testable, as Indico's test
-    # fixture turns session.rollback into a no-op). Time and location changes of persistent objects raise
-    # unless tracked; tracking also sends the signals vc_teams and reminders follow.
-    with db.session.begin_nested():
+    # Time and location changes of persistent objects raise unless tracked; tracking also sends the
+    # signals vc_teams and reminders follow.
+    with _savepoint():
         with track_time_changes(auto_extend=True, user=user), track_location_changes():
             for step in plan.steps:
                 action = actions.ACTIONS[step['action']]
