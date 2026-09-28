@@ -115,6 +115,18 @@ def _confirm(plan):
     return 'confirmed' if confirmed else 'not_confirmable'  # 0 rows: another request confirmed it first
 
 
+def reissue_token(plan_id, user):
+    """A new confirm token for the user's plan still waiting for an answer, or None (spec 020 R10): a plan card
+    drawn again after navigating. The old token stops working; single use, expiry and supersession stay."""
+    token = secrets.token_urlsafe(24)
+    replaced = (ActionPlan.query
+                .filter(ActionPlan.id == plan_id, ActionPlan.user_id == user.id, ActionPlan.status == 'shown',
+                        ActionPlan.expires_at > _now())
+                .update({'token_hash': _hash(token)}, synchronize_session=False))
+    db.session.expire_all()
+    return token if replaced else None
+
+
 def cancel(plan_id, user):
     cancelled = (ActionPlan.query
                  .filter_by(id=plan_id, user_id=user.id, status='shown')

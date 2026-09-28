@@ -16,6 +16,7 @@ import httpx
 import jwt
 
 from indico_data_layer import IndicoDataLayer, install_token_middleware
+from resume import UNANSWERED, restore
 
 CHAINLIT_AUTH_SECRET = os.environ.get("CHAINLIT_AUTH_SECRET", "")
 
@@ -180,6 +181,56 @@ async def on_chat_start():
     _get_auth_token()
 
 
+async def _announce_thread() -> None:
+    """Tell the Indico page which conversation this is (spec 020 R6): Chainlit's app stays on "/" for a new
+    conversation, so its URL cannot say. Chainlit posts window messages to the parent frame."""
+    thread_id = _thread_id()
+    if thread_id and cl.user_session.get("announced_thread") != thread_id:
+        cl.user_session.set("announced_thread", thread_id)
+        await cl.send_window_message({"source": "indico-assistant", "type": "thread", "threadId": thread_id})
+
+
+@cl.on_chat_resume
+async def on_chat_resume(thread):
+    """A conversation reopened after navigating (spec 020 R7). Chainlit redraws its messages right after this
+    returns; what it cannot redraw (the waiting plan's buttons, an answer still being written) follows."""
+    cl.user_session.set("indico_session_id", thread["id"])
+    user = cl.user_session.get("user")
+    event_id = (getattr(user, "metadata", None) or {}).get("event_id")
+    cl.user_session.set("indico_event_id", event_id)  # the page this sign-in came from (R3, R8)
+    cl.user_session.set("announced_thread", thread["id"])  # (its URL, /thread/<id>, already says)
+    indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
+    if indico_api_url and auth_token:
+        asyncio.create_task(_after_resume(thread["id"], indico_api_url, auth_token))
+
+
+RESUME_SETTLE = 0.5  # ponytail: lets Chainlit send the thread's history first; an event hook would be exact
+
+
+async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str) -> None:
+    await asyncio.sleep(RESUME_SETTLE)
+    client = await _get_http_client(indico_api_url)
+    try:
+        restored = await restore(client, auth_token, thread_id)
+    except httpx.RequestError:
+        logger.warning("Could not restore %s", thread_id, exc_info=True)
+        return
+    if restored.plan:
+        card, actions = render_plan(restored.plan)
+        message = cl.Message(content=card, actions=actions)
+        await message.send()
+        cl.user_session.set("plan_message", message)
+        cl.user_session.set("plan_id", restored.plan["id"])
+    if restored.pending_job_id:
+        loading_msg = cl.Message(content="")
+        response = await _wait_for_answer(client, restored.pending_job_id, auth_token)
+        if response.status_code == 404:  # the job left the cache: no answer is coming (R9)
+            loading_msg.content = UNANSWERED
+            await loading_msg.send()
+            return
+        await _show_answer(response, loading_msg, client, auth_token)
+
+
 @cl.header_auth_callback
 def header_auth_callback(headers: dict) -> cl.User | None:
     """Authenticate users via JWT passed from the Indico plugin.
@@ -341,6 +392,7 @@ async def _ask(text: str, files=()):
         if response.status_code == 202:
             queued = response.json()
             cl.user_session.set("indico_session_id", queued.get("session_id"))
+            await _announce_thread()  # Indico has the conversation now: the next page may restore it
             response = await _wait_for_answer(client, queued["job_id"], auth_token)
             if response.status_code == 202:
                 loading_msg.content = "The assistant is taking too long to answer. Please try again."
@@ -352,6 +404,12 @@ async def _ask(text: str, files=()):
         await loading_msg.send()
         return
 
+    await _show_answer(response, loading_msg, client, auth_token)
+
+
+async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client: httpx.AsyncClient,
+                       auth_token: str) -> None:
+    """Show Indico's answer to a question (or why there is none) in ``loading_msg``."""
     logger.info(
         "Received response from Indico assistant API",
         extra={"status_code": response.status_code}

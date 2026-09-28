@@ -89,6 +89,20 @@ class RHPlanConfirm(RHPlanBase):
         return jsonify({"job_id": job_id, "plan_id": str(plan.id), "status": "confirmed"}), 202
 
 
+class RHPlanToken(RHPlanBase):
+    """POST /plans/<plan_id>/token: the plan card drawn again after navigating (spec 020 R10)."""
+
+    def _process(self):
+        if (plan := self._plan()) is None:
+            return self._not_found()
+        if (token := executor.reissue_token(plan.id, self.user)) is None:
+            return self._error_response("PLAN_NOT_CONFIRMABLE", "This plan is no longer waiting for an answer",
+                                        details={"status": ActionPlan.query.get(plan.id).effective_status},
+                                        status=409)
+        db.session.commit()
+        return jsonify(PlanView.of(ActionPlan.query.get(plan.id), token).model_dump(mode="json")), 200
+
+
 class RHPlanCancel(RHPlanBase):
     """POST /plans/<plan_id>/cancel"""
 

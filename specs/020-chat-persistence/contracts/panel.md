@@ -52,3 +52,13 @@ The inline `<head>` snippet reads only `open` and `width`, to reserve the margin
   clicks in.
 - **Launcher.** The existing lazy launcher button opens the panel when it is closed. While the panel is open,
   the button is hidden.
+
+## Test hooks (the browser walk, T021)
+
+| Hook | Meaning |
+|---|---|
+| `#assistant-launcher` | the launcher button (hidden while the panel is open) |
+| `#assistant-panel`, `#assistant-panel-frame`, `#assistant-panel-handle`, `#assistant-panel-close` | the panel, its iframe, the drag handle, the close button |
+| `<html data-assistant-panel="closed\|loading\|ready\|unavailable">` | the panel's state |
+| `window.__assistantReadyAt` | `performance.now()` when the frame reported `ready` (SC-002) |
+| `window.__assistantInitialMargin` | the `margin-right` the inline `<head>` snippet reserved, before the page painted (FR-006a) |

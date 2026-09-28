@@ -153,22 +153,22 @@ and waiting plans come back. Focus is not stolen.
 
 ### Tests first
 
-- [ ] T018 [P] [US1] In `tests/integration/actions/test_plan_token.py`, for `POST /plans/<id>/token`:
+- [x] T018 [P] [US1] In `tests/integration/actions/test_plan_token.py`, for `POST /plans/<id>/token`:
   - owner only (`403`/`404` otherwise);
   - only for a `shown`, unexpired plan (`409` for confirmed, superseded or expired);
   - after the reissue, the old token no longer confirms, and the new one confirms exactly once.
-- [ ] T019 [P] [US1] In `chainlit_app/tests/test_resume.py`, `on_chat_resume` against a fake Indico:
+- [x] T019 [P] [US1] In `chainlit_app/tests/test_resume.py`, the resume logic (`chainlit_app/resume.py: restore`, which `on_chat_resume` draws) against a fake Indico:
   - it sets the Indico session to the thread id;
   - with an open plan, it calls the token reissue and sends a card with Confirm/Cancel actions carrying the
     new token;
   - with `pending_job_id`, it polls the job and sends the answer with its message id;
   - an expired job gives the "went unanswered" note (R9).
-- [ ] T020 [P] [US1] In `tests/unit/test_plugin.py`, the `html-head` hook:
+- [x] T020 [P] [US1] In `tests/unit/test_widget_config.py`, the `html-head` hook:
   - for a logged-in user with the widget enabled, it renders the script tag with `data-user` and the inline
     margin snippet;
   - for anonymous users or a disabled widget, it renders nothing;
   - the snippet reads only `open` and `width`, and survives a `localStorage` that throws.
-- [ ] T021 [US1] Write `tests/browser/walk.mjs`, which logs in as the local admin. It asserts:
+- [x] T021 [US1] Write `tests/browser/walk.mjs`, which logs in as the local admin. It asserts:
   - **SC-001.** It opens the panel and asks a question, then follows 10 links, each from the page or an
     answer. The same conversation is shown on every page, with every earlier message.
   - **SC-002.** The time from `load` to the frame's `ready`; the median of 10 is under 2 s.
@@ -181,15 +181,15 @@ and waiting plans come back. Focus is not stolen.
 
 ### Implementation
 
-- [ ] T022 [US1] Make T018 pass:
+- [x] T022 [US1] Make T018 pass:
   - add `reissue_token(plan_id, user)` to `indico_assistant/services/actions/executor.py`. It is an atomic
     UPDATE of `token_hash` `WHERE status='shown' AND expires_at > now()` and returns the new token;
   - add `RHPlanToken` to `indico_assistant/controllers/actions.py` (the `read` rate bucket) and the route to
     `indico_assistant/blueprint.py`.
-- [ ] T023 [US1] Add `@cl.on_chat_resume` to `chainlit_app/app_chnlit.py` per R7, making T019 pass. It sets
+- [x] T023 [US1] Add `@cl.on_chat_resume` to `chainlit_app/app_chnlit.py` per R7, making T019 pass. It sets
   the session, redraws the waiting plan card with a reissued token, and polls a pending job. Reuse
   `render_plan` and `_wait_for_answer`.
-- [ ] T024 [P] [US1] Create `chainlit_app/public/indico_panel.js` (`custom_js`, contracts/panel.md):
+- [x] T024 [P] [US1] Create `chainlit_app/public/indico_panel.js` (`custom_js`, contracts/panel.md):
   - post `ready` once the chat is drawn;
   - post `thread {threadId}` on every route change (wrap `history.pushState` and `replaceState`, and listen
     for `popstate`);
@@ -197,11 +197,11 @@ and waiting plans come back. Focus is not stolen.
   - post `close` on Esc.
 
   It learns the parent origin from `sessionStorage`, which `indico-login.html` sets.
-- [ ] T025 [P] [US1] In `indico_assistant/plugin.py: _render_widget_script`, add `data-user="<id>"` and the
+- [x] T025 [P] [US1] In `indico_assistant/plugin.py: _render_widget_script`, add `data-user="<id>"` and the
   inline snippet, as `<script nonce="{get_csp_nonce()}">` so it runs under Indico's CSP: read
   `localStorage['indico-assistant:<id>']`; if `open`, set `document.documentElement.style.marginRight` to its
   `width` (inside try/catch). Make T020 pass, including a check that the nonce is present.
-- [ ] T026 [US1] Rewrite `indico_assistant/static/js/chat_widget.js` as in contracts/panel.md:
+- [x] T026 [US1] Rewrite `indico_assistant/static/js/chat_widget.js` as in contracts/panel.md:
   - the launcher, which is hidden while open;
   - the panel with the iframe (`indico-login.html?parent=…`) and a placeholder until `ready`;
   - the `hello` → `login` handshake with a fresh `/widget/config?event_id=` token;
@@ -212,9 +212,9 @@ and waiting plans come back. Focus is not stolen.
   - it never calls `focus()`.
 
   Drop the Copilot mount, the fetch/XHR patching and the shadow-DOM styling code.
-- [ ] T027 [P] [US1] Put the panel, handle, placeholder and narrow-screen styles in
+- [x] T027 [P] [US1] Put the panel, handle, placeholder and narrow-screen styles in
   `indico_assistant/static/css/chat_widget.css`. It is served with the widget.
-- [ ] T028 [US1] Live check: spec 020 quickstart §2 on the local stack, then run `walk.mjs` (T021) until it
+- [x] T028 [US1] Live check: spec 020 quickstart §2 on the local stack, then run `walk.mjs` (T021) until it
   passes. Restart the worker and Chainlit first.
 
 **Checkpoint**: US1 works across navigation. It ships only together with US2 (plan.md, delivery order).
