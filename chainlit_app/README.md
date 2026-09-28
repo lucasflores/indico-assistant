@@ -51,10 +51,6 @@ To customize:
 
 Edit `public/theme.json` to customize colors and fonts. Uses Shadcn/Radix CSS variable format (HSL values).
 
-### Custom CSS
-
-Additional styling overrides in `public/widget.css`. Referenced in `.chainlit/config.toml`.
-
 ## Loading Animation (Feature 017)
 
 The chat widget displays a loading animation when processing user messages:
