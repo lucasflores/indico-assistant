@@ -204,19 +204,19 @@ builds on these.
 
 ### Tests first
 
-- [ ] T047 [P] [US3] `tests/integration/actions/test_categories.py`:
+- [x] T047 [P] [US3] `tests/integration/actions/test_categories.py`:
   - only categories passing `can_create_events` are in `create`;
   - `propose` holds `can_propose_events` categories only when unlisted events are enabled (fixture toggles `unlisted_events_settings`, R4);
   - ranking puts the category with the user's recent meetings first, with a reason;
   - a user with none → the "who to ask" reply, and no plan (AS-4);
   - name matching: "Engineering" → an exact match; an ambiguous name → a question with the closest paths (AS-3).
-- [ ] T048 [P] [US3] Parity test `tests/integration/actions/test_parity_propose.py`: `propose_event.check` matches `can_create_unlisted_events` + `RHMoveEvent`'s rule.
+- [x] T048 [P] [US3] Parity test `tests/integration/actions/test_parity_propose.py`: `propose_event.check` matches `can_create_unlisted_events` + `RHMoveEvent`'s rule.
 
 ### Implementation
 
-- [ ] T049 [US3] Ranking in `list_categories` (`indico_assistant/services/actions/resolve.py`): the recent-activity count (the user's linked events, 12 months), plus topic similarity through `EmbeddingService` on event titles; a reason string per suggestion.
-- [ ] T050 [P] [US3] `ProposeEvent` in `indico_assistant/services/actions/events.py`: unlisted `create_event(None, ...)` + `create_event_request` + `notify_move_request_creation`; revert withdraws the request and deletes the event.
-- [ ] T051 [US3] Category name matching and the "no category" reply (the category managers of the nearest category the user can see, or the admins), in `resolve.py` + `planner.py`.
+- [x] T049 [US3] Ranking in `list_categories` (`indico_assistant/services/actions/resolve.py`): the recent-activity count (the user's linked events, 12 months), plus topic similarity through `EmbeddingService` on event titles; a reason string per suggestion.
+- [x] T050 [P] [US3] `ProposeEvent` in `indico_assistant/services/actions/events.py`: unlisted `create_event(None, ...)` + `create_event_request` + `notify_move_request_creation`; revert withdraws the request and deletes the event.
+- [x] T051 [US3] Category name matching and the "no category" reply (the category managers of the nearest category the user can see, or the admins), in `resolve.py` + `planner.py`.
 
 ---
 

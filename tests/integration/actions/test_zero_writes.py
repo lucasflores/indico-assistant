@@ -23,12 +23,17 @@ START = (now_utc() + timedelta(days=3)).replace(minute=0, second=0, microsecond=
 @pytest.fixture
 def writable(people, dummy_event, create_category, teams):
     """One valid single-step plan per write action, all for the manager."""
+    from indico.modules.events.settings import unlisted_events_settings
+    unlisted_events_settings.set('enabled', True)
     category = create_category(title='Meetings', event_creation_mode=EventCreationMode.restricted)
     category.update_principal(people['manager'], permissions={'create'})
+    board = create_category(title='Board', event_creation_mode=EventCreationMode.moderated)
     dummy_event.start_dt, dummy_event.end_dt = START, START + timedelta(hours=2)
     return {
         'create_event': {'category_id': category.id, 'title': 'New meeting', 'start_dt': START.isoformat(),
                          'end_dt': (START + timedelta(minutes=30)).isoformat(), 'timezone': 'UTC'},
+        'propose_event': {'category_id': board.id, 'title': 'Proposed meeting', 'start_dt': START.isoformat(),
+                          'end_dt': (START + timedelta(minutes=30)).isoformat(), 'timezone': 'UTC'},
         'add_contribution': {'event_id': dummy_event.id, 'title': 'Talk', 'start_dt': START.isoformat(),
                              'duration_minutes': 20, 'speakers': [{'user_id': people['makoto'].id}]},
         'add_reminder': {'event_id': dummy_event.id, 'minutes_before': 15, 'recipients': ['x@example.test']},
@@ -48,7 +53,7 @@ def test_every_write_action_is_covered(writable):
     assert implemented == set(writable)  # a new action needs a case here
 
 
-@pytest.mark.parametrize('action', ['create_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
 @pytest.mark.parametrize('state', ['unconfirmed', 'cancelled', 'expired', 'superseded'])
 def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, state):
     lucas = people['manager']
@@ -74,7 +79,7 @@ def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, stat
     assert fake.calls == []  # no Teams call either
 
 
-@pytest.mark.parametrize('action', ['create_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
 def test_a_double_confirmation_runs_once(db, people, writable, teams, action):
     lucas = people['manager']
     _, fake = teams
