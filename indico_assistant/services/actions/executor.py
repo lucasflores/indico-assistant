@@ -46,7 +46,7 @@ def _hash(token):
 
 
 def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(), supersedes=None,
-                undoes=None, message_id=None, llm_calls=()):
+                undoes=None, message_id=None, llm_calls=(), draft=None):
     """Save a plan to show; returns (plan, confirm token). A revision supersedes the plan it replaces."""
     token = secrets.token_urlsafe(24)
     if supersedes is not None and supersedes.status == 'shown':
@@ -54,7 +54,7 @@ def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(
     plan = ActionPlan(user_id=user.id, session_id=session_id, steps=list(steps), summary=summary,
                       questions=list(questions), suggestions=list(suggestions), token_hash=_hash(token),
                       supersedes_id=supersedes.id if supersedes else None, undoes_id=undoes.id if undoes else None,
-                      message_id=message_id, llm_calls=to_jsonable_python(list(llm_calls)))
+                      message_id=message_id, llm_calls=to_jsonable_python(list(llm_calls)), draft=draft)
     db.session.add(plan)
     db.session.flush()
     return plan, token
@@ -116,6 +116,7 @@ def run(plan_id):
     db.session.commit()
 
     g.assistant_rollback_callbacks = []
+    g.pop('assistant_new_events', None)
     try:
         user = User.get(plan.user_id, is_deleted=False)
         if user is None:

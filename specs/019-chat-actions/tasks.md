@@ -167,7 +167,7 @@ builds on these.
   - `draft_to_steps(CreateMeeting)`: When → aware datetimes in the user's timezone; slots back to back; the meeting extended to fit; Teams step last; reminder recipients = non-speaker invitees.
 - [x] T037 [US1] Wire `CreateMeeting` in `indico_assistant/services/actions/planner.py` to the resolvers. The plan summary lists every object, times with the timezone, people with email, the category path and side effects (FR-006).
 - [x] T038 [US1] Success reply in `indico_assistant/services/actions/executor.py`: link to the event (`event.external_url`) and a list of what was created (AS-4).
-- [ ] T039 [US1] Manual run of quickstart.md §2 on the local stack: restart the worker, run the example sentence, check the event in the UI. Record the results in the PR description.
+- [x] T039 [US1] Manual run of quickstart.md §2 on the local stack: restart the worker, run the example sentence, check the event in the UI. Record the results in the PR description.
 
 **Checkpoint**: the MVP works. Confirmed plans create the meeting exactly as Indico's pages would.
 

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+from flask import g
 from pydantic import BaseModel, model_validator
 
 from indico.modules.events import Event
@@ -79,6 +80,14 @@ class AddContribution(Action):
                                                   'email': speaker.email.lower()})
             # every person of a meeting contribution is a speaker, and speakers may submit material
             links[ContributionPersonLink(person=person, is_speaker=True, author_type=AuthorType.none)] = True
+        if event.id in g.get('assistant_new_events', ()):
+            # Indico numbers contributions per event from a separate DB session, which cannot see an event
+            # this plan created and has not committed yet. Nobody else can see it either, so take the next
+            # number on the event itself, as Indico's event cloning does. (Indico's test fixture shares that
+            # session, so only a real database shows this.)
+            event._last_friendly_contribution_id += 1
+            (g.setdefault('friendly_ids', {}).setdefault(Contribution, {}).setdefault(event.id, [])
+             .append(event._last_friendly_contribution_id))
         contribution = create_contribution(event, {
             'title': args.title,
             'duration': timedelta(minutes=args.duration_minutes),

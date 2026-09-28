@@ -5,6 +5,7 @@ Runs in the chat worker inside ``acting_as(user)``: resolving names and checking
 the user.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -13,6 +14,8 @@ from indico_assistant.services.actions.context import user_timezone
 from indico_assistant.services.llm.models.plan import PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
+
+logger = logging.getLogger(__name__)
 
 NOT_AVAILABLE = ('Making changes from the chat is not enabled on this Indico. You can still ask me about '
                  'events, and make the change on the Indico page itself.')
@@ -29,6 +32,8 @@ Rules:
 - Never invent people, categories, dates or times. Leave a field null when the user did not say it; the
   assistant will ask or suggest.
 - Keep people's names exactly as the user wrote them. "me", "I" and "us" include the user.
+- Talks (slots, contributions) for people: one slot per person, with that person as its speaker. "Add both
+  of us as contributors with 20 min slots" = a 20-minute slot with speaker "me" and one with the other person.
 - decision: "new_request" for a new change; with an open plan, "revise" (change it), "confirm" (the user
   agrees: "yes", "go ahead", "create it"), "cancel" (the user declines); "unrelated" when the message is
   a question rather than a change.
@@ -49,11 +54,15 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE)
+    if open_plan is not None and (draft := answered_draft(open_plan, message)) is not None:
+        # a choice offered in the plan (a button, or its label typed): no LLM needed
+        return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings)
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
         response = llm.generate(_prompt(user, message, open_plan, enabled), PlanDraft,
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
+        logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
     turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls, settings)
     turn.llm_calls = calls
@@ -92,11 +101,36 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings):
         return PlanTurn('I cannot plan that: ' + '; '.join(errors))
     plan, token = executor.create_plan(user, chat_session_id, steps=resolved.steps, summary=resolved.summary,
                                        questions=resolved.questions, suggestions=resolved.suggestions,
-                                       supersedes=open_plan if draft.decision == 'revise' else None,
-                                       llm_calls=calls)
+                                       supersedes=open_plan if open_plan is not None else None,
+                                       llm_calls=calls, draft=draft.model_dump(mode='json'))
     from indico_assistant.schemas.actions import PlanView
 
-    return PlanTurn(draft.reply, plan=PlanView.of(plan, token).model_dump(mode='json'))
+    reply = draft.reply or ('Here is the plan. ' + ('Please answer the questions below.' if plan.questions
+                                                    else 'Confirm it to go ahead.'))
+    return PlanTurn(reply, plan=PlanView.of(plan, token).model_dump(mode='json'))
+
+
+def answered_draft(open_plan, message):
+    """The open plan's draft with ``message`` applied, if it is exactly one of the plan's choices."""
+    if not open_plan.draft:
+        return None
+    said = message.strip().lower()
+    for question in open_plan.questions:
+        for choice in question.get('choices', []):
+            if said in (choice['label'].lower(), str(choice['value']).lower()):
+                draft = PlanDraft.model_validate(open_plan.draft)
+                step = draft.steps[0]
+                if question['id'] == 'category':
+                    step.category = choice['label']
+                elif question['id'].startswith('person:'):
+                    key = question['id'].removeprefix('person:')
+                    for ref in [*step.people, *(slot.speaker for slot in step.slots if slot.speaker)]:
+                        if (ref.name or ref.email or '').strip().lower() == key:
+                            ref.email = choice['value']
+                draft.decision = 'revise'
+                draft.reply = ''
+                return draft
+    return None
 
 
 def _prompt(user, message, open_plan, enabled):

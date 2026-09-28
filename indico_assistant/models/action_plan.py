@@ -59,6 +59,7 @@ class ActionPlan(db.Model):
     result = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
     llm_calls = Column(JSONB, nullable=False, default=list)
+    draft = Column(JSONB, nullable=True)  # what the user asked for (PlanDraft), to apply answers to it
 
     @property
     def effective_status(self):

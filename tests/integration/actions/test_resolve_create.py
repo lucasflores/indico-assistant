@@ -1,6 +1,7 @@
 """From what the user said to the plan they confirm (US1 acceptance scenarios, research R8-R11)."""
 
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
@@ -105,3 +106,43 @@ def test_relative_dates():
     assert resolve_date('sunday', sunday) == date(2026, 10, 4)
     assert resolve_date('2026-10-02', sunday) == date(2026, 10, 2)
     assert resolve_date('someday', sunday) is None
+
+
+def test_picking_an_offered_choice_needs_no_llm(people, categories, teams, db):
+    from unittest.mock import MagicMock
+
+    from indico_assistant.models import ChatSession
+    from indico_assistant.services.actions import planner
+    from indico_assistant.services.llm.models.base import LLMResponse
+
+    lucas = people['manager']
+    lucas.settings.set('timezone', 'Europe/Zurich')
+    chat = ChatSession(user_id=lucas.id)
+    db.session.add(chat)
+    db.session.flush()
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'create_meeting', 'teams': True, 'when': {'date': 'tomorrow', 'time': '2pm'},
+         'slots': [{'speaker': 'me'}, {'speaker': 'Makoto'}]}]})
+    llm = MagicMock()
+    llm.generate.return_value = LLMResponse(success=True, latency_ms=1, result=draft)
+    settings = {'actions_enabled': True, 'actions_allowed': ['create_event', 'add_contribution', 'add_reminder',
+                                                             'add_teams_room']}
+    with acting_as(lucas):
+        first = planner.plan_turn(lucas, chat.id, 'Create a Teams meeting…', [], None, llm=llm, settings=settings)
+        assert first.plan['questions'][0]['id'] == 'category' and not first.plan['can_confirm']
+        assert first.plan['steps'][0]['description'].startswith('Create event')  # no category yet
+        assert 'Sync with Makoto' in first.plan['summary']  # speakers count for the default title
+
+        from indico_assistant.services.actions import executor
+        second = planner.plan_turn(lucas, chat.id, 'Home » Meetings', [], executor.open_plan(chat.id), llm=llm,
+                                   settings=settings)
+    llm.generate.assert_called_once()  # only the first turn used the LLM
+    assert second.plan['can_confirm'] and second.plan['questions'] == []
+    assert 'Home » Meetings' in second.plan['summary']
+    assert executor.open_plan(chat.id).id == UUID(second.plan['id'])
+
+
+def test_a_slot_each_when_the_model_drops_the_speakers(people, categories, teams):
+    plan = plan_for(people['manager'], category='Meetings', slots=[{'duration_minutes': 20}, {'duration_minutes': 20}])
+    speakers = [s['args']['speakers'][0]['user_id'] for s in plan.steps if s['action'] == 'add_contribution']
+    assert speakers == [people['manager'].id, people['makoto'].id]

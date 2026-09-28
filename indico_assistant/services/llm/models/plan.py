@@ -10,24 +10,29 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PersonRef(BaseModel):
     name: str | None = Field(None, description='As the user said it, e.g. "Makoto"; "me" for the user')
     email: str | None = None
 
+    @model_validator(mode='before')
+    @classmethod
+    def _from_name(cls, value):
+        return {'name': value} if isinstance(value, str) else value  # models often send just the name
+
 
 class When(BaseModel):
     date: str | None = Field(None, description='As said: "today", "next Tuesday", "2026-10-02"')
     time: str | None = Field(None, description='"14:00", "2pm"; null when not given (the assistant suggests times)')
-    duration_minutes: int | None = None
+    duration_minutes: int | None = Field(None, description='Only if the user said how long the meeting is')
     timezone: str | None = Field(None, description='Only if the user named one')
 
 
 class Slot(BaseModel):
     title: str | None = None
-    speaker: PersonRef | None = None
+    speaker: PersonRef | None = Field(None, description='Who gives this talk; "me" for the user')
     duration_minutes: int | None = None
 
 
@@ -88,4 +93,4 @@ class PlanDraft(BaseModel):
     steps: list[Step] = Field(default_factory=list, max_length=10)
     questions: list[str] = Field(default_factory=list, description='Only what context cannot answer')
     suggestions: list[SuggestionDraft] = Field(default_factory=list)
-    reply: str = Field(..., description='One or two sentences to the user')
+    reply: str = Field('', description='One or two sentences to the user')
