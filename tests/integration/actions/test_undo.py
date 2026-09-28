@@ -115,3 +115,46 @@ def test_a_locked_meeting_is_not_undone(db, people, made):
     result = executor.run(undo_plan.id)
     assert result.status == 'refused' and 'locked' in result.error
     assert not event.is_deleted
+
+
+@pytest.fixture
+def existing(db, people, dummy_event, teams):
+    """(chat, plan, event): a plan that added a Teams room, a reminder that was too late, and a link to a
+    meeting that already existed."""
+    lucas = people['manager']
+    dummy_event.update_principal(lucas, full_access=True)
+    dummy_event.start_dt = now_utc() + timedelta(minutes=5)  # too soon for a 15-minute reminder
+    dummy_event.end_dt = dummy_event.start_dt + timedelta(hours=1)
+    chat = new_chat(db, lucas)
+    plan = run(lucas, chat, [
+        {'n': 1, 'action': 'add_reminder', 'args': {'event_id': dummy_event.id, 'minutes_before': 15}},
+        {'n': 2, 'action': 'attach_link', 'args': {'target_type': 'event', 'target_id': dummy_event.id,
+                                                   'url': 'https://indico.example/agenda', 'title': 'Agenda'}},
+        {'n': 3, 'action': 'add_teams_room', 'args': {'event_id': dummy_event.id, 'name': 'Sync',
+                                                      'coorganizer_ids': [lucas.id]}}], summary='Add to it')
+    assert plan.result[0].get('skipped')  # the reminder
+    return chat, plan, dummy_event
+
+
+def test_undo_removes_a_teams_room_from_a_meeting_that_existed(people, existing):
+    # (Copilot Balanced review, PR #3) the room's undo was a no-op; and a skipped reminder crashed the undo
+    from indico.modules.vc.models.vc_rooms import VCRoomEventAssociation
+    lucas = people['manager']
+    chat, plan, event = existing
+    assert VCRoomEventAssociation.find_for_event(event).count() == 1
+    resolved = undo(lucas, chat)
+    undo_plan = run(lucas, chat, resolved.steps, undoes=plan, summary=resolved.summary)
+    assert undo_plan.status == 'done' and not event.is_deleted
+    assert VCRoomEventAssociation.find_for_event(event).count() == 0
+    assert g.vc_teams_pending_cancel  # the Teams meeting is cancelled after the commit
+    assert not [a for f in event.attachment_folders for a in f.attachments if not a.is_deleted]
+
+
+def test_undoing_additions_to_a_locked_meeting_is_refused(people, existing):
+    lucas = people['manager']
+    chat, plan, event = existing
+    resolved = undo(lucas, chat)
+    event.is_locked = True
+    undo_plan, token = executor.create_plan(lucas, chat.id, steps=resolved.steps, summary='undo', undoes=plan)
+    executor.confirm(undo_plan.id, lucas, token)
+    assert executor.run(undo_plan.id).status == 'refused'

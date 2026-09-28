@@ -146,7 +146,8 @@ class SettingsForm(IndicoForm):
     )
     actions_outlook_freebusy = BooleanField(
         "Use Outlook free/busy for time suggestions",
-        description="Needs the Calendars.ReadBasic permission for the Teams app. Off: suggestions use Indico only.",
+        description="Not available yet (it waits for a check of the Teams app's Microsoft 365 setup): suggestions "
+                    "use Indico only, and say so.",
     )
 
     # Chat Widget Settings (Feature 008)

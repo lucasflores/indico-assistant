@@ -236,7 +236,8 @@ def test_done_is_committed_with_the_changes(run, db, monkeypatch):
     commit, seen = db.session.commit, []
 
     def recording_commit():
-        seen.append(sorted({p.status for p in db.session.identity_map.values() if isinstance(p, ActionPlan)}))
+        db.session.flush()
+        seen.append(sorted({status for (status,) in db.session.query(ActionPlan.status)}))  # as the database has it
         commit()
     monkeypatch.setattr(db.session, 'commit', recording_commit)
     plan, _ = run('test_note', 'test_external')

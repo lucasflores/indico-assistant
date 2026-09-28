@@ -88,7 +88,18 @@ class AddTeamsRoom(Action):
         return {'created': {'vc_room_id': vc_room.id, 'graph_event_id': graph_event_id}}
 
     def revert(self, user, result):
-        pass  # deleting the event (the undo of create_event) deletes the room and cancels the meeting
+        """The "Remove" of the videoconference page (RHVCManageEventRemove, all of it): the room goes, and
+        vc_teams cancels the Teams meeting after the commit. (When the plan also created the event, this
+        runs first and the event's deletion finds no room left.)"""
+        vc_room = VCRoom.get(result['created']['vc_room_id'])
+        if vc_room is None or vc_room.status == VCRoomStatus.deleted or not vc_room.events:
+            return
+        event = vc_room.events[0].event
+        plugin = teams_plugin()
+        # the "deleted" email, like the "created" one, links relative to the VC page
+        with current_app.test_request_context(url_for('vc.manage_vc_rooms', event)), acting_as(user), \
+                plugin.plugin_context():
+            vc_room.delete(user, event=event)
 
 
 def _cancel(graph_event_id):
