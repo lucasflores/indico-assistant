@@ -12,3 +12,13 @@ node walk.mjs               # uses the installed Google Chrome (override with CH
 `mint_session.py` logs the walk in without a password: it saves an Indico session for a user id through
 Indico's own session interface. It needs the instance config and cache, so it only works on a dev machine.
 Over plain HTTP, Indico's session cookie is named `indico_session_http`.
+
+Checks, each against the running stack:
+
+| Script | What |
+|---|---|
+| `node walk.mjs` | US1: 10-page walk, restore, focus, links, Esc, width (SC-001, SC-002, SC-004) |
+| `node sc003.mjs` | US2: "this event" / "this meeting" follow the page, 10 alternations (SC-003) |
+| `node sidebar.mjs` | US3: Past Chats list, groups, paging, search, open, new chat (SC-006), two users (SC-005); seed first with `python seed_sc006.py`, then `python seed_sc006.py delete` |
+
+Run the Python helpers with the Indico env and `INDICO_CONFIG` set.
