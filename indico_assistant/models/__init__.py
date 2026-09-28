@@ -5,8 +5,10 @@ Provides SQLAlchemy models for the Indico Assistant plugin.
 Feature: 004-chat-api (T009)
 Feature: 005-langfuse-observability (T007)
 Feature: 006-vector-search-rag (T006)
+Feature: 019-chat-actions
 """
 
+from indico_assistant.models.action_plan import ActionPlan
 from indico_assistant.models.audit import QueryAuditLog
 from indico_assistant.models.document import (
     DocumentSyncLog,
@@ -27,6 +29,7 @@ from indico_assistant.models.observability import (
 from indico_assistant.models.session import ChatSession
 
 __all__ = [
+    "ActionPlan",
     "QueryAuditLog",
     "ChatSession",
     "ChatMessage",

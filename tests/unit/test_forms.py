@@ -128,3 +128,16 @@ class TestFormValidation:
             validators = field.kwargs.get("validators", [])
             has_required = any(isinstance(v, DataRequired) for v in validators)
             assert has_required, f"Field {field_name} should have DataRequired validator"
+
+
+def test_chat_actions_are_off_until_an_admin_enables_them():
+    from indico_assistant.default_settings import DEFAULT_SETTINGS, WRITE_ACTIONS
+    from indico_assistant.forms import SettingsForm
+
+    assert DEFAULT_SETTINGS['actions_enabled'] is False  # writes to shared data are opt-in
+    assert DEFAULT_SETTINGS['actions_allowed'] == list(WRITE_ACTIONS)
+    assert DEFAULT_SETTINGS['actions_outlook_freebusy'] is False  # until the tenant probe confirms it
+    choices = [value for value, _ in SettingsForm.actions_allowed.kwargs['choices']]
+    assert choices == list(WRITE_ACTIONS)
+    for name in ('actions_enabled', 'actions_reminder_minutes', 'actions_outlook_freebusy', 'retention_plan_days'):
+        assert hasattr(SettingsForm, name)

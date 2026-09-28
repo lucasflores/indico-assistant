@@ -8,6 +8,9 @@ from wtforms.fields import BooleanField, IntegerField, PasswordField, SelectFiel
 from wtforms.validators import DataRequired, InputRequired, NumberRange, Optional, URL, ValidationError
 
 from indico.web.forms.base import IndicoForm
+from indico.web.forms.fields import IndicoSelectMultipleCheckboxField
+
+from indico_assistant.default_settings import WRITE_ACTIONS
 
 
 class SettingsForm(IndicoForm):
@@ -118,6 +121,32 @@ class SettingsForm(IndicoForm):
     retention_sync_log_days = IntegerField(
         "Keep document sync logs (days)", validators=[InputRequired(), NumberRange(min=0)],
         description="0 keeps them forever.",
+    )
+    retention_plan_days = IntegerField(
+        "Keep chat action plans (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="What the assistant planned and did, for audit. Undo only reaches back 24 hours. "
+                    "0 keeps them forever.",
+    )
+
+    # Chat actions (Feature 019)
+    actions_enabled = BooleanField(
+        "Enable chat actions",
+        description="Let the assistant create and change meetings, contributions, reminders, Teams rooms and "
+                    "material. Users always confirm the exact plan first, and can only do what they could do "
+                    "on the corresponding Indico page.",
+    )
+    actions_allowed = IndicoSelectMultipleCheckboxField(
+        "Allowed actions",
+        choices=[(name, name.replace("_", " ").capitalize()) for name in WRITE_ACTIONS],
+        description="Actions the assistant may plan. A disabled action is never offered.",
+    )
+    actions_reminder_minutes = IntegerField(
+        "Reminder before a meeting (minutes)", validators=[InputRequired(), NumberRange(min=0)],
+        description="Default for the reminder sent to a meeting's invitees and speakers; editable in each plan.",
+    )
+    actions_outlook_freebusy = BooleanField(
+        "Use Outlook free/busy for time suggestions",
+        description="Needs the Calendars.ReadBasic permission for the Teams app. Off: suggestions use Indico only.",
     )
 
     # Chat Widget Settings (Feature 008)

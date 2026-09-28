@@ -32,17 +32,17 @@ The 17 already-failing plugin tests (see the PR #2 baseline) must stay the only 
 
 **Purpose**: prerequisites outside the new package: the vc_teams fixes, settings and storage.
 
-- [ ] T001 [P] In `~/indico-assistant/indico-plugin-vc-teams` (branch `002-scale`), write failing tests in `tests/test_create_room.py`:
+- [x] T001 [P] In `~/indico-assistant/indico-plugin-vc-teams` (branch `002-scale`), write failing tests in `tests/test_create_room.py`:
   - `create_room` cancels the Graph event and raises `VCRoomError` when a `requests.ConnectionError` / `Timeout` happens after `create_event`;
   - it raises `VCRoomError(field='coorganizers')` for a co-organizer without a tenant email.
-- [ ] T002 In `indico_vc_teams/plugin.py` + `indico_vc_teams/graph.py`, make T001 pass (R5 fixes 1 and 3):
+- [x] T002 In `indico_vc_teams/plugin.py` + `indico_vc_teams/graph.py`, make T001 pass (R5 fixes 1 and 3):
   - wrap `requests` exceptions from `_request` as `GraphError`;
   - validate co-organizers in `create_room` instead of dropping them silently.
-- [ ] T003 [P] In vc_teams, add `discard_pending()` to `indico_vc_teams/plugin.py`. It pops `g.vc_teams_pending_cancel`, `g.vc_teams_pending_move` and `g.vc_teams_dirty`. Add a test in `tests/test_pending.py` that a rollback followed by `discard_pending()` sends nothing at the next commit (R5 fix 2).
-- [ ] T004 [P] Add the settings `actions_enabled` (False), `actions_allowed` (all action names), `actions_reminder_minutes` (15), `actions_outlook_freebusy` (False) and `retention_plan_days` (90) to `indico_assistant/default_settings.py`. Add their fields to `indico_assistant/forms.py`: `BooleanField`, `IndicoSelectMultipleCheckboxField`, and `IntegerField` with `NumberRange(min=0)`. Extend `tests/unit/test_forms.py`.
-- [ ] T005 [P] Create the `ActionPlan` model in `indico_assistant/models/action_plan.py`, with the columns, check constraint on `status`, FKs and indexes from data-model.md. Export it in `indico_assistant/models/__init__.py`.
-- [ ] T006 Write migration `indico_assistant/migrations/007_create_action_plans.py` (`down_revision = '006_add_partial_sync_status'`, upgrade + downgrade). Apply it locally with `indico db --all-plugins upgrade`, then check `\d plugin_assistant.action_plans`.
-- [ ] T007 [P] Add `('plugin_assistant.action_plans', 'created_at', 'retention_plan_days')` to `RETENTION` in `indico_assistant/tasks/cleanup.py`, and a case to `tests/unit/tasks/test_retention.py`.
+- [x] T003 [P] In vc_teams, add `discard_pending()` to `indico_vc_teams/plugin.py`. It pops `g.vc_teams_pending_cancel`, `g.vc_teams_pending_move` and `g.vc_teams_dirty`. Add a test in `tests/test_pending.py` that a rollback followed by `discard_pending()` sends nothing at the next commit (R5 fix 2).
+- [x] T004 [P] Add the settings `actions_enabled` (False), `actions_allowed` (all action names), `actions_reminder_minutes` (15), `actions_outlook_freebusy` (False) and `retention_plan_days` (90) to `indico_assistant/default_settings.py`. Add their fields to `indico_assistant/forms.py`: `BooleanField`, `IndicoSelectMultipleCheckboxField`, and `IntegerField` with `NumberRange(min=0)`. Extend `tests/unit/test_forms.py`.
+- [x] T005 [P] Create the `ActionPlan` model in `indico_assistant/models/action_plan.py`, with the columns, check constraint on `status`, FKs and indexes from data-model.md. Export it in `indico_assistant/models/__init__.py`.
+- [x] T006 Write migration `indico_assistant/migrations/007_create_action_plans.py` (`down_revision = '006_add_partial_sync_status'`, upgrade + downgrade). Apply it locally with `indico db --all-plugins upgrade`, then check `\d plugin_assistant.action_plans`.
+- [x] T007 [P] Add `('plugin_assistant.action_plans', 'created_at', 'retention_plan_days')` to `RETENTION` in `indico_assistant/tasks/cleanup.py`, and a case to `tests/unit/tasks/test_retention.py`.
 
 **Checkpoint**: vc_teams tests green, the migration applied, and the settings visible in the admin panel.
 
