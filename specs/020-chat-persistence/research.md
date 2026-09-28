@@ -190,6 +190,11 @@ token as `Bearer`, so Indico checks ownership on every request (FR-017). With no
   users) also emits a few lines of inline script. It reads the stored state and sets
   `document.documentElement.style.marginRight` to the stored width. The deferred widget script builds the
   panel after that. The placeholder shows until the frame reports `ready`.
+- **Indico's CSP.** When an instance sets `CSP_ENABLED`, Indico restricts only `script-src` (`'self'`,
+  `'unsafe-eval'` and the page nonce, `web/flask/app.py: inject_csp`) and `base-uri`, with no `frame-src`. So
+  the iframe to Chainlit's origin stays allowed, and the inline snippet carries `nonce="{get_csp_nonce()}"`.
+  The old Copilot, which loads `copilot/index.js` from Chainlit's origin, would be blocked under that CSP;
+  the panel is not.
 - **Per-browser, per-user state in `localStorage`.** Key `indico-assistant:<user id>`, value
   `{open, width, threadId}`. The same hook puts the user id on the script tag (`data-user`).
 - **Messages.** A small `postMessage` protocol (see `contracts/panel.md`), always checked against the other

@@ -1,0 +1,8 @@
+{
+  "name": "indico-assistant-browser-tests",
+  "private": true,
+  "description": "Spec 020 panel walk against the local stack (dev only; never a plugin dependency)",
+  "type": "module",
+  "scripts": {"walk": "node walk.mjs"},
+  "devDependencies": {"puppeteer": "^24.0.0"}
+}
