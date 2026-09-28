@@ -202,3 +202,36 @@ def test_my_contribution_is_found_or_asked(db, upload, people, chat, dummy_event
     db.session.flush()
     (question,) = attach('my talk').questions
     assert len(question['choices']) == 2  # asked, never picked
+
+
+def test_this_meeting_is_the_one_the_chat_was_opened_on(db, upload, people, dummy_event, create_event,
+                                                        create_contribution):
+    # seen live: two identical "Sync with Makoto" meetings; the file went to the other one's talk
+    from indico.modules.events.contributions.models.persons import ContributionPersonLink
+    from indico.modules.events.models.persons import EventPerson
+    lucas = people['manager']
+    dummy_event.end_dt = now_utc() + timedelta(days=1)
+    twin = create_event(title=dummy_event.title, start_dt=dummy_event.start_dt, end_dt=dummy_event.end_dt,
+                        creator=lucas, creator_has_privileges=True)
+    for event in (dummy_event, twin):
+        talk = create_contribution(event, 'Lucas Flores')
+        talk.person_links.append(ContributionPersonLink(person=EventPerson.for_user(lucas, event), is_speaker=True))
+    chat = ChatSession(user_id=lucas.id, event_id=twin.id)  # opened on the twin's page
+    db.session.add(chat)
+    db.session.flush()
+    _, sent = upload(PDF, 'slides.pdf')
+    db.session.add(ChatMessage(session_id=chat.id, role='user', content='attach this to my contribution',
+                               metadata_json={'uploads': [{'uuid': sent['uuid'], 'filename': 'slides.pdf'}]}))
+    db.session.flush()
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'attach', 'target': 'my contribution in this meeting', 'upload': 'this'}]})
+    with acting_as(lucas):
+        result = resolve.draft_to_plan(draft, lucas, chat_session_id=chat.id)
+    assert result.questions == [] and result.steps[0]['args']['target_id'] == twin.contributions[0].id
+
+
+def test_namesake_choices_can_be_told_apart():
+    from indico_assistant.services.actions.resolve import _distinct
+    choices = _distinct([{'value': '#351', 'label': 'Sync (Mon)'}, {'value': '#352', 'label': 'Sync (Mon)'},
+                         {'value': '#c7', 'label': 'Talk'}])
+    assert [c['label'] for c in choices] == ['Sync (Mon) [351]', 'Sync (Mon) [352]', 'Talk']

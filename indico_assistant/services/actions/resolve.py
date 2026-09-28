@@ -488,6 +488,20 @@ def made_in_chat(chat_session_id, user=None):
     return None
 
 
+def chat_event(chat_session_id):
+    """The meeting whose page the chat was opened on (the widget scopes the chat to it)."""
+    from indico.modules.events import Event
+
+    from indico_assistant.models import ChatSession
+    chat = ChatSession.query.get(chat_session_id) if chat_session_id else None
+    return Event.get(chat.event_id, is_deleted=False) if chat and chat.event_id else None
+
+
+def meeting_in_view(chat_session_id, user):
+    """What "this meeting" / "it" means: the one made in this chat, else the one the chat was opened on."""
+    return made_in_chat(chat_session_id, user) or chat_event(chat_session_id)
+
+
 def managed_meetings(user):
     """Meetings the user manages, from a month ago onwards, soonest first."""
     from indico.modules.users.util import get_linked_events
@@ -498,7 +512,17 @@ def managed_meetings(user):
 
 
 def _event_label(event, tz):
-    return f'{event.title} ({format_dt(event.start_dt, tz)})'
+    where = f', {category_path(event.category)}' if event.category else ''
+    return f'{event.title} ({format_dt(event.start_dt, tz)}{where})'
+
+
+def _distinct(choices):
+    """Choices that look the same (namesake meetings at the same time) get their Indico number."""
+    labels = [c['label'] for c in choices]
+    for choice in choices:
+        if labels.count(choice['label']) > 1:
+            choice['label'] += f' [{choice["value"].lstrip("#c")}]'
+    return choices
 
 
 def find_meeting(name, user, chat_session_id):
@@ -509,9 +533,9 @@ def find_meeting(name, user, chat_session_id):
     said = (name or '').strip().lower()
     if said.startswith('#') and said[1:].isdigit():  # an answer to the "which meeting?" question
         return Event.get(int(said[1:]), is_deleted=False), None
-    here = made_in_chat(chat_session_id, user)
+    here = meeting_in_view(chat_session_id, user)
     if here is not None and (said in IT or said in here.title.lower()):
-        return here, None  # the meeting made in this chat wins over others with the same name
+        return here, None  # the meeting made or opened in this chat wins over others with the same name
     candidates = managed_meetings(user)
     if said not in IT:
         matching = [e for e in candidates if said in e.title.lower()]
@@ -526,8 +550,8 @@ def find_meeting(name, user, chat_session_id):
     if not candidates:
         return None, None
     return None, {'id': 'event', 'kind': 'choice', 'text': 'Which meeting?',
-                  'choices': [{'value': f'#{e.id}', 'label': _event_label(e, tz), 'note': None}
-                              for e in candidates[:MAX_CHOICES]]}
+                  'choices': _distinct([{'value': f'#{e.id}', 'label': _event_label(e, tz), 'note': None}
+                                        for e in candidates[:MAX_CHOICES]])}
 
 
 def _talk(which, talks):
@@ -671,17 +695,22 @@ def _attach(step, user, chat_session_id):
     tz = user_timezone(user)
     wanted = step.target.strip().lower()
     wants_talk = any(word in wanted for word in TALK_WORDS)
-    here = made_in_chat(chat_session_id, user)
+    here = meeting_in_view(chat_session_id, user)
     questions = []
     target = None
     if wants_talk:
-        talks = my_talks(user, here) or my_talks(user)
+        # a meeting in view (made or opened in this chat) limits the talks to it: never someone else's namesake
+        talks = my_talks(user, here) if here is not None else my_talks(user)
         if len(talks) == 1:
             target = ('contribution', talks[0])
         elif talks:
             questions.append({'id': 'talk_target', 'kind': 'choice', 'text': 'Which talk?',
-                              'choices': [{'value': f'#c{t.id}', 'label': f'{t.title} ({_event_label(t.event, tz)})',
-                                           'note': None} for t in talks[:MAX_CHOICES]]})
+                              'choices': _distinct([{'value': f'#c{t.id}',
+                                                     'label': f'{t.title} ({_event_label(t.event, tz)})',
+                                                     'note': None} for t in talks[:MAX_CHOICES]])})
+        elif here is not None:
+            return Resolved(refusal=f'You are not a speaker of a talk in “{here.title}”. Say “attach this to the '
+                                    f'meeting” to add it to the meeting itself.')
         else:
             return Resolved(refusal='I could not find a talk where you are a speaker.')
     elif wanted.startswith('#c') and wanted[2:].isdigit():
