@@ -146,3 +146,12 @@ def test_context_offers_suggestions_but_never_adds_steps(db, people, past, creat
     offered = {(s['kind'], s['content']) for s in plan['suggestions']}
     assert {('material', 'Q3 budget slides'), ('person', 'Makoto Tanaka'), ('duration', '45')} <= offered
     assert ('person', lucas.full_name) not in offered  # never the requester
+
+
+def test_emails_come_from_the_user_not_the_model():
+    from indico_assistant.services.actions.planner import _only_what_the_user_asked_for
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [{'action': 'create_meeting', 'when': {},
+        'people': [{'name': 'Makoto Tanaka', 'email': 'makoto@example.com'},
+                   {'name': 'Kaori Ito', 'email': 'kaori@ito.org'}]}]})
+    step = _only_what_the_user_asked_for(draft, ['meet Makoto and Kaori Ito (kaori@ito.org)']).steps[0]
+    assert [p.email for p in step.people] == [None, 'kaori@ito.org']

@@ -20,7 +20,11 @@ class PersonRef(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _from_name(cls, value):
-        return {'name': value} if isinstance(value, str) else value  # models often send just the name
+        if isinstance(value, str):
+            return {'name': value}  # models often send just the name
+        if isinstance(value, dict) and '@' not in str(value.get('email') or ''):
+            value = {**value, 'email': None}  # seen live: "null" as a string, which turned a user into a guest
+        return value
 
 
 class When(BaseModel):

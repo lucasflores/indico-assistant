@@ -330,12 +330,12 @@ builds on these.
 
 ### Tests first
 
-- [ ] T072 [P] [US8] `tests/integration/actions/test_suggest_times.py`: busy intervals from `get_linked_events` + `happens_between` + contribution times; working hours in the user's timezone; up to three slots; a person without readable availability is named (AS-3); the sources are listed (AS-2).
+- [x] T072 [P] [US8] `tests/integration/actions/test_suggest_times.py`: busy intervals from `get_linked_events` + `happens_between` + contribution times; working hours in the user's timezone; up to three slots; a person without readable availability is named (AS-3); the sources are listed (AS-2).
 
 ### Implementation
 
-- [ ] T073 [US8] `suggest_times` in `indico_assistant/services/actions/resolve.py` (R10), wired into `CreateMeeting` when `When.time` is missing. The slots become a choice question.
-- [ ] T074 [US8] Add an Outlook free/busy hook behind `actions_outlook_freebusy`, returning "not configured" until the tenant probe confirms `getSchedule`. Leave a `ponytail:` note in `resolve.py` naming the probe as the upgrade path.
+- [x] T073 [US8] `suggest_times` in `indico_assistant/services/actions/resolve.py` (R10), wired into `CreateMeeting` when `When.time` is missing. The slots become a choice question.
+- [x] T074 [US8] Add an Outlook free/busy hook behind `actions_outlook_freebusy`, returning "not configured" until the tenant probe confirms `getSchedule`. Leave a `ponytail:` note in `resolve.py` naming the probe as the upgrade path.
 
 ---
 

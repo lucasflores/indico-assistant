@@ -344,14 +344,28 @@ def _create_meeting(step, user, settings, topic):
 
     # when
     tz = user_timezone(user)
-    day = resolve_date(step.when.date, local_today(user))
+    week = week_days(step.when.date, local_today(user))
+    day = None if week else resolve_date(step.when.date, local_today(user))
     at = resolve_time(step.when.time)
-    if day is None:
+    if week and at is not None:
+        questions.append({'id': 'date', 'kind': 'text', 'text': f'Which day {step.when.date}?'})
+    elif day is None and not week:
         questions.append({'id': 'date', 'kind': 'text', 'text': f'Which day is “{step.when.date}”?'})
-    if at is None:
-        questions.append({'id': 'time', 'kind': 'text', 'text': 'What time should it start?'})
     slot_minutes = [slot.duration_minutes or DEFAULT_SLOT for slot, _ in slots]
     minutes = step.when.duration_minutes or sum(slot_minutes) or DEFAULT_DURATION
+    if at is None:  # no time given: offer free ones (US8)
+        others_now = [p for p in [*invitees, *(s for _, s in slots if s)] if p is not user]
+        free, sources, unknown = suggest_times(user, others_now, max(minutes, sum(slot_minutes)),
+                                               days=week or ([day] if day and step.when.date else None),
+                                               settings=settings)
+        note = f'Checked: {"; ".join(sources)}.'
+        if unknown:
+            note += f' Not known for {", ".join(unknown)}.'
+        questions.append({'id': 'time', 'kind': 'choice' if free else 'text',
+                          'text': ('When should it be? These times are free. ' + note) if free
+                          else 'What time should it start? I found no free time in working hours.',
+                          'choices': [{'value': t.astimezone(tz).isoformat(), 'label': format_dt(t, tz), 'note': None}
+                                      for t in free]})
     if sum(slot_minutes) > minutes:
         notes.append(f'The meeting is extended to {sum(slot_minutes)} minutes to fit its talks.')
         minutes = sum(slot_minutes)
@@ -749,3 +763,64 @@ def _attach(step, user, chat_session_id):
     what = ', '.join(f.filename for f in files) or step.url
     where = f' to “{target[1].title}”' if target else ''
     return Resolved(steps=steps, questions=questions, summary=f'Attach {what}{where}.')
+
+
+# --- suggesting a time (US8, research R10) -----------------------------------------------------------
+
+WORK_START, WORK_END = time(9), time(18)
+WORKING_DAYS = 5
+STEP = timedelta(minutes=30)
+SOURCES = 'Indico: events they manage, chair, speak in or are registered for'
+
+
+def busy_times(person, start, end):
+    """When ``person`` is taken in Indico between ``start`` and ``end``."""
+    from indico.modules.users.util import get_linked_events
+
+    return [(e.start_dt, e.end_dt) for e in get_linked_events(person, dt=start)
+            if not e.is_deleted and e.start_dt < end and start < e.end_dt]
+
+
+def week_days(said, today):
+    """The working days meant by "this week" (from today) or "next week"; None for anything else."""
+    said = (said or '').strip().lower()
+    if said not in ('this week', 'next week'):
+        return None
+    monday = today - timedelta(days=today.weekday()) + timedelta(weeks=1 if said == 'next week' else 0)
+    days = [d for d in (monday + timedelta(days=i) for i in range(5)) if d >= today]
+    return days or week_days('next week', today)  # "this week" on a weekend: the coming one
+
+
+def suggest_times(user, people, minutes, days=None, settings=None):
+    """(up to 3 free starts, sources used, names whose availability is unknown): the earliest free slot in
+    working hours on each coming working day (or on ``day``), for the user and the Indico users named."""
+    tz = user_timezone(user)
+    now = now_utc()
+    today = local_today(user)
+    if not days:
+        days, candidate = [], today
+        while len(days) < WORKING_DAYS:
+            if candidate.weekday() < 5:
+                days.append(candidate)
+            candidate += timedelta(days=1)
+    known = [user, *(p for p in people if p.id is not None)]
+    unknown = [p.full_name for p in people if p.id is None]
+    window = (tz.localize(datetime.combine(days[0], WORK_START)), tz.localize(datetime.combine(days[-1], WORK_END)))
+    busy = [interval for person in known for interval in busy_times(person, *window)]
+    length = timedelta(minutes=minutes)
+    free = []
+    for d in days:
+        start, closing = tz.localize(datetime.combine(d, WORK_START)), tz.localize(datetime.combine(d, WORK_END))
+        while start + length <= closing:
+            if start >= now + STEP and not any(b0 < start + length and start < b1 for b0, b1 in busy):
+                free.append(start)
+                break  # one per day: three options, not three half-hours in a row
+            start += STEP
+        if len(free) == 3:
+            break
+    sources = [SOURCES]
+    if (settings or {}).get('actions_outlook_freebusy'):
+        # ponytail: Outlook free/busy (Graph getSchedule, Calendars.ReadBasic) waits for the tenant probe to
+        # confirm it works with the scoped service-account setup (FR-023); until then Indico only.
+        sources.append('Outlook calendars (not available yet on this Indico)')
+    return free, sources, unknown
