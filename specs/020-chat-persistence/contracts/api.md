@@ -40,7 +40,8 @@ The order is `updated_at` descending, then `id`.
 
 Adds `title`, `updated_at`, and `pending_job_id`: the `job_id` of the last message when that message is the
 user's and has no answer yet. Otherwise it is null. Each message gains `metadata.event_id` for user messages,
-where it is known.
+where it is known, and `feedback`: the caller's own entry `{id, value: 0|1, comment}`, or null. The resumed
+thread shows the thumbs already given (R11).
 
 ## `PATCH /sessions/<id>` (new)
 
