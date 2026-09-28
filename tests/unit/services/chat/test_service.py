@@ -70,7 +70,7 @@ class TestChatService:
         assert chat_service.submit_message(user, "What events?") == (
             session.id, True, mock_session_manager.add_user_message.return_value.id)
         mock_session_manager.create_session.assert_called_once_with(123, None)
-        mock_session_manager.add_user_message.assert_called_once_with(session, "What events?", None)
+        mock_session_manager.add_user_message.assert_called_once_with(session, "What events?", {"event_id": None})
         mock_session_manager.commit.assert_called_once()
 
     def test_submit_to_existing_session(self, chat_service, mock_session_manager, user):
@@ -110,6 +110,7 @@ class TestChatService:
     ):
         session_id = uuid4()
         mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=456)
+        mock_session_manager.page_event_of.side_effect = lambda message_id, fallback: fallback  # (spec 020)
         mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
         mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
         user = MagicMock(id=123, is_admin=True)
@@ -150,6 +151,45 @@ class TestChatService:
             with pytest.raises(EventAccessDeniedError):
                 chat_service.answer(123, uuid4(), "hi")
         pipeline.assert_not_called()
+
+    # --- spec 020 US2: "this event" is the page each message is sent from -----------------------------
+
+    def test_a_message_from_another_events_page_is_accepted(self, chat_service, mock_session_manager, user):
+        session = MagicMock(id=uuid4(), event_id=351)  # started on event 351
+        mock_session_manager.get_session.return_value = session
+        mock_session_manager.validate_session_ownership.return_value = True
+        with patch.object(chat_service, '_validate_event_access') as check:
+            chat_service.submit_message(user, "and this one?", session_id=session.id, event_id=352)
+        check.assert_called_once_with(user, 352)  # the page's event, not the one it started on
+        mock_session_manager.add_user_message.assert_called_once_with(session, "and this one?", {"event_id": 352})
+
+    def test_access_is_checked_against_the_messages_page(self, chat_service, mock_session_manager, user):
+        session = MagicMock(id=uuid4(), event_id=351)
+        mock_session_manager.get_session.return_value = session
+        mock_session_manager.validate_session_ownership.return_value = True
+        with patch.object(chat_service, '_validate_event_access', side_effect=EventAccessDeniedError(352)):
+            with pytest.raises(EventAccessDeniedError):
+                chat_service.submit_message(user, "hi", session_id=session.id, event_id=352)
+        mock_session_manager.add_user_message.assert_not_called()
+
+    def test_the_answer_is_for_the_questions_page(self, chat_service, mock_session_manager, mock_context_builder):
+        session_id, message_id = uuid4(), uuid4()
+        mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=351)
+        mock_session_manager.page_event_of.return_value = 352
+        mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+        mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
+        mock_context_builder.page_note.return_value = {"role": "system", "content": "page 352"}
+        nl2sql = MagicMock(return_value=("An answer", {}))
+        with patch.object(chat_service, '_load_user', return_value=MagicMock(id=123, is_admin=False)), \
+                patch.object(chat_service, '_validate_event_access') as check, \
+                patch.object(chat_service, '_process_with_nl2sql', nl2sql), \
+                patch('indico_assistant.services.actions.executor.open_plan', return_value=None), \
+                patch('indico_assistant.services.chat.service.db'):
+            chat_service.answer(123, session_id, "hi", message_id)
+        mock_session_manager.page_event_of.assert_called_once_with(message_id, 351)
+        assert check.call_args.args[1] == 352 and nl2sql.call_args.args[2] == 352
+        history = nl2sql.call_args.args[1]
+        assert history[-2] == {"role": "system", "content": "page 352"} and history[-1]["content"] == "hi"
 
     @pytest.fixture
     def routed(self, chat_service, mock_session_manager, mock_context_builder):

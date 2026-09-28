@@ -26,6 +26,7 @@ def test_chat_round_trip(monkeypatch):
     manager = MagicMock()
     manager.create_session.return_value = manager.get_session.return_value = session
     manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+    manager.page_event_of.side_effect = lambda message_id, fallback: fallback  # (spec 020: the question's page)
     service = ChatService(session_manager=manager, context_builder=MagicMock())
     monkeypatch.setattr(jobs, '_cache', FakeCache())
     request = MagicMock()

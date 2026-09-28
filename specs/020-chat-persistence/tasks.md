@@ -229,37 +229,37 @@ and waiting plans come back. Focus is not stolen.
 
 ### Tests first
 
-- [ ] T029 [P] [US2] In `tests/unit/services/chat/test_service.py`:
+- [x] T029 [P] [US2] In `tests/unit/services/chat/test_service.py`:
   - a message sent with another event than the session's is accepted;
   - access is checked against the message's event (`EventAccessDeniedError` when the user cannot access it);
   - `answer()` passes the message's event to NL2SQL;
   - an old message without `event_id` falls back to `session.event_id`.
-- [ ] T030 [P] [US2] In `tests/unit/services/chat/test_context_builder.py`, the prompt gets "The user is on
+- [x] T030 [P] [US2] In `tests/integration/chat/test_page_context.py`, the prompt gets "The user is on
   the page of event <id> “<title>”" for an event page, and "not on an event page" otherwise. The title is
   never taken from an event the user cannot access.
-- [ ] T031 [P] [US2] In `tests/integration/actions/test_page_context.py` (R8 ordering):
+- [x] T031 [P] [US2] In `tests/integration/actions/test_page_context.py` (R8 ordering):
   - "move this meeting" sent from B's page plans a change to B;
   - just after the chat made meeting M, "add a talk to it" on the same page targets M;
   - after the user moves to B, "move it" targets B.
 
 ### Implementation
 
-- [ ] T032 [US2] In `indico_assistant/services/chat/service.py`:
+- [x] T032 [US2] In `indico_assistant/services/chat/service.py`:
   - `submit_message` stores `event_id` in the user message's metadata;
   - remove the "different event scope" refusal (line 231);
   - check access per message;
   - `answer()` reads the message's event (falling back to the session's) for access, NL2SQL and the planner.
 
   Make T029 pass.
-- [ ] T033 [US2] Add the page line to `indico_assistant/services/chat/context_builder.py`, under the user's
+- [x] T033 [US2] Add the page line to `indico_assistant/services/chat/context_builder.py`, under the user's
   access. Make T030 pass.
-- [ ] T034 [US2] Pass `page_event_id` through the chat-action code, making T031 pass:
+- [x] T034 [US2] Pass `page_event_id` through the chat-action code, making T031 pass:
   - `indico_assistant/services/chat/service.py: _plan` → `planner.plan_turn` → `resolve.draft_to_plan`;
   - `chat_event` and `meeting_in_view` in `indico_assistant/services/actions/resolve.py` take it;
   - `meeting_in_view` applies R8's rule: the page wins when the user navigated after the meeting was made.
-- [ ] T035 [US2] In `chainlit_app/app_chnlit.py`, always send `event_id` from the session user's metadata,
+- [x] T035 [US2] In `chainlit_app/app_chnlit.py`, always send `event_id` from the session user's metadata,
   which is the page that signed in (R3). After a resume, check that it is the new page's.
-- [ ] T036 [US2] Regression and SC-003:
+- [x] T036 [US2] Regression and SC-003:
   - rerun the chat-actions eval (at least 90% intended, 0% unasked);
   - live, in one conversation across two events, ask "What is this event about?" and "move this meeting to
     4pm" 10 times each; they target the page's event 10/10.
