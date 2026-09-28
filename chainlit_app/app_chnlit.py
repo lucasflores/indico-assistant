@@ -445,7 +445,8 @@ def render_plan(plan: dict) -> tuple[str, list[cl.Action]]:
             actions.append(cl.Action(name="plan_choice", label=choice["label"], payload={"text": choice["label"]}))
     for suggestion in plan.get("suggestions", []):
         lines += ["", f"Suggestion ({suggestion['source']['label']}): {suggestion['content']}"]
-        actions.append(cl.Action(name="plan_choice", label=f"Add: {suggestion['kind']}",
+        short = suggestion["content"] if len(suggestion["content"]) <= 40 else suggestion["content"][:37] + "..."
+        actions.append(cl.Action(name="plan_choice", label=f"Add {suggestion['kind'].replace('_', ' ')}: {short}",
                                  payload={"text": f"add suggestion {suggestion['id']}"}))
     if plan.get("can_confirm"):
         actions.append(cl.Action(name="confirm_plan", label="Confirm", icon="check",

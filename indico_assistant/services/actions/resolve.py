@@ -385,6 +385,9 @@ def _create_meeting(step, user, settings, topic):
             'minutes_before': settings['actions_reminder_minutes'], 'recipients': reminder_to,
             'send_to_speakers': bool(speakers),
         }, refs={'event_id': '$1'}))
+    for url in step.links:  # material from a past meeting (an accepted suggestion)
+        steps.append(_step(len(steps) + 1, 'attach_link', {'target_type': 'event', 'url': url},
+                           refs={'target_id': '$1.event_id'}))
     if step.teams:
         if teams_plugin() is None:
             notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')

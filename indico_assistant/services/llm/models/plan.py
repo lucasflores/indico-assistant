@@ -47,6 +47,7 @@ class CreateMeeting(BaseModel):
     slots: list[Slot] = Field(default_factory=list, description='Contributions (talks) with their speakers')
     teams: bool = Field(False, description='A Microsoft Teams meeting was asked for')
     description: str | None = None
+    links: list[str] = Field(default_factory=list, description='Links to attach as material (accepted suggestions)')
 
 
 class SlotChange(BaseModel):

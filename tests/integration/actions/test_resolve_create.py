@@ -128,7 +128,8 @@ def test_picking_an_offered_choice_needs_no_llm(people, categories, teams, db):
     settings = {'actions_enabled': True, 'actions_allowed': ['create_event', 'add_contribution', 'add_reminder',
                                                              'add_teams_room']}
     with acting_as(lucas):
-        first = planner.plan_turn(lucas, chat.id, 'Create a Teams meeting…', [], None, llm=llm, settings=settings)
+        first = planner.plan_turn(lucas, chat.id, 'Create a Teams meeting tomorrow at 2pm with Makoto, add both of '
+                                 'us as contributors with 20 min slots', [], None, llm=llm, settings=settings)
         assert first.plan['questions'][0]['id'] == 'category' and not first.plan['can_confirm']
         assert first.plan['steps'][0]['description'].startswith('Create event')  # no category yet
         assert 'Sync with Makoto' in first.plan['summary']  # speakers count for the default title

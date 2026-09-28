@@ -307,7 +307,7 @@ builds on these.
 
 ### Tests first
 
-- [ ] T068 [P] [US5] `tests/integration/actions/test_suggestions.py`:
+- [x] T068 [P] [US5] `tests/integration/actions/test_suggestions.py`:
   - context comes only from the user's own chats and from events and material passing `can_access` (another user's chat or a protected event never appears, FR-016);
   - every suggestion has a source;
   - none are applied until accepted;
@@ -316,9 +316,9 @@ builds on these.
 
 ### Implementation
 
-- [ ] T069 [US5] The context block in `indico_assistant/services/actions/context.py`: the user's linked events from the last 12 months on the topic (embedding similarity on titles), their attendees, material titles and minutes (notes) with ids, and earlier-chat snippets from the user's own sessions within retention. Everything goes through `can_access`.
-- [ ] T070 [US5] Suggestions in `indico_assistant/services/actions/planner.py`: validate `source_ref` against the context ids (drop unknown ones), map to Suggestion rows. "Add suggestion s1" → a revision that includes its step.
-- [ ] T071 [P] [US5] Chainlit: render the suggestions as a separate list with an "Add" choice button each (`chainlit_app/app_chnlit.py`).
+- [x] T069 [US5] The context block in `indico_assistant/services/actions/context.py`: the user's linked events from the last 12 months on the topic (embedding similarity on titles), their attendees, material titles and minutes (notes) with ids, and earlier-chat snippets from the user's own sessions within retention. Everything goes through `can_access`.
+- [x] T070 [US5] Suggestions in `indico_assistant/services/actions/planner.py`: validate `source_ref` against the context ids (drop unknown ones), map to Suggestion rows. "Add suggestion s1" → a revision that includes its step.
+- [x] T071 [P] [US5] Chainlit: render the suggestions as a separate list with an "Add" choice button each (`chainlit_app/app_chnlit.py`).
 
 ---
 
