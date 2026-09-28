@@ -24,7 +24,7 @@ from indico_assistant.default_settings import DEFAULT_SETTINGS
 from indico_assistant.services.actions import ACTIONS
 from indico_assistant.services.actions.base import category_path, format_dt
 from indico_assistant.services.actions.context import local_today, user_timezone
-from indico_assistant.services.llm.models.plan import Attach, ChangeMeeting, CreateMeeting
+from indico_assistant.services.llm.models.plan import Attach, ChangeMeeting, CreateMeeting, Undo
 
 
 DEFAULT_DURATION = 30  # minutes, when neither the meeting nor its talks have one
@@ -41,6 +41,7 @@ class Resolved:
     questions: list = field(default_factory=list)
     suggestions: list = field(default_factory=list)
     refusal: str | None = None  # the user cannot do this at all (the reason, as Indico would give it)
+    undoes: object = None  # the plan an undo plan reverses
 
 
 def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None, topic=''):
@@ -52,7 +53,9 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
         return _change_meeting(step, user, settings, chat_session_id)
     if isinstance(step, Attach):
         return _attach(step, user, chat_session_id)
-    raise NotImplementedError  # Undo: T076
+    if isinstance(step, Undo):
+        return _undo(step, user, chat_session_id)
+    raise NotImplementedError
 
 
 # --- people (research R8) ------------------------------------------------------------------------------
@@ -824,3 +827,65 @@ def suggest_times(user, people, minutes, days=None, settings=None):
         # confirm it works with the scoped service-account setup (FR-023); until then Indico only.
         sources.append('Outlook calendars (not available yet on this Indico)')
     return free, sources, unknown
+
+
+# --- undo (US7) ----------------------------------------------------------------------------------------
+
+
+def undoable_plans(user):
+    """The user's carried-out plans of the last 24 hours, from any chat, that can still be undone."""
+    from indico_assistant.models import ActionPlan
+    from indico_assistant.services.actions.events import UNDO_WINDOW, undoable_plan
+
+    recent = (ActionPlan.query.filter(ActionPlan.user_id == user.id, ActionPlan.status == 'done',
+                                      ActionPlan.undoes_id.is_(None), ActionPlan.finished_at > now_utc() - UNDO_WINDOW)
+              .order_by(ActionPlan.finished_at.desc()))
+    return [plan for plan in recent if undoable_plan(plan.id, user) is not None]
+
+
+def _changed_since(plan):
+    """What others (or the user) changed after the plan ran (US7 AS-2)."""
+    from indico.modules.attachments.models.attachments import Attachment
+    from indico.modules.events import Event
+    from indico.modules.events.contributions.models.contributions import Contribution
+
+    notes = []
+    for result in plan.result or ():
+        created, after = result.get('created') or {}, result.get('after') or {}
+        if (event_id := created.get('event_id')) is not None and Event.get(event_id).is_deleted:
+            notes.append(f'“{Event.get(event_id).title}” was already deleted.')
+        if (attachment_id := created.get('attachment_id')) is not None and Attachment.get(attachment_id).is_deleted:
+            notes.append(f'“{Attachment.get(attachment_id).title}” was already removed.')
+        if after:
+            obj = (Event.get(after['event_id']) if 'event_id' in after else Contribution.get(after['contribution_id']))
+            now = {'title': obj.title, 'start_dt': obj.start_dt.isoformat() if obj.start_dt else None}
+            changed = [k for k in now if k in after and str(after[k])[:16] != str(now[k])[:16]]
+            if changed:
+                notes.append(f'“{obj.title}” was changed since ({", ".join(changed)}); undo sets it back anyway.')
+    return notes
+
+
+def _undo(step, user, chat_session_id):
+    tz = user_timezone(user)
+    plans = undoable_plans(user)
+    which = (step.which or 'last').strip().lower()
+    chosen = None
+    if which.startswith('#p'):
+        chosen = next((p for p in plans if str(p.id) == which[2:]), None)
+    elif here := [p for p in plans if p.session_id == chat_session_id]:
+        chosen = here[0]  # "undo that": the latest one in this chat
+    elif len(plans) == 1:
+        chosen = plans[0]
+    if chosen is None:
+        if not plans:
+            return Resolved(refusal='There is nothing of yours from the last 24 hours that I can undo.')
+        return Resolved(summary='Which change should I undo?', questions=[{
+            'id': 'undo_target', 'kind': 'choice', 'text': 'Which change should I undo?',
+            'choices': _distinct([{'value': f'#p{p.id}', 'label': f'{p.summary} ({format_dt(p.finished_at, tz)})',
+                                   'note': None} for p in plans[:MAX_CHOICES]])}])
+    steps = [_step(1, 'delete_created', {'plan_id': str(chosen.id)})]
+    _describe(steps)
+    reverted = [f'undo “{s.get("description", s["action"])}”' for s in reversed(chosen.steps)]
+    steps[0]['side_effects'] = reverted
+    what = chosen.summary.split('. ', 1)[0].rstrip('.')  # (its first sentence, without the old plan's notes)
+    return Resolved(steps=steps, summary=' '.join([f'Undo: {what}.', *_changed_since(chosen)]), undoes=chosen)

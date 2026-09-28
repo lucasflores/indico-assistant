@@ -79,7 +79,8 @@ def build_context(user, topic, chat_session_id=None, history=()):
                                              'event_id': event.id, 'attachment_id': attachment.id,
                                              'url': attachment.absolute_download_url}
                     lines.append(f'[{akey}] Material of “{event.title}”: {attachment.title}')
-        if (note := EventNote.get_for_linked_object(event)) is not None and note.can_access(user):
+        # minutes are visible to whoever may see what they belong to (the meeting, checked above)
+        if (note := EventNote.get_for_linked_object(event)) is not None and note.object.can_access(user):
             nkey = f'note:{event.id}'
             context.sources[nkey] = {'type': 'note', 'label': f'the minutes of “{event.title}”', 'event_id': event.id}
             lines.append(f'[{nkey}] Minutes of “{event.title}”: {_plain(note.html)[:NOTE_CHARS]}')
@@ -94,9 +95,11 @@ def build_context(user, topic, chat_session_id=None, history=()):
 def automatic(context, draft, user=None):
     """Suggestions that need no model: from the most similar past meeting, its material, the people there
     who are not invited yet, and its length when none was given (each with its source)."""
+    from indico_assistant.services.llm.models.plan import CreateMeeting
+
     meetings = [k for k, v in context.sources.items() if v['type'] == 'event']
-    if not meetings or not draft.steps:
-        return []
+    if not meetings or not draft.steps or not isinstance(draft.steps[0], CreateMeeting):
+        return []  # suggestions are for new meetings (seen live: "undo that" crashed here)
     step = draft.steps[0]
     best = meetings[0]  # (most similar first)
     source = context.sources[best]

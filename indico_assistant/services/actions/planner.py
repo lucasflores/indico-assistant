@@ -129,6 +129,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
                                        questions=resolved.questions,
                                        suggestions=list(suggestions) if isinstance(draft.steps[0], CreateMeeting) else [],
                                        supersedes=open_plan if open_plan is not None else None,
+                                       undoes=resolved.undoes,
                                        llm_calls=calls, draft={**draft.model_dump(mode='json'), 'topic': topic})
     from indico_assistant.schemas.actions import PlanView
 
@@ -226,7 +227,9 @@ def answered_draft(open_plan, message):
             if said in (choice['label'].lower(), str(choice['value']).lower()):
                 draft = PlanDraft.model_validate(open_plan.draft)
                 step = draft.steps[0]
-                if question['id'] == 'talk_target':
+                if question['id'] == 'undo_target':
+                    step.which = choice['value']  # '#p<plan id>'
+                elif question['id'] == 'talk_target':
                     step.target = choice['value']  # '#c<contribution id>'
                 elif question['id'] == 'event' and hasattr(step, 'target'):
                     step.target = choice['value']
