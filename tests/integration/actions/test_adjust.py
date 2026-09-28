@@ -1,0 +1,178 @@
+"""Adjusting meetings (US6): "move it to 3pm", renaming, adding and changing talks; parity with the
+event-editing pages; the talks and the Teams meeting move with the event."""
+
+from datetime import timedelta
+
+import pytest
+from flask import g
+
+from indico.modules.categories.models.categories import EventCreationMode
+from indico.modules.events.management.controllers.settings import RHEditEventData, RHEditEventDates
+from indico.modules.events.timetable.controllers.legacy import RHLegacyTimetableEditEntry
+from indico.util.date_time import now_utc
+
+from indico_assistant.models import ChatSession
+from indico_assistant.services.actions import ACTIONS, executor, resolve
+from indico_assistant.services.actions.context import acting_as
+from indico_assistant.services.llm.models.plan import PlanDraft
+
+
+ROLES = ['admin', 'manager', 'contributions_manager', 'submitter', 'stranger']
+START = (now_utc() + timedelta(days=2)).replace(hour=14, minute=0, second=0, microsecond=0)
+
+
+@pytest.mark.parametrize('role', ROLES)
+@pytest.mark.parametrize('locked', [False, True])
+def test_update_event_parity(page_allows, action_allows, people, dummy_event, role, locked):
+    dummy_event.is_locked = locked
+    user = people[role]
+    ours = action_allows(ACTIONS['update_event'], user, event_id=dummy_event.id, title='Renamed')
+    assert ours == page_allows(RHEditEventData, user, event=dummy_event) == \
+        page_allows(RHEditEventDates, user, event=dummy_event), role
+
+
+@pytest.mark.parametrize('role', ROLES)
+def test_update_contribution_parity(page_allows, action_allows, people, dummy_event, create_contribution, role):
+    talk = create_contribution(dummy_event, 'Talk')
+    user = people[role]
+    assert action_allows(ACTIONS['update_contribution'], user, contribution_id=talk.id, title='New') == \
+        page_allows(RHLegacyTimetableEditEntry, user, event=dummy_event, session=None), role
+
+
+@pytest.fixture
+def meeting(db, people, create_category, teams):
+    """A meeting made in a chat by a carried-out plan: two talks and a Teams room, 14:00-14:40."""
+    lucas, makoto = people['manager'], people['makoto']
+    lucas.settings.set('timezone', 'UTC')
+    category = create_category(title='Meetings', event_creation_mode=EventCreationMode.restricted)
+    category.update_principal(lucas, permissions={'create'})
+    chat = ChatSession(user_id=lucas.id)
+    db.session.add(chat)
+    db.session.flush()
+    steps = [
+        {'n': 1, 'action': 'create_event', 'args': {'category_id': category.id, 'title': 'Weekly sync',
+                                                    'start_dt': START.isoformat(),
+                                                    'end_dt': (START + timedelta(minutes=40)).isoformat(),
+                                                    'timezone': 'UTC'}},
+        *({'n': n, 'action': 'add_contribution', 'refs': {'event_id': '$1'},
+           'args': {'title': who.full_name, 'start_dt': (START + timedelta(minutes=20 * (n - 2))).isoformat(),
+                    'duration_minutes': 20, 'speakers': [{'user_id': who.id}]}}
+          for n, who in ((2, lucas), (3, makoto))),
+        {'n': 4, 'action': 'add_teams_room', 'refs': {'event_id': '$1'},
+         'args': {'name': 'Weekly sync', 'coorganizer_ids': [lucas.id]}},
+    ]
+    run(lucas, chat, steps)
+    return chat, executor.made_in_chat(chat.id) if hasattr(executor, 'made_in_chat') else resolve.made_in_chat(chat.id)
+
+
+def run(user, chat, steps):
+    plan, token = executor.create_plan(user, chat.id, steps=steps, summary='x')
+    executor.confirm(plan.id, user, token)
+    g.email_queue = []
+    result = executor.run(plan.id)
+    assert result.status == 'done', result.error
+    return result
+
+
+def change(user, chat, **what):
+    step = {'action': 'change_meeting', **what}
+    with acting_as(user):
+        return resolve.draft_to_plan(PlanDraft.model_validate({'decision': 'new_request', 'steps': [step]}), user,
+                                     chat_session_id=chat.id)
+
+
+def test_move_it_to_3pm_moves_talks_and_teams(people, meeting, teams):
+    lucas = people['manager']
+    chat, event = meeting
+    _, fake = teams
+    plan = change(lucas, chat, meeting='it', move_to={'time': '3pm'})
+    assert plan.questions == [] and [s['action'] for s in plan.steps] == ['update_event']
+    assert 'Its 2 talks move with it' in plan.steps[0]['side_effects']
+    assert 'The Teams meeting moves too' in plan.steps[0]['side_effects']
+    run(lucas, chat, plan.steps)
+    assert (event.start_dt, event.end_dt) == (START + timedelta(hours=1), START + timedelta(hours=1, minutes=40))
+    assert sorted(c.start_dt for c in event.contributions) == [START + timedelta(hours=1),
+                                                               START + timedelta(hours=1, minutes=20)]
+    assert g.vc_teams_pending_move  # vc_teams moves the Teams meeting once this commits
+
+
+def test_add_a_qa_at_the_end_extends_the_meeting(people, meeting):
+    lucas = people['manager']
+    chat, event = meeting
+    plan = change(lucas, chat, meeting='it', add_slots=[{'title': 'Q&A', 'duration_minutes': 10}])
+    assert plan.steps[0]['args']['start_dt'] == (START + timedelta(minutes=40)).isoformat().replace('+00:00', 'Z') \
+        or plan.steps[0]['args']['start_dt'].startswith((START + timedelta(minutes=40)).strftime('%Y-%m-%dT%H:%M'))
+    assert 'extended to end at 14:50' in plan.summary
+    run(lucas, chat, plan.steps)
+    assert event.end_dt == START + timedelta(minutes=50) and len(event.contributions) == 3
+
+
+def test_change_the_speaker_of_the_second_talk(people, meeting, create_user):
+    lucas = people['manager']
+    chat, event = meeting
+    kaori = create_user(70, first_name='Kaori', last_name='Ito', email='kaori@aithoth.com')
+    plan = change(lucas, chat, meeting='it', change_slots=[{'which': 'second', 'speaker': 'Kaori'}])
+    assert plan.steps[0]['action'] == 'update_contribution'
+    run(lucas, chat, plan.steps)
+    second = sorted(event.contributions, key=lambda c: c.start_dt)[1]
+    assert [link.person.user for link in second.person_links if link.is_speaker] == [kaori]
+
+
+def test_a_named_meeting_among_several_is_asked(db, people, meeting, create_event, dummy_event):
+    lucas = people['manager']
+    _, event = meeting
+    chat = ChatSession(user_id=lucas.id)  # another chat: no meeting made here
+    db.session.add(chat)
+    db.session.flush()
+    other = create_event(title='Weekly sync (team B)', start_dt=START + timedelta(days=7),
+                         end_dt=START + timedelta(days=7, hours=1), creator=lucas, creator_has_privileges=True)
+    plan = change(lucas, chat, meeting='weekly sync', title='Weekly sync (renamed)')
+    (question,) = plan.questions
+    assert sorted(c['value'] for c in question['choices']) == sorted([f'#{event.id}', f'#{other.id}'])
+    answered = change(lucas, chat, meeting=f'#{other.id}', title='Weekly sync (renamed)')
+    assert answered.steps[0]['args'] == {'event_id': other.id, 'title': 'Weekly sync (renamed)',
+                                         'description': None, 'start_dt': None, 'end_dt': None}
+
+
+def test_someone_elses_meeting_is_refused(people, meeting):
+    chat, event = meeting
+    assert 'could not find' in change(people['stranger'], chat, meeting='Weekly sync', title='Mine').refusal
+    assert 'cannot manage' in change(people['stranger'], chat, meeting=f'#{event.id}', title='Mine').refusal
+
+
+def test_too_short_for_its_talks_is_refused_at_check(action_allows, people, meeting):
+    _, event = meeting
+    # moving the start 30 minutes later but keeping the end: the talks would not fit (EventDatesForm)
+    assert not action_allows(ACTIONS['update_event'], people['manager'], event_id=event.id,
+                             start_dt=START + timedelta(minutes=30))
+
+
+def test_the_meeting_made_here_wins_over_namesakes(people, meeting, create_event):
+    lucas = people['manager']
+    chat, event = meeting
+    create_event(title='Weekly sync', start_dt=START + timedelta(days=1), end_dt=START + timedelta(days=1, hours=1),
+                 creator=lucas, creator_has_privileges=True)
+    plan = change(lucas, chat, meeting='Weekly sync', move_to={'time': '3pm'})
+    assert plan.questions == [] and plan.steps[0]['args']['event_id'] == event.id
+
+
+def test_a_move_keeps_the_day_unless_the_user_named_one():
+    # seen live: "move it to 3pm" came back from the model with a made-up date
+    from indico_assistant.services.actions.planner import _only_what_the_user_said
+    draft = lambda: PlanDraft.model_validate({'decision': 'new_request', 'steps': [  # noqa: E731
+        {'action': 'change_meeting', 'move_to': {'date': '2026-09-29', 'time': '15:00'}}]})
+    assert _only_what_the_user_said(draft(), 'move it to 3pm').steps[0].move_to.date is None
+    assert _only_what_the_user_said(draft(), 'move it to Tuesday at 3pm').steps[0].move_to.date == 'tuesday'
+
+
+@pytest.mark.parametrize(('message', 'model_date', 'used'), [
+    ('Create a meeting on Thursday at 2pm', '2026-09-29', 'on thursday'),  # seen live: a Tuesday
+    ('set something up next Tuesday', '2026-10-13', 'next tuesday'),
+    ('meeting tomorrow at 10', '2026-09-30', 'tomorrow'),
+    ('meeting on 2026-10-02 at 10', '2026-10-02', '2026-10-02'),
+])
+def test_the_users_own_words_decide_the_day(message, model_date, used):
+    from indico_assistant.services.actions.planner import _only_what_the_user_said
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'create_meeting', 'when': {'date': model_date, 'time': '14:00'}}]})
+    assert _only_what_the_user_said(draft, message).steps[0].when.date == used

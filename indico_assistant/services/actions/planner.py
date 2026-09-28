@@ -7,12 +7,13 @@ the user.
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from indico_assistant.services.actions import enabled_actions, executor, validate_plan
 from indico_assistant.services.actions.context import fence, user_timezone
-from indico_assistant.services.llm.models.plan import PlanDraft
+from indico_assistant.services.llm.models.plan import CreateMeeting, PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
 
@@ -33,6 +34,8 @@ Rules:
 - Never invent people, categories, dates or times. Leave a field null when the user did not say it; the
   assistant will ask or suggest.
 - Keep people's names exactly as the user wrote them. "me", "I" and "us" include the user.
+- Moving a meeting: give only what the user said. "Move it to 3pm" has a time and no date (null): it keeps
+  its day. Never work out a date yourself.
 - The category is where the meeting goes ("in Engineering"); it is never the title. The title is only what
   the user called the meeting; leave it null otherwise.
 - Someone "giving a talk" or "presenting" is the speaker of that slot, and only them.
@@ -71,7 +74,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
-    draft = _only_what_the_user_confirmed(response.result, open_plan)
+    draft = _only_what_the_user_said(_only_what_the_user_confirmed(response.result, open_plan), message)
     turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message)
     turn.llm_calls = calls
     return turn
@@ -122,10 +125,36 @@ def _only_what_the_user_confirmed(draft, open_plan):
     """A time in the past is kept only when the user picked "Keep that time" (answered_draft), never because
     the model said so; a revision keeps an earlier such answer."""
     kept = bool(open_plan and open_plan.draft and any(
-        (s.get('when') or {}).get('keep_past') for s in open_plan.draft.get('steps', [])))
+        (s.get('when') or s.get('move_to') or {}).get('keep_past') for s in open_plan.draft.get('steps', [])))
     for step in draft.steps:
-        if getattr(step, 'when', None) is not None:
-            step.when.keep_past = kept
+        for when in (getattr(step, 'when', None), getattr(step, 'move_to', None)):
+            if when is not None:
+                when.keep_past = kept
+    return draft
+
+
+RELATIVE_DAY = re.compile(r'\b(?:(?:next|this|on) )?(?:mon|tues|wednes|thurs|fri|satur|sun)day\b|\btoday\b|\btomorrow\b',
+                          re.IGNORECASE)
+
+
+def _only_what_the_user_said(draft, message):
+    """Dates as the user said them, worked out by our code (models get weekdays wrong: "Thursday" came back as
+    a Tuesday); and a move keeps the meeting's day unless the user named one ("move it to 3pm" came back
+    with another day)."""
+    from indico_assistant.services.llm.models.plan import ChangeMeeting
+
+    said = message.lower()
+    relative = RELATIVE_DAY.search(message)
+    names_a_day = relative is not None or any(word in said for word in (
+        'week', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', '/', '-'))
+    for step in draft.steps:
+        when = step.when if isinstance(step, CreateMeeting) else getattr(step, 'move_to', None)
+        if when is None:
+            continue
+        if relative is not None:
+            when.date = relative.group(0).lower()
+        elif isinstance(step, ChangeMeeting) and not names_a_day:
+            when.date = None
     return draft
 
 
@@ -139,13 +168,20 @@ def answered_draft(open_plan, message):
             if said in (choice['label'].lower(), str(choice['value']).lower()):
                 draft = PlanDraft.model_validate(open_plan.draft)
                 step = draft.steps[0]
-                if question['id'] == 'category':
+                if question['id'] == 'event':
+                    step.meeting = choice['value']  # '#<event id>'
+                elif question['id'].startswith('talk:'):
+                    for change in getattr(step, 'change_slots', ()):
+                        if change.which == question['id'].removeprefix('talk:'):
+                            change.which = choice['value']
+                elif question['id'] == 'category':
                     step.category = choice['label']
                 elif question['id'] == 'past':
+                    when = step.when if isinstance(step, CreateMeeting) else step.move_to
                     if choice['value'] == 'keep':
-                        step.when.keep_past = True
+                        when.keep_past = True
                     else:
-                        step.when.date = choice['value']
+                        when.date = choice['value']
                 elif question['id'].startswith('person:'):
                     key = question['id'].removeprefix('person:')
                     for ref in [*step.people, *(slot.speaker for slot in step.slots if slot.speaker)]:

@@ -21,7 +21,7 @@ START = (now_utc() + timedelta(days=3)).replace(minute=0, second=0, microsecond=
 
 
 @pytest.fixture
-def writable(people, dummy_event, create_category, teams):
+def writable(people, dummy_event, create_category, create_contribution, teams):
     """One valid single-step plan per write action, all for the manager."""
     from indico.modules.events.settings import unlisted_events_settings
     unlisted_events_settings.set('enabled', True)
@@ -37,13 +37,16 @@ def writable(people, dummy_event, create_category, teams):
         'add_contribution': {'event_id': dummy_event.id, 'title': 'Talk', 'start_dt': START.isoformat(),
                              'duration_minutes': 20, 'speakers': [{'user_id': people['makoto'].id}]},
         'add_reminder': {'event_id': dummy_event.id, 'minutes_before': 15, 'recipients': ['x@example.test']},
+        'update_event': {'event_id': dummy_event.id, 'title': 'Renamed meeting'},
+        'update_contribution': {'contribution_id': create_contribution(dummy_event, 'Old talk').id, 'title': 'New talk'},
         'add_teams_room': {'event_id': dummy_event.id, 'name': 'Sync', 'coorganizer_ids': [people['manager'].id]},
     }
 
 
 def footprint(fake):
-    """Everything a write action could leave behind."""
-    return (Event.query.filter_by(is_deleted=False).count(), Contribution.query.filter_by(is_deleted=False).count(),
+    """Everything a write action could leave behind or change."""
+    return (sorted((e.id, e.title, e.start_dt, e.end_dt) for e in Event.query.filter_by(is_deleted=False)),
+            sorted((c.id, c.title, c.duration) for c in Contribution.query.filter_by(is_deleted=False)),
             EventReminder.query.count(), VCRoom.query.count(), len(fake.state['events']))
 
 
@@ -53,7 +56,7 @@ def test_every_write_action_is_covered(writable):
     assert implemented == set(writable)  # a new action needs a case here
 
 
-@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution'])
 @pytest.mark.parametrize('state', ['unconfirmed', 'cancelled', 'expired', 'superseded'])
 def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, state):
     lucas = people['manager']
@@ -79,7 +82,7 @@ def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, stat
     assert fake.calls == []  # no Teams call either
 
 
-@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution'])
 def test_a_double_confirmation_runs_once(db, people, writable, teams, action):
     lucas = people['manager']
     _, fake = teams
@@ -95,4 +98,4 @@ def test_a_double_confirmation_runs_once(db, people, writable, teams, action):
     after = footprint(fake)
     with pytest.raises(executor.NotConfirmed):
         executor.run(plan.id)  # a second worker delivery of the same plan
-    assert footprint(fake) == after and sum(a - b for a, b in zip(after, before)) >= 1
+    assert footprint(fake) == after != before  # it did something, once

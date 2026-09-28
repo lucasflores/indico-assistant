@@ -24,7 +24,7 @@ from indico_assistant.default_settings import DEFAULT_SETTINGS
 from indico_assistant.services.actions import ACTIONS
 from indico_assistant.services.actions.base import category_path, format_dt
 from indico_assistant.services.actions.context import local_today, user_timezone
-from indico_assistant.services.llm.models.plan import CreateMeeting
+from indico_assistant.services.llm.models.plan import ChangeMeeting, CreateMeeting
 
 
 DEFAULT_DURATION = 30  # minutes, when neither the meeting nor its talks have one
@@ -48,7 +48,9 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
     step = draft.steps[0]
     if isinstance(step, CreateMeeting):
         return _create_meeting(step, user, settings, topic or step.title or '')
-    raise NotImplementedError  # ChangeMeeting: T060; Attach: T066; Undo: T076
+    if isinstance(step, ChangeMeeting):
+        return _change_meeting(step, user, settings, chat_session_id)
+    raise NotImplementedError  # Attach: T066; Undo: T076
 
 
 # --- people (research R8) ------------------------------------------------------------------------------
@@ -458,3 +460,171 @@ def _describe(steps):
             continue
         step['description'], step['side_effects'] = action.describe(validated)
         step['args'] = validated.model_dump(mode='json', exclude=set(step['refs']))
+
+
+# --- changing a meeting (US6) --------------------------------------------------------------------------
+
+IT = {'', 'it', 'this', 'that', 'the meeting', 'this meeting', 'that meeting'}
+ORDINALS = {'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2, 'fourth': 3, 'last': -1}
+
+
+def made_in_chat(chat_session_id, user=None):
+    """The meeting the user's latest carried-out plan in this chat created ("it", US6 AS-1)."""
+    from indico.modules.events import Event
+
+    from indico_assistant.models import ActionPlan
+    if chat_session_id is None:
+        return None
+    plans = ActionPlan.query.filter_by(session_id=chat_session_id, status='done')
+    if user is not None:
+        plans = plans.filter_by(user_id=user.id)
+    for plan in plans.order_by(ActionPlan.finished_at.desc()):
+        for result in plan.result or ():
+            if (event_id := (result.get('created') or {}).get('event_id')) is not None:
+                if (event := Event.get(event_id, is_deleted=False)) is not None:
+                    return event
+    return None
+
+
+def managed_meetings(user):
+    """Meetings the user manages, from a month ago onwards, soonest first."""
+    from indico.modules.users.util import get_linked_events
+
+    events = [e for e in get_linked_events(user, dt=now_utc() - timedelta(days=30))
+              if not e.is_deleted and e.can_manage(user)]
+    return sorted(events, key=lambda e: e.start_dt)
+
+
+def _event_label(event, tz):
+    return f'{event.title} ({format_dt(event.start_dt, tz)})'
+
+
+def find_meeting(name, user, chat_session_id):
+    """(event, question): the meeting the user means, or a question listing the candidates."""
+    from indico.modules.events import Event
+
+    tz = user_timezone(user)
+    said = (name or '').strip().lower()
+    if said.startswith('#') and said[1:].isdigit():  # an answer to the "which meeting?" question
+        return Event.get(int(said[1:]), is_deleted=False), None
+    here = made_in_chat(chat_session_id, user)
+    if here is not None and (said in IT or said in here.title.lower()):
+        return here, None  # the meeting made in this chat wins over others with the same name
+    candidates = managed_meetings(user)
+    if said not in IT:
+        matching = [e for e in candidates if said in e.title.lower()]
+        if not matching:
+            close = difflib.get_close_matches(said, [e.title.lower() for e in candidates], n=MAX_CHOICES, cutoff=0.6)
+            matching = [e for e in candidates if e.title.lower() in close]
+            candidates = matching
+        elif len(matching) == 1:
+            return matching[0], None
+        else:
+            candidates = matching
+    if not candidates:
+        return None, None
+    return None, {'id': 'event', 'kind': 'choice', 'text': 'Which meeting?',
+                  'choices': [{'value': f'#{e.id}', 'label': _event_label(e, tz), 'note': None}
+                              for e in candidates[:MAX_CHOICES]]}
+
+
+def _talk(which, talks):
+    said = which.strip().lower()
+    if said in ORDINALS:
+        index = ORDINALS[said]
+        return talks[index] if -len(talks) <= index < len(talks) else None
+    if said.isdigit() and 0 < int(said) <= len(talks):
+        return talks[int(said) - 1]
+    matching = [t for t in talks if said in t.title.lower()
+                or any(said in link.full_name.lower() for link in t.person_links)]
+    return matching[0] if len(matching) == 1 else None
+
+
+def _change_meeting(step, user, settings, chat_session_id):
+    event, question = find_meeting(step.meeting, user, chat_session_id)
+    if question:
+        return Resolved(summary='Which meeting do you want to change?', questions=[question])
+    if event is None:
+        return Resolved(refusal=f'I could not find a meeting called “{step.meeting}” that you manage.')
+    if not event.can_manage(user):
+        return Resolved(refusal=f'You cannot manage “{event.title}”, so I cannot change it.')  # US6 AS-2
+
+    tz = user_timezone(user)
+    questions, notes, steps = [], [], []
+    start, end = event.start_dt, event.end_dt
+    change = {}
+    if step.move_to:
+        day = (resolve_date(step.move_to.date, local_today(user)) if step.move_to.date
+               else event.start_dt.astimezone(tz).date())
+        at = resolve_time(step.move_to.time) or event.start_dt.astimezone(tz).time()
+        start = tz.localize(datetime.combine(day, at))
+        end = start + (timedelta(minutes=step.move_to.duration_minutes) if step.move_to.duration_minutes
+                       else event.end_dt - event.start_dt)
+        if start < now_utc() and not step.move_to.keep_past:
+            questions.append({'id': 'past', 'kind': 'choice', 'text': f'{format_dt(start, tz)} has already passed.',
+                              'choices': [{'value': (day + timedelta(days=1)).isoformat(),
+                                           'label': f'Tomorrow at {at:%H:%M}', 'note': None},
+                                          {'value': 'keep', 'label': 'Keep that time', 'note': None}]})
+        if (start, end) != (event.start_dt, event.end_dt):
+            change.update(start_dt=start, end_dt=end)
+    if step.title:
+        change['title'] = step.title
+    if step.description:
+        change['description'] = step.description
+    if change:
+        steps.append(_step(1, 'update_event', {'event_id': event.id, **change}))
+
+    shift = start - event.start_dt
+    talks = sorted((c for c in event.contributions if c.is_scheduled), key=lambda c: c.start_dt)
+    resolved = {}
+
+    def person(ref):
+        key = (ref.name or ref.email or '').strip().lower()
+        if key in ME:
+            return user
+        if key not in resolved:
+            matches = find_people(ref, user, known_people(user))
+            resolved[key] = matches[0] if len(matches) == 1 else (
+                Guest.from_ref(ref) if not matches and ref.email and ref.name else None)
+            if resolved[key] is None:
+                questions.append({'id': f'person:{key}', 'kind': 'text',
+                                  'text': f'Who is “{ref.name or ref.email}”? Give their full name and email.'})
+        return resolved[key]
+
+    for change_ in step.change_slots:
+        talk = _talk(change_.which, talks)
+        if talk is None:
+            questions.append({'id': f'talk:{change_.which}', 'kind': 'choice',
+                              'text': f'Which talk is “{change_.which}”?',
+                              'choices': [{'value': t.title, 'label': t.title, 'note': None} for t in talks]})
+            continue
+        args = {'contribution_id': talk.id}
+        if change_.title:
+            args['title'] = change_.title
+        if change_.duration_minutes:
+            args['duration_minutes'] = change_.duration_minutes
+        if change_.speaker and (who := person(change_.speaker)) is not None:
+            args['speakers'] = [speaker_args(who)]
+        if change_.move_to and (at := resolve_time(change_.move_to.time)):
+            args['start_dt'] = tz.localize(datetime.combine(start.astimezone(tz).date(), at))
+        steps.append(_step(len(steps) + 1, 'update_contribution', args))
+
+    after = max([t.end_dt for t in talks] + [event.start_dt]) + shift
+    for slot in step.add_slots:
+        length = slot.duration_minutes or DEFAULT_SLOT
+        speaker = person(slot.speaker) if slot.speaker else None
+        steps.append(_step(len(steps) + 1, 'add_contribution', {
+            'event_id': event.id, 'title': slot.title or (speaker.full_name if speaker else 'Talk'),
+            'start_dt': after, 'duration_minutes': length, 'speakers': [speaker_args(speaker)] if speaker else [],
+        }))
+        after += timedelta(minutes=length)
+    if after > end:
+        notes.append(f'The meeting is extended to end at {after.astimezone(tz):%H:%M} to fit the new talks.')
+
+    if not steps and not questions:
+        return Resolved(refusal='I did not find anything to change. What should be different?')
+    if change.get('start_dt'):
+        notes.extend(_clashes(user, [user], start, end))
+    _describe(steps)
+    return Resolved(steps=steps, questions=questions,
+                    summary=' '.join([f'Change the meeting “{event.title}” ({format_dt(event.start_dt, tz)}).', *notes]))
