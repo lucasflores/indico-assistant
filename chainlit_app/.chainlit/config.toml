@@ -6,7 +6,7 @@ user_env = []
 session_timeout = 3600
 
 # Duration (in seconds) of the user session expiry
-user_session_timeout = 1296000  # 15 days
+user_session_timeout = 86400  # 24 h: the Indico token's lifetime; each page load signs in again (spec 020 R3)
 
 # Enable third parties caching (e.g., LangChain cache)
 cache = false
@@ -85,7 +85,7 @@ custom_css = "/public/widget.css"
 
 # layout = "wide"
 
-# default_sidebar_state = "open"
+default_sidebar_state = "closed"  # Past Chats starts folded in the narrow panel (spec 020)
 
 # Description of the assistant. This is used for HTML tags.
 # description = ""
@@ -102,7 +102,7 @@ cot = "full"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# custom_js = "/public/test.js"
+custom_js = "/public/indico_panel.js"  # the frame side of the panel protocol (spec 020 R6)
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"

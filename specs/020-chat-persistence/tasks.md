@@ -59,20 +59,20 @@ Indico ids (R11).
 
 ### Tests first
 
-- [ ] T005 [P] In `tests/unit/services/chat/test_session_manager.py`:
+- [x] T005 [P] In `tests/integration/chat/test_session_history.py` (real rows; the older session tests are mock-only):
   - `create_session(user_id, event_id, session_id=<uuid>)` keeps the given id;
   - the list item's `title` falls back to the first user message cut to 60 characters when `title` is null.
-- [ ] T006 [P] In `tests/integration/chat/test_chat_endpoint.py`:
+- [x] T006 [P] In `tests/integration/chat/test_session_history.py`:
   - `POST /chat` with a `session_id` that does not exist creates that session, owned by the caller;
   - with another user's existing id it responds `403`;
   - the queued `job_id` is stored in the user message's `metadata_json`.
-- [ ] T007 [P] In `tests/integration/chat/test_sessions_endpoint.py`:
+- [x] T007 [P] In `tests/integration/chat/test_session_history.py`:
   - `GET /sessions` returns `title`, `updated_at` and `next_cursor`;
   - walking the pages with `cursor` visits every session once, newest `updated_at` first, even when a
     session is updated between pages;
   - `GET /sessions/<id>` returns `pending_job_id` only when the last message is an unanswered user message;
   - it returns each message's `metadata.event_id` and the caller's own `feedback`.
-- [ ] T008 [P] In `chainlit_app/tests/test_data_layer.py`, against a fake Indico (`httpx.MockTransport`):
+- [x] T008 [P] In `chainlit_app/tests/test_data_layer.py`, against a fake Indico (`httpx.MockTransport`):
   - `get_thread` maps a session to `ThreadDict`/`StepDict` as data-model.md says (ids, types, `createdAt =
     updated_at`, name fallback, upload lines, feedback);
   - `list_threads` maps the page and `next_cursor` into `PaginatedResponse`/`PageInfo`;
@@ -84,10 +84,10 @@ Indico ids (R11).
 
 ### Implementation
 
-- [ ] T009 Add `title = Column(String(200), nullable=True)` to `indico_assistant/models/session.py`. Write
+- [x] T009 Add `title = Column(String(200), nullable=True)` to `indico_assistant/models/session.py`. Write
   `indico_assistant/migrations/008_add_chat_session_title.py` (`down_revision = '007_create_action_plans'`,
   upgrade and downgrade). Apply it locally and check `\d plugin_assistant.chat_sessions`.
-- [ ] T010 In `indico_assistant/services/chat/session_manager.py`:
+- [x] T010 In `indico_assistant/services/chat/session_manager.py`:
   - `create_session(..., session_id=None)`;
   - `list_sessions(user_id, limit, cursor, search=None)`, keyset on (`updated_at`, `id`), returning the next
     cursor;
@@ -95,17 +95,17 @@ Indico ids (R11).
   - `set_message_metadata(message_id, **keys)`, which merges into `metadata_json`.
 
   Make T005 pass.
-- [ ] T011 Make T006 pass:
+- [x] T011 Make T006 pass:
   - in `indico_assistant/services/chat/service.py`, `_get_or_create_session` creates the session with the
     client's id when none exists; the ownership check stays for existing ones;
   - in `indico_assistant/controllers/chat.py`, after `jobs.create`, write `job_id` onto the user message
     with `set_message_metadata` and commit.
-- [ ] T012 Make T007 pass:
+- [x] T012 Make T007 pass:
   - in `indico_assistant/schemas/session.py`, add `title`, `updated_at` and `next_cursor` to the list;
     `title`, `updated_at` and `pending_job_id` to the detail; and `feedback` per message;
   - in `indico_assistant/controllers/sessions.py`, accept `cursor`. `offset` is ignored when `cursor` is
     given.
-- [ ] T013 Create `chainlit_app/indico_data_layer.py`, making T008 pass. It holds:
+- [x] T013 Create `chainlit_app/indico_data_layer.py`, making T008 pass. It holds:
   - `IndicoDataLayer(BaseDataLayer)`, with the method mapping of R4;
   - `CURRENT_TOKEN: ContextVar[str | None]`;
   - `install_token_middleware(app)`, an ASGI middleware that sets `CURRENT_TOKEN` from
@@ -113,7 +113,7 @@ Indico ids (R11).
   - `_token()`, which prefers `CURRENT_TOKEN`, then `chainlit.context.context.session.token`.
 
   Indico calls use one `httpx.AsyncClient` against `INDICO_API_URL`, with a timeout (constitution IV).
-- [ ] T014 Wire it into `chainlit_app/app_chnlit.py`:
+- [x] T014 Wire it into `chainlit_app/app_chnlit.py`:
   - register `@cl.data_layer` returning `IndicoDataLayer()`, and call
     `install_token_middleware(chainlit.server.app)` at import;
   - `_ask` sends `session_id = cl.context.session.thread_id` (R5) instead of `indico_session_id`;
@@ -121,13 +121,13 @@ Indico ids (R11).
     callback's `auth_token` stays only as a fallback until T047;
   - the answer is sent as `cl.Message(id=<job's message_id>, …)`, replacing the loading message, so a step's
     id is its Indico message id (R11).
-- [ ] T015 [P] In `chainlit_app/.chainlit/config.toml`:
+- [x] T015 [P] In `chainlit_app/.chainlit/config.toml`:
   - `user_session_timeout = 86400`;
   - `allow_thread_sharing = false` (check);
   - `[UI] custom_js = "/public/indico_panel.js"`;
   - `custom_css = "/public/widget.css"` (check);
   - `default_sidebar_state = "closed"`.
-- [ ] T016 [P] Create `chainlit_app/public/indico-login.html`, as in contracts/panel.md and R3:
+- [x] T016 [P] Create `chainlit_app/public/indico-login.html`, as in contracts/panel.md and R3:
   - on load, post `hello` to `?parent=<origin>`;
   - accept `login` only from that origin, and only when the origin is in `allow_origins`;
   - `fetch('/auth/jwt', {method: 'POST', headers: {Authorization: 'Bearer ' + token}, credentials: 'include'})`;
@@ -135,7 +135,7 @@ Indico ids (R11).
   - on failure, post `login_failed {status}`.
 
   The token is never written to the URL, storage or the console.
-- [ ] T017 Checkpoint:
+- [x] T017 Checkpoint:
   - T005–T008 pass;
   - the full plugin suite shows only the 17 baseline failures;
   - in a browser, `http://127.0.0.1:8001/public/indico-login.html?parent=http://127.0.0.1:8000`, driven by

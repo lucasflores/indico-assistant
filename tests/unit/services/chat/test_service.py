@@ -81,11 +81,13 @@ class TestChatService:
         assert chat_service.submit_message(user, "and then?", session_id=session.id)[:2] == (session.id, False)
         mock_session_manager.create_session.assert_not_called()
 
-    def test_submit_unknown_session(self, chat_service, mock_session_manager, user):
+    def test_submit_unknown_session_starts_it_under_that_id(self, chat_service, mock_session_manager, user):
+        # spec 020 R5: the chat panel's thread id becomes the session id
         mock_session_manager.get_session.return_value = None
-        with pytest.raises(SessionNotFoundError):
-            chat_service.submit_message(user, "hi", session_id=uuid4())
-        mock_session_manager.rollback.assert_called_once()
+        mock_session_manager.create_session.return_value = MagicMock(event_id=None)
+        thread_id = uuid4()
+        chat_service.submit_message(user, "hi", session_id=thread_id)
+        mock_session_manager.create_session.assert_called_once_with(user.id, None, session_id=thread_id)
 
     def test_submit_someone_elses_session(self, chat_service, mock_session_manager, user):
         mock_session_manager.get_session.return_value = MagicMock()

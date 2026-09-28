@@ -137,6 +137,12 @@ class ChatService:
             self._session_manager.rollback()
             raise
 
+    def record_job(self, message_id: UUID, job_id: str) -> None:
+        """Keep the answer's job on the question: if the user navigates before the answer comes, the panel
+        finds it again and waits for it (spec 020 R9)."""
+        self._session_manager.set_message_metadata(message_id, job_id=job_id)
+        self._session_manager.commit()
+
     def answer(self, user_id: int, session_id: UUID, message: str, message_id: UUID | None = None) -> ChatResult:
         """Worker half: answer one message of a session and save the reply.
 
@@ -217,14 +223,16 @@ class ChatService:
         Returns:
             Tuple of (session, created_flag)
             
+        A ``session_id`` that does not exist yet starts a session under that id: the chat panel's thread id
+        (spec 020 R5). One that exists must be the user's.
+
         Raises:
-            SessionNotFoundError: If session_id not found
             SessionAccessDeniedError: If user doesn't own session
         """
         if session_id:
             session = self._session_manager.get_session(session_id)
             if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
+                return self._session_manager.create_session(user_id, event_id, session_id=session_id), True
             
             if not self._session_manager.validate_session_ownership(session, user_id):
                 raise SessionAccessDeniedError("Session belongs to another user")

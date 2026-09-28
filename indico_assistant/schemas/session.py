@@ -28,7 +28,9 @@ class SessionListItem(BaseModel):
     created_at: datetime = Field(..., description="Session creation time")
     last_message_at: datetime = Field(..., description="Last message timestamp")
     message_count: int = Field(..., ge=0, description="Number of messages")
-    event_id: int | None = Field(default=None, description="Event scope (optional)")
+    event_id: int | None = Field(default=None, description="The page it started on (optional)")
+    title: str = Field(default='', description="Renamed title, or the start of the first question (spec 020)")
+    updated_at: datetime | None = Field(default=None, description="Last activity")
 
     model_config = {"from_attributes": True}
 
@@ -50,6 +52,7 @@ class SessionListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total session count")
     limit: int = Field(..., ge=1, le=100, description="Requested limit")
     offset: int = Field(..., ge=0, description="Requested offset")
+    next_cursor: str | None = Field(default=None, description="Cursor of the next page; null on the last (spec 020)")
 
 
 class MessageItem(BaseModel):
@@ -71,6 +74,9 @@ class MessageItem(BaseModel):
         default=None,
         description="Additional metadata (for assistant messages)"
     )
+    feedback: dict[str, Any] | None = Field(
+        default=None, description="The caller's own feedback on this message: {id, value 0|1, comment} (spec 020)"
+    )
 
     model_config = {"from_attributes": True}
 
@@ -86,8 +92,13 @@ class SessionDetailResponse(BaseModel):
     """
     
     session_id: UUID = Field(..., description="Session UUID")
-    event_id: int | None = Field(default=None, description="Event scope (optional)")
+    event_id: int | None = Field(default=None, description="The page it started on (optional)")
     created_at: datetime = Field(..., description="Session creation time")
+    title: str = Field(default='', description="Renamed title, or the start of the first question (spec 020)")
+    updated_at: datetime | None = Field(default=None, description="Last activity")
+    pending_job_id: str | None = Field(
+        default=None, description="The job of the last message, when it is an unanswered question (spec 020)"
+    )
     messages: list[MessageItem] = Field(
         default_factory=list,
         description="Messages in chronological order"

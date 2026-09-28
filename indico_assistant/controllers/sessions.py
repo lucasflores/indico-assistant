@@ -83,20 +83,18 @@ class RHSessionList(RHChatBase):
                 status=422
             )
         
+        cursor = request.args.get("cursor") or None
+        search = (request.args.get("search") or "").strip() or None
         try:
             session_manager = get_session_manager()
-            
-            # Get user's sessions
-            sessions = session_manager.list_user_sessions(
-                user_id=self.user.id,
-                limit=limit,
-                offset=offset
-            )
-            
-            # Get total count for pagination
+            if cursor or search or not offset:
+                # keyset pages, newest activity first (spec 020 R12); offset stays for old clients
+                sessions, next_cursor = session_manager.page_sessions(self.user.id, limit, cursor, search)
+            else:
+                sessions = session_manager.list_user_sessions(user_id=self.user.id, limit=limit, offset=offset)
+                next_cursor = None
             total = session_manager.count_user_sessions(self.user.id)
-            
-            # Build response items
+
             items = []
             for session in sessions:
                 items.append(SessionListItem(
@@ -104,16 +102,19 @@ class RHSessionList(RHChatBase):
                     event_id=session.event_id,
                     created_at=session.created_at.isoformat(),
                     last_message_at=session.last_message_at.isoformat() if session.last_message_at else session.updated_at.isoformat(),
-                    message_count=session.message_count
+                    message_count=session.message_count,
+                    title=session_manager.title_of(session),
+                    updated_at=session.updated_at.isoformat(),
                 ))
-            
+
             response = SessionListResponse(
                 sessions=items,
                 total=total,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                next_cursor=next_cursor,
             )
-            
+
             return jsonify(response.model_dump(mode='json')), 200
             
         except Exception as e:
@@ -185,7 +186,8 @@ class RHSessionDetail(RHChatBase):
             
             # Get messages
             messages = session_manager.get_session_messages(uuid_id)
-            
+            feedback = session_manager.feedback_of([m.id for m in messages], self.user.id)
+
             # Build message items
             message_items = []
             for msg in messages:
@@ -194,14 +196,20 @@ class RHSessionDetail(RHChatBase):
                     role=msg.role,
                     content=msg.content,
                     created_at=msg.created_at.isoformat(),
-                    metadata=msg.metadata_json  # (msg.metadata is SQLAlchemy's table MetaData)
+                    metadata=msg.metadata_json,  # (msg.metadata is SQLAlchemy's table MetaData)
+                    feedback=feedback.get(msg.id),
                 ))
-            
+            # an answer still being written when the user left: its job is on the question (spec 020 R9)
+            last = messages[-1] if messages else None
+            pending = (last.metadata_json or {}).get("job_id") if last is not None and last.role == "user" else None
+
             response = SessionDetailResponse(
                 session_id=str(session.id),
                 event_id=session.event_id,
                 created_at=session.created_at.isoformat(),
                 updated_at=session.updated_at.isoformat(),
+                title=session_manager.title_of(session),
+                pending_job_id=pending,
                 messages=message_items
             )
             
