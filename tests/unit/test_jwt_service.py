@@ -53,6 +53,7 @@ class TestCreateChainlitToken:
 
         assert payload["metadata"]["name"] == "Test User"
         assert payload["metadata"]["email"] == "test@example.com"
+        assert payload["display_name"] == "Test User"  # Chainlit's avatar and menu (spec 020)
 
     def test_token_uses_email_when_no_full_name(self):
         """Token should use email as name when full_name is None."""

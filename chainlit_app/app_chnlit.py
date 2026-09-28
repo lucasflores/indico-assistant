@@ -1,24 +1,25 @@
-"""Minimal Chainlit app for Indico Assistant widget.
+"""Chainlit app for the Indico Assistant panel (spec 020): Chainlit's full app in a frame on every Indico page.
 
-- Auth: validates JWT from Indico plugin using CHAINLIT_AUTH_SECRET.
-- Message handler: simple echo placeholder (replace with real LLM logic).
+- Sign-in: the panel hands the page's Indico token to /auth/jwt, which sets Chainlit's session cookie (R3).
+- Messages go to Indico's chat API as that user; conversations are read back through IndicoDataLayer.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
 import asyncio
 import chainlit as cl
 import chainlit.server
 import httpx
-import jwt
 
 from indico_data_layer import IndicoDataLayer, install_token_middleware
 from resume import UNANSWERED, restore
 
-CHAINLIT_AUTH_SECRET = os.environ.get("CHAINLIT_AUTH_SECRET", "")
+# Every request needs the session cookie. Chainlit requires a login only with an auth callback or this
+# variable, and the panel signs in through /auth/jwt with neither: set here, so no deployment can forget it
+# (without it, websockets connect anonymously).
+os.environ["CHAINLIT_CUSTOM_AUTH"] = "true"
 
 logger = logging.getLogger(__name__)
 
@@ -48,74 +49,11 @@ def _get_indico_api_url() -> str:
 
 
 def _get_auth_token() -> str | None:
-    user = getattr(cl, "user", None)
-    if user is None:
-        user = getattr(getattr(cl, "context", None), "current_user", None)
-
-    if user and getattr(user, "metadata", None):
-        token = user.metadata.get("auth_token")
-        if token:
-            cl.user_session.set("auth_token", token)
-            return token
-        # the full app (spec 020): the session's Chainlit JWT, minted from the page's Indico token (R3)
-        session_token = getattr(getattr(getattr(cl, "context", None), "session", None), "token", None)
-        if session_token:
-            return session_token
-        if CHAINLIT_AUTH_SECRET:
-            payload = {
-                "identifier": getattr(user, "identifier", "unknown"),
-                "metadata": {
-                    "name": user.metadata.get("name", ""),
-                    "email": user.metadata.get("email", ""),
-                },
-                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-                "iat": datetime.now(timezone.utc),
-            }
-            token = jwt.encode(payload, CHAINLIT_AUTH_SECRET, algorithm="HS256")
-            cl.user_session.set("auth_token", token)
-            return token
-
-    token = cl.user_session.get("auth_token")
-    if token:
-        return token
-
+    """The session's Chainlit JWT: the page's Indico token, which /auth/jwt turned into the session cookie (R3)."""
     try:
-        context = getattr(cl, "context", None)
-        session = getattr(context, "session", None)
-        if session is not None and getattr(session, "token", None):
-            token = session.token
-            cl.user_session.set("auth_token", token)
-            return token
-    except Exception:
-        logger.debug("Unable to extract auth token from Chainlit session", exc_info=True)
-
-    try:
-        context = getattr(cl, "context", None)
-        if context is not None:
-            cookies = getattr(context, "cookies", None)
-            if cookies and isinstance(cookies, dict) and cookies.get("access_token"):
-                token = cookies.get("access_token")
-                cl.user_session.set("auth_token", token)
-                return token
-
-        request = getattr(context, "current_request", None)
-        if request and getattr(request, "headers", None):
-            auth_header = request.headers.get("Authorization") or request.headers.get("authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header.removeprefix("Bearer ")
-                cl.user_session.set("auth_token", token)
-                return token
-            cookie_header = request.headers.get("Cookie") or request.headers.get("cookie", "")
-            if cookie_header:
-                for part in cookie_header.split(";"):
-                    name, _, value = part.strip().partition("=")
-                    if name == "access_token" and value:
-                        cl.user_session.set("auth_token", value)
-                        return value
-    except Exception:
-        logger.debug("Unable to extract auth token from current request", exc_info=True)
-
-    return None
+        return cl.context.session.token
+    except Exception:  # no Chainlit context (outside a request)
+        return None
 
 
 _http_clients: dict[str, httpx.AsyncClient] = {}
@@ -169,16 +107,14 @@ def _thread_id() -> str | None:
 async def on_chat_start():
     cl.user_session.set("indico_session_id", None)
     
-    # Store event_id from user metadata in session for easy access
-    # User object is returned by header_auth_callback
+    # the page's event, from the token the panel signed in with (R3)
     user = cl.user_session.get("user")
     
     if user and isinstance(user, cl.User) and hasattr(user, "metadata"):
         event_id = user.metadata.get("event_id")
         if event_id:
             cl.user_session.set("indico_event_id", event_id)
-    
-    _get_auth_token()
+
 
 
 async def _announce_thread() -> None:
@@ -230,70 +166,6 @@ async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str) ->
             return
         await _show_answer(response, loading_msg, client, auth_token)
 
-
-@cl.header_auth_callback
-def header_auth_callback(headers: dict) -> cl.User | None:
-    """Authenticate users via JWT passed from the Indico plugin.
-
-    Expects Authorization: Bearer <token> and validates with CHAINLIT_AUTH_SECRET.
-    Returns a cl.User so Chainlit associates sessions with the Indico user.
-    """
-
-    auth_header = headers.get("Authorization") or headers.get("authorization", "")
-    cookie_header = headers.get("Cookie") or headers.get("cookie", "")
-    
-    token = None
-    if auth_header.startswith("Bearer "):
-        token = auth_header.removeprefix("Bearer ")
-    elif cookie_header:
-        for part in cookie_header.split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == "access_token" and value:
-                token = value
-                break
-    if not token:
-        logger.info("Authorization token missing in headers")
-        return None
-
-    if not CHAINLIT_AUTH_SECRET:
-        # Dev fallback: accept tokens but mark unauthenticated
-        cl.user_session.set("auth_token", token)
-        return cl.User(
-            identifier="anonymous",
-            metadata={
-                "authenticated": False,
-                "source": "indico",
-                "auth_token": token,
-                "event_id": None,
-            },
-        )
-
-    try:
-        payload = jwt.decode(token, CHAINLIT_AUTH_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-
-    identifier = payload.get("identifier", "unknown")
-    meta = payload.get("metadata", {}) or {}
-
-    # Extract event_id from JWT metadata (Feature 013: event context)
-    event_id = meta.get("event_id")
-
-    cl.user_session.set("auth_token", token)
-    user = cl.User(
-        identifier=identifier,
-        metadata={
-            "name": meta.get("name", ""),
-            "email": meta.get("email", ""),
-            "authenticated": True,
-            "source": "indico",
-            "auth_token": token,
-            "event_id": event_id,
-        },
-    )
-    return user
 
 @cl.set_starters
 async def starters():
@@ -348,8 +220,6 @@ async def _ask(text: str, files=()):
         return
 
     auth_token = _get_auth_token()
-    token_prefix = f"{auth_token[:8]}..." if auth_token else None
-    logger.info("Auth token available for request=%s prefix=%s", bool(auth_token), token_prefix)
     if not auth_token:
         await cl.Message(
             content="Authentication token missing. Please re-authenticate."

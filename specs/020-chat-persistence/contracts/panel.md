@@ -17,8 +17,7 @@ other side's origin and ignores anything else. The page learns the frame's origi
 
 | `type` | Fields | When |
 |---|---|---|
-| `login` | `token`, `threadId` (or null), `theme` (`light`/`dark`) | The login page reports `hello`. The page answers with a fresh token from `/widget/config?event_id=<page event>` |
-| `theme` | `theme` | Indico's theme changes while the panel is open |
+| `login` | `token`, `threadId` (or null) | The login page reports `hello`. The page answers with a fresh token from `/widget/config?event_id=<page event>` |
 
 ## Frame → page
 
@@ -62,3 +61,8 @@ The inline `<head>` snippet reads only `open` and `width`, to reserve the margin
 | `<html data-assistant-panel="closed\|loading\|ready\|unavailable">` | the panel's state |
 | `window.__assistantReadyAt` | `performance.now()` when the frame reported `ready` (SC-002) |
 | `window.__assistantInitialMargin` | the `margin-right` the inline `<head>` snippet reserved, before the page painted (FR-006a) |
+
+**Theme (changed while building):** Indico is light on every page. An event page's dark grey is only the
+meeting theme's backdrop, so reading the page's background made the panel flip between light and dark as
+the user moved around. The page sends no theme any more. Chainlit starts light (`default_theme`), and its own
+switch is remembered across pages.

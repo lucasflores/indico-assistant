@@ -17,7 +17,8 @@ export INDICO_CONFIG=~/indico-assistant/instance/indico.conf
 ~/indico-assistant/instance/env/bin/indico db --all-plugins upgrade   # 008: chat_sessions.title
 ```
 
-Restart Chainlit and check `curl -sf http://127.0.0.1:8001/health`.
+Restart Chainlit, then check that `curl -s http://127.0.0.1:8001/auth/config` shows `"requireLogin":true`. The app
+sets `CHAINLIT_CUSTOM_AUTH` itself.
 
 ## 2. Persistence across pages (US1)
 
@@ -46,7 +47,16 @@ then B. On B, "move this meeting to 4pm" plans a change to B (if you manage it).
 5. Log out, log in as another user (for example Makoto, id 6) in the same browser: none of the first
    user's conversations show.
 
-## 5. Tests
+## 5. Feedback and look
+
+1. Thumbs down on an answer, with a comment, then reload: still down. Thumbs up replaces it. Clicking it again
+   takes the vote back.
+2. The panel is light, like Indico (an event page's dark grey is only the meeting theme's backdrop). The
+   header is Indico's blue and the avatar shows your name's initial. Chainlit's sun/moon switches to dark,
+   and the choice is kept across pages.
+3. Hovering an icon or a conversation shows a small tooltip.
+
+## 6. Tests
 
 ```bash
 cd ~
@@ -55,5 +65,9 @@ INDICO_CONFIG=~/indico-assistant/instance/indico.conf ~/indico-assistant/instanc
 cd ~/indico-assistant/plugin/chainlit_app && .venv/bin/python -m pytest -q tests   # the data layer, fake Indico
 ```
 
-The panel walk (SC-001, SC-002, SC-004) is a puppeteer script in `tests/browser/`, run against the local
-stack.
+The browser checks are puppeteer scripts in `tests/browser/` (see its README), run against the local stack.
+Things learned running them:
+- **Test runs use up the admin's chat limit** (200 questions a day). Run the scripts as Makoto
+  (`WALK_USER=6`), except `walk.mjs`: it drafts a plan, and Makoto can't create events.
+- **Scripted mouse moves miss the panel's sidebar drawer:** click and hover by dispatching events in the
+  frame instead.

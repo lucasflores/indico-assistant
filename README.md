@@ -57,7 +57,14 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ### User Interface
 
-- **Embedded Chat Widget**: a launcher on every page for logged-in users (one cached script); the Chainlit Copilot, its config and JWT load only when it is opened. Theme sync, persistence, and feedback. See [Deployment Guide](docs/DEPLOYMENT.md)
+- **Chat panel**: a launcher on every page for logged-in users (one cached script). It opens Chainlit's full app in a panel docked to the right, in Indico's look.
+  - **It follows the user around Indico:** the panel comes back open, on the same conversation, on every page they go to.
+  - **"This event" is the page's event:** each question refers to the page it's asked from.
+  - **Past Chats:** a sidebar to search, reopen, rename and delete conversations.
+  - **Thumbs up and down:** saved as Indico feedback.
+  - **Stored in Indico:** conversations live in Indico's database.
+
+  See the [Deployment Guide](docs/DEPLOYMENT.md).
   - JWT Authentication: Secure token-based auth per user
   - Theme Synchronization: Auto-detects Indico theme and applies matching styles
   - Session Persistence: Conversations persist across page reloads
@@ -262,6 +269,8 @@ LLM calls never hold an Indico web worker; the request only saves the message an
 {"message": "How many events are there this week?", "session_id": "optional-session-id", "event_id": 123}
 ```
 
+`session_id` may be a new id chosen by the client: the chat panel starts a conversation under Chainlit's thread id. `event_id` is the event of the page the message is sent from, and it's kept on the message. `answer_id` (optional) is the id to store the answer under. The panel sends its Chainlit run's id, because Chainlit's thumbs vote on the run.
+
 ```json
 {"job_id": "374c73cc…", "session_id": "f982fd9d-…", "created_session": true, "status": "pending"}
 ```
@@ -304,43 +313,49 @@ days and sync logs after 90 days. Each period is an admin setting (Admin → Plu
 
 #### GET /api/assistant/sessions
 
-List user's chat sessions:
+The caller's conversations, most recently active first, one page at a time. The parameters are `limit`, `cursor` (the previous page's `next_cursor`) and `search` (words in the title or the messages):
 
 ```json
 {
   "sessions": [
-    {
-      "id": "session-123",
-      "created_at": "2026-01-20T10:00:00Z",
-      "last_message_at": "2026-01-20T10:15:00Z",
-      "message_count": 5
-    }
-  ]
+    {"session_id": "f982fd9d-…", "title": "Move the weekly sync", "event_id": 351,
+     "created_at": "2026-09-27T10:00:00+00:00", "updated_at": "2026-09-28T09:00:00+00:00", "message_count": 4}
+  ],
+  "next_cursor": "…"
 }
 ```
 
 #### GET /api/assistant/sessions/{session_id}
 
-Get conversation history for a specific session.
+A conversation's messages, with each answer's feedback from the caller. It also returns `pending_job_id` when a question is still being answered.
+
+#### PATCH /api/assistant/sessions/{session_id}
+
+Rename a conversation: `{"title": "…"}`, 1 to 200 characters. Owner only.
+
+#### PUT /api/assistant/sessions/{session_id}
+
+Start a conversation under this id before its first question is stored: `{"first_message": "…"}`. It returns `201` if created, `200` if it's already the caller's own, and `403` if it belongs to someone else. The panel uses it so Past Chats lists a new conversation at once.
 
 #### DELETE /api/assistant/sessions/{session_id}
 
-Delete a chat session and its history.
+Delete a conversation and its messages. Its action plans are kept for the audit trail.
 
 ### Feedback
 
 #### POST /api/assistant/feedback
 
-Submit feedback on assistant responses:
+Feedback on one of the caller's answers. A thumb is one vote, so switching between up and down replaces it. A vote counts against the read limit, not as a question:
 
 ```json
-{
-  "session_id": "session-123",
-  "message_id": "msg-456",
-  "rating": 1,
-  "comment": "Very helpful!"
-}
+{"message_id": "4be4e637-…", "feedback_type": "thumbs_down", "value": true}
 ```
+
+`feedback_type` is `thumbs_up`, `thumbs_down`, `rating` (with `value` from 1 to 5) or `comment` (with `value` a text).
+
+#### DELETE /api/assistant/feedback/{feedback_id}
+
+Take back a thumbs vote, together with its comment: `204`. A vote that isn't the caller's returns `404`.
 
 ### Vector Search
 

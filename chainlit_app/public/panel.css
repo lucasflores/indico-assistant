@@ -1,0 +1,3 @@
+/* The panel beside Indico's pages (spec 020 FR-006e): Indico's text is 13px, Chainlit's 16px. Chainlit sizes in
+   rem, so a smaller root scales the whole app evenly. (Colours and fonts are in theme.json.) */
+html { font-size: 14px; }

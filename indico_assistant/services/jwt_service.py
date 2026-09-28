@@ -51,6 +51,7 @@ def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24, eve
 
     payload = {
         "identifier": str(user.id),
+        "display_name": metadata["name"],  # Chainlit's avatar and menu (else the id)
         "metadata": metadata,
         "exp": datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
         "iat": datetime.now(timezone.utc),

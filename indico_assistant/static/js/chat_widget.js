@@ -26,7 +26,7 @@
   let state = loadState();
   let panel = null;
   let frame = null;
-  let config = null;  // {chainlitUrl, authToken, theme}
+  let config = null;  // {chainlitUrl, authToken}
   let frameHello = false;
 
   function loadState() {
@@ -62,21 +62,6 @@
     root.style.marginRight = `${width}px`;
   }
 
-  function detectTheme() {
-    const style = getComputedStyle(document.documentElement);
-    for (const key of ["--indico-theme", "--ui-theme", "--theme", "--color-scheme"]) {
-      const value = style.getPropertyValue(key).trim().toLowerCase();
-      if (value === "dark" || value === "light") return value;
-    }
-    if (document.body.classList.contains("dark-theme")) return "dark";
-    const match = getComputedStyle(document.body).backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    if (match) {
-      const [r, g, b] = match.slice(1, 4).map(Number);
-      if (0.2126 * r + 0.7152 * g + 0.0722 * b < 115) return "dark";
-      return "light";
-    }
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
 
   function eventIdFromPage() {
     const match = window.location.pathname.match(/^\/event\/(\d+)(\/|$)/);
@@ -97,7 +82,7 @@
   function sendLogin() {
     if (!frameHello || !config) return;
     frameHello = false;  // one sign-in per load of the login page
-    postToFrame({ type: "login", token: config.authToken, threadId: state.threadId || null, theme: detectTheme() });
+    postToFrame({ type: "login", token: config.authToken, threadId: state.threadId || null });
   }
 
   function injectStylesheet() {

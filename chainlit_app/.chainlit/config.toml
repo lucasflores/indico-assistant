@@ -74,10 +74,10 @@ reaction_on_message_received = false
 # Name of the assistant.
 name = "Indico Assistant"
 
-# Custom styling: none (the Copilot-era widget.css sized every Radix popper, tooltips included, to 85vh)
-# custom_css = "/public/test.css"
+# Custom styling: only the text size (never style Radix popper wrappers globally: they hold every tooltip)
+custom_css = "/public/panel.css"
 
-# default_theme = "dark"
+default_theme = "light"  # as Indico (spec 020 FR-006e); the user can switch in the app
 
 # Force a specific language for all users (e.g., "en-US", "he-IL", "fr-FR")
 # If not set, the browser's language will be used
