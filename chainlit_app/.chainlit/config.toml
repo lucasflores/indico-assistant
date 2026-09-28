@@ -53,20 +53,12 @@ reaction_on_message_received = false
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
-    # Off: the assistant ignores files, and every upload was written to this host's disk (20 × 500 MB)
-    enabled = false
-    # Define accepted file types using MIME types
-    # Examples:
-    # 1. For specific file types:
-    #    accept = ["image/jpeg", "image/png", "application/pdf"]
-    # 2. For all files of certain type:
-    #    accept = ["image/*", "audio/*", "video/*"]
-    # 3. For specific file extensions:
-    #    accept = { "application/octet-stream" = [".xyz", ".pdb"] }
-    # Note: Using "*/*" is not recommended as it may cause browser warnings
-    accept = ["*/*"]
-    max_files = 20
-    max_size_mb = 500
+    # Files to attach as material from the chat (Feature 019, US9). Each one is forwarded to Indico right
+    # away (Chainlit deletes its copy when the session ends), and Indico checks type, content and size again.
+    enabled = true
+    accept = { "application/pdf" = [".pdf"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document" = [".docx"], "application/vnd.openxmlformats-officedocument.presentationml.presentation" = [".pptx"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" = [".xlsx"], "text/plain" = [".txt"], "text/markdown" = [".md"], "image/png" = [".png"], "image/jpeg" = [".jpg", ".jpeg"] }
+    max_files = 5
+    max_size_mb = 25
 
 [features.audio]
     # Enable audio features

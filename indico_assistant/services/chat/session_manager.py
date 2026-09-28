@@ -95,7 +95,8 @@ class SessionManager:
     def add_user_message(
         self,
         session: ChatSession,
-        content: str
+        content: str,
+        metadata: Optional[dict[str, Any]] = None
     ) -> ChatMessage:
         """Add a user message to a session.
         
@@ -109,7 +110,8 @@ class SessionManager:
         message = ChatMessage.create(
             session_id=session.id,
             role='user',
-            content=content
+            content=content,
+            metadata=metadata
         )
         session.touch()  # Update session timestamp
         return message

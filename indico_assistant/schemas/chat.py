@@ -35,6 +35,11 @@ class ChatRequest(BaseModel):
         default=None,
         description="Continue an existing session (optional)"
     )
+    uploads: list[UUID] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Feature 019: files sent with the message (uuids from POST /chat/uploads)",
+    )
     event_id: int | None = Field(
         default=None,
         description="Scope queries to a specific event (optional)"
