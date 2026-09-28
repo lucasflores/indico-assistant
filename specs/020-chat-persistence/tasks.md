@@ -353,13 +353,13 @@ and waiting plans come back. Focus is not stolen.
   - `docs/DEPLOYMENT.md`: same-site hosting, or `CHAINLIT_COOKIE_SAMESITE=none` with HTTPS (the requirement
     for Makoto); `allow_origins` set to the Indico origin; `CHAINLIT_CUSTOM_AUTH`; the 2.12.0 upgrade;
   - `specs/020-chat-persistence/quickstart.md`: anything learned.
-- [ ] T051 Full checks:
+- [x] T051 Full checks:
   - the plugin suite shows only the 17 baseline failures;
   - the Chainlit tests pass;
   - `ruff check` is clean on the changed Python files;
   - `walk.mjs` passes;
   - the chat-actions eval stays at least 90% intended and 0% unasked.
-- [ ] T052 Record SC-002 and SC-006 (medians of 10) and the eval numbers in the PR description.
+- [x] T052 Record SC-002 and SC-006 (medians of 10) and the eval numbers in the PR description.
 
 ---
 
