@@ -25,8 +25,9 @@ def upgrade():
         'action_plans',
         sa.Column('id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('uuid_generate_v4()')),
         sa.Column('user_id', sa.Integer(), nullable=False),
+        # SET NULL: deleting a chat (or chat retention) keeps the plans' audit trail (retention_plan_days)
         sa.Column('session_id', UUID(as_uuid=True),
-                  sa.ForeignKey('plugin_assistant.chat_sessions.id', ondelete='CASCADE'), nullable=False),
+                  sa.ForeignKey('plugin_assistant.chat_sessions.id', ondelete='SET NULL'), nullable=True),
         sa.Column('message_id', UUID(as_uuid=True),
                   sa.ForeignKey('plugin_assistant.chat_messages.id', ondelete='SET NULL'), nullable=True),
         sa.Column('supersedes_id', UUID(as_uuid=True),

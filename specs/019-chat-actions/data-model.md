@@ -9,7 +9,7 @@ the old one.
 |---|---|---|
 | `id` | UUID PK | `server_default=uuid_generate_v4()` |
 | `user_id` | int, not null, indexed | Indico user id. There is no FK, matching the other plugin tables. |
-| `session_id` | UUID FK → `chat_sessions.id`, `ON DELETE CASCADE` | the chat it was made in |
+| `session_id` | UUID FK → `chat_sessions.id`, nullable, `ON DELETE SET NULL` | the chat it was made in (the plan stays for audit when the chat is deleted) |
 | `message_id` | UUID FK → `chat_messages.id`, `ON DELETE SET NULL` | the assistant message that showed it |
 | `supersedes_id` | UUID FK → `action_plans.id`, nullable | the previous version |
 | `undoes_id` | UUID FK → `action_plans.id`, nullable | set on undo plans |

@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
 from dateutil import parser as date_parser
-from sqlalchemy import func, or_
+from flask import g
+from sqlalchemy import or_
 from sqlalchemy.orm import undefer
 
 from indico.core.config import config
@@ -112,9 +113,14 @@ def _chat_mentions(user, candidates):
     """How often each candidate's name comes up in ``user``'s own chats (never anyone else's, FR-016)."""
     from indico_assistant.models import ChatMessage, ChatSession
 
-    mine = ChatMessage.query.join(ChatSession).filter(ChatSession.user_id == user.id)
-    return {c.id: mine.filter(func.lower(ChatMessage.content).contains(c.full_name.lower(), autoescape=True)).count()
-            for c in candidates}
+    # one query for the user's recent messages, not one per candidate (a common first name has hundreds)
+    texts = [content.lower() for (content,) in (db.session.query(ChatMessage.content).join(ChatSession)
+                                                .filter(ChatSession.user_id == user.id, ChatMessage.role == 'user')
+                                                .order_by(ChatMessage.created_at.desc()).limit(MENTION_MESSAGES))]
+    return {c.id: sum(c.full_name.lower() in text for text in texts) for c in candidates}
+
+
+MENTION_MESSAGES = 500  # the user's most recent messages searched for names
 
 
 def find_people(ref, user=None, known=None):
@@ -151,7 +157,7 @@ def _candidates(user, permission, modes):
     query = Category.query.filter(~Category.is_deleted).options(undefer('chain_titles'))
     if user.is_admin:
         return query
-    groups = [g.id for g in user.local_groups]
+    groups = [group.id for group in user.local_groups]
     roles = [r.id for r in user.category_roles]
     principals = CategoryPrincipal.query.filter(
         or_(CategoryPrincipal.user_id == user.id,
@@ -186,13 +192,17 @@ class CategoryOption:
 
 
 def _embed(texts):
-    """Sentence embeddings with the plugin's local model, or None when it is not available."""
+    """Sentence embeddings with the plugin's local model, or None when it is not available. Cached for the
+    request: a planning turn embeds the user's meeting titles for suggestions and for categories."""
+    cache = g.setdefault('assistant_embeddings', {})
     try:
-        from indico_assistant.plugin import AssistantPlugin
-        from indico_assistant.services.embedding import EmbeddingService
-        return EmbeddingService(AssistantPlugin.instance).embed_batch(texts)
+        if missing := list(dict.fromkeys(t for t in texts if t not in cache)):
+            from indico_assistant.plugin import AssistantPlugin
+            from indico_assistant.services.embedding import EmbeddingService
+            cache.update(zip(missing, EmbeddingService(AssistantPlugin.instance).embed_batch(missing), strict=True))
     except Exception:
         return None
+    return [cache[t] for t in texts]
 
 
 def _cosine(a, b):
@@ -643,13 +653,17 @@ def _change_meeting(step, user, settings, chat_session_id):
     shift = start - event.start_dt
     talks = sorted((c for c in event.contributions if c.is_scheduled), key=lambda c: c.start_dt)
     resolved = {}
+    known = None
 
     def person(ref):
+        nonlocal known
         key = (ref.name or ref.email or '').strip().lower()
         if key in ME:
             return user
         if key not in resolved:
-            matches = find_people(ref, user, known_people(user))
+            if known is None:
+                known = known_people(user)
+            matches = find_people(ref, user, known)
             resolved[key] = matches[0] if len(matches) == 1 else (
                 Guest.from_ref(ref) if not matches and ref.email and ref.name else None)
             if resolved[key] is None:
@@ -698,7 +712,7 @@ def _change_meeting(step, user, settings, chat_session_id):
 
 # --- attaching material (US9) --------------------------------------------------------------------------
 
-TALK_WORDS = ('contribution', 'talk', 'presentation', 'slot', 'slides')
+TALK_TARGET_WORDS = ('contribution', 'talk', 'presentation', 'slot', 'slides')  # "attach to my talk"
 
 
 def chat_uploads(chat_session_id, user):
@@ -734,7 +748,7 @@ def my_talks(user, event=None):
 def _attach(step, user, chat_session_id):
     tz = user_timezone(user)
     wanted = step.target.strip().lower()
-    wants_talk = any(word in wanted for word in TALK_WORDS)
+    wants_talk = any(word in wanted for word in TALK_TARGET_WORDS)
     here = meeting_in_view(chat_session_id, user)
     questions = []
     target = None

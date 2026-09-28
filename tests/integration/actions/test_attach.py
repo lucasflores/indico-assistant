@@ -44,6 +44,8 @@ DOCX = _zip('[Content_Types].xml', 'word/document.xml')
 def upload(monkeypatch, people):
     request = MagicMock()
     monkeypatch.setattr(actions_module, 'request', request)
+    monkeypatch.setattr(RHChatUpload, 'plugin', MagicMock(), raising=False)
+    monkeypatch.setattr(actions_module, 'enabled_actions', lambda settings: frozenset({'attach_file'}))
 
     def _upload(data, filename, user=people['manager']):
         request.files = {'file': FileStorage(stream=io.BytesIO(data), filename=filename)}
@@ -64,6 +66,14 @@ def test_an_allowed_file_is_kept_unclaimed_for_its_uploader(upload, people):
     assert not file.claimed and file.meta['assistant_user_id'] == people['manager'].id
     assert uploads.usable_upload(body['uuid'], people['manager']) == file
     assert uploads.usable_upload(body['uuid'], people['stranger']) is None  # FR-025
+
+
+def test_no_uploads_unless_attaching_files_is_enabled(upload, monkeypatch):
+    # (code review, PR #3) actions off (the default) or attach_file off: nothing is written to storage
+    monkeypatch.setattr(actions_module, 'enabled_actions', lambda settings: frozenset({'create_event'}))
+    files_before = File.query.count()
+    status, body = upload(PDF, 'slides.pdf')
+    assert (status, body['error']) == (403, 'ACTIONS_DISABLED') and File.query.count() == files_before
 
 
 def test_an_office_package_is_accepted(upload):
@@ -254,3 +264,23 @@ def test_namesake_choices_can_be_told_apart():
     choices = _distinct([{'value': '#351', 'label': 'Sync (Mon)'}, {'value': '#352', 'label': 'Sync (Mon)'},
                          {'value': '#c7', 'label': 'Talk'}])
     assert [c['label'] for c in choices] == ['Sync (Mon) [351]', 'Sync (Mon) [352]', 'Talk']
+
+
+def test_an_attached_upload_cannot_be_used_again(db, upload, people, dummy_event):
+    # (code review, PR #3) uploads stay unclaimed, so "used" is recorded by the plan that attached them
+    lucas = people['manager']
+    dummy_event.update_principal(lucas, full_access=True)
+    _, body = upload(PDF, 'slides.pdf')
+    chat = ChatSession(user_id=lucas.id)
+    db.session.add(chat)
+    db.session.flush()
+    step = {'n': 1, 'action': 'attach_file', 'args': {'target_type': 'event', 'target_id': dummy_event.id,
+                                                      'upload_uuid': body['uuid'], 'title': 'Slides'}}
+    plan, token = executor.create_plan(lucas, chat.id, steps=[step, {**step, 'n': 2}], summary='x')
+    executor.confirm(plan.id, lucas, token)
+    g.email_queue = []
+    assert executor.run(plan.id).status == 'done'  # the same plan may attach it twice (meeting and talk)
+    assert uploads.usable_upload(body['uuid'], lucas) is None
+    again, token = executor.create_plan(lucas, chat.id, steps=[step], summary='again')
+    executor.confirm(again.id, lucas, token)
+    assert executor.run(again.id).status == 'refused'

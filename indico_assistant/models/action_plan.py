@@ -37,8 +37,9 @@ class ActionPlan(db.Model):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(Integer, nullable=False)
-    session_id = Column(UUID(as_uuid=True), ForeignKey('plugin_assistant.chat_sessions.id', ondelete='CASCADE'),
-                        nullable=False)
+    # the plan outlives its chat (audit, retention_plan_days): None once the chat is deleted
+    session_id = Column(UUID(as_uuid=True), ForeignKey('plugin_assistant.chat_sessions.id', ondelete='SET NULL'),
+                        nullable=True)
     message_id = Column(UUID(as_uuid=True), ForeignKey('plugin_assistant.chat_messages.id', ondelete='SET NULL'),
                         nullable=True)
     supersedes_id = Column(UUID(as_uuid=True), ForeignKey('plugin_assistant.action_plans.id', ondelete='SET NULL'),

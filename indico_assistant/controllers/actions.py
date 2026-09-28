@@ -108,6 +108,10 @@ class RHChatUpload(RHPlanBase):
     def _process(self):
         from indico_assistant.services.actions.uploads import UploadRefused, store
 
+        if "attach_file" not in enabled_actions(self.plugin.settings.get_all()):
+            # (otherwise any user could fill Indico's storage with files nothing will ever attach)
+            return self._error_response("ACTIONS_DISABLED", "Attaching files from the chat is not enabled",
+                                        status=403)
         upload = request.files.get("file")
         if upload is None or not upload.filename:
             return self._validation_error("A file is required", field="file")

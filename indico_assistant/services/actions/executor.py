@@ -33,6 +33,10 @@ class NotConfirmed(Exception):
     """Only confirmed plans run."""
 
 
+class AlreadyConfirmed(Exception):
+    """A revision arrived for a plan the user confirmed in the meantime."""
+
+
 class Refused(Exception):
     """A step's permission check failed at execution time (FR-008); the message is the user-facing reason."""
 
@@ -58,6 +62,11 @@ def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(
     (ActionPlan.query
      .filter(ActionPlan.session_id == session_id, ActionPlan.status == 'shown')
      .update({'status': 'superseded'}, synchronize_session='fetch'))
+    # a revision of a plan confirmed meanwhile would be a second confirmable copy of it. (Confirming does
+    # not take the chat lock, but the UPDATE above waited for the plan's row, so this read sees it.)
+    if supersedes is not None and db.session.query(ActionPlan.status).filter(
+            ActionPlan.id == supersedes.id).scalar() in ('confirmed', 'running', 'done', 'refused', 'failed'):
+        raise AlreadyConfirmed(supersedes.id)
     plan = ActionPlan(user_id=user.id, session_id=session_id, steps=list(steps), summary=summary,
                       questions=list(questions), suggestions=list(suggestions), token_hash=_hash(token),
                       supersedes_id=supersedes.id if supersedes else None, undoes_id=undoes.id if undoes else None,
@@ -99,7 +108,8 @@ def _confirm(plan):
     now = _now()
     confirmed = (ActionPlan.query
                  .filter(ActionPlan.id == plan_id, ActionPlan.status == 'shown', ActionPlan.expires_at > now,
-                         func.jsonb_array_length(ActionPlan.questions) == 0)
+                         func.jsonb_array_length(ActionPlan.questions) == 0,
+                         ActionPlan.session_id.isnot(None))  # (its chat was deleted: nothing to confirm in)
                  .update({'status': 'confirmed', 'confirmed_at': now}, synchronize_session=False))
     db.session.expire(plan)
     return 'confirmed' if confirmed else 'not_confirmable'  # 0 rows: another request confirmed it first
@@ -127,6 +137,7 @@ def run(plan_id, enabled=None):
 
     g.assistant_rollback_callbacks = []
     g.pop('assistant_new_events', None)
+    g.assistant_plan_id = str(plan.id)  # (an upload this plan attaches is marked as used by it)
     try:
         user = User.get(plan.user_id, is_deleted=False)
         if user is None:
@@ -150,6 +161,7 @@ def run(plan_id, enabled=None):
         _abort()
         return _finish(plan_id, 'failed', error=FAILED_MESSAGE)
     g.pop('assistant_rollback_callbacks', None)
+    g.pop('assistant_plan_id', None)
     return plan
 
 
@@ -224,6 +236,7 @@ def _discard_vc_pending():
 
 
 def _finish(plan_id, status, *, error=None, result=None):
+    g.pop('assistant_plan_id', None)
     plan = ActionPlan.query.get(plan_id)
     _mark(plan, status, error=error, result=result)
     db.session.commit()

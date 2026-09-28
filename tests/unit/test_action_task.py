@@ -69,3 +69,11 @@ def test_a_skipped_step_is_not_reported_as_done(confirmed):
     confirmed.status, confirmed.result = 'done', [
         {'n': 1, 'action': 'add_reminder', 'created': None, 'skipped': 'the meeting starts too soon for a reminder'}]
     assert outcome_message(confirmed) == 'Done:\n- Create “Sync” (not done: the meeting starts too soon for a reminder)'
+
+
+def test_a_crash_outside_the_plan_fails_the_job(confirmed):
+    # (code review, PR #3) the job never stays pending
+    with patch.object(executor, 'run', side_effect=RuntimeError('db went away')), \
+            patch('indico_assistant.services.chat.jobs.finish') as finish, patch('indico_assistant.services.chat.jobs.start'):
+        execute_plan.run('job1', confirmed.id)
+    assert finish.call_args.kwargs['status'] == 'failed' and finish.call_args.kwargs['error'] == 'PLAN_FAILED'

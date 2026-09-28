@@ -56,17 +56,30 @@ def _manage_refusal(event, user):
     return None
 
 
-def _person_links(event, speakers):
+def _link(contribution, person, **fields):
+    """A person link for ``person``: their existing one on ``contribution`` if any, updated (as Indico's form
+    does: a second link for the same person breaks the unique key), else a new one."""
+    existing = next((link for link in contribution.person_links if link.person == person), None) \
+        if contribution is not None else None
+    if existing is None:
+        return ContributionPersonLink(person=person, **fields)
+    for name, value in fields.items():
+        setattr(existing, name, value)
+    return existing
+
+
+def _person_links(event, speakers, contribution=None):
     """The contribution's person links, as its form makes them: every person of a meeting contribution is a
     speaker, and speakers may submit material."""
     links = {}
-    for speaker in speakers:
+    for order, speaker in enumerate(speakers):
         if speaker.user_id is not None:
             person = EventPerson.for_user(User.get(speaker.user_id), event)
         else:
             person = get_event_person(event, {'first_name': speaker.first_name, 'last_name': speaker.last_name,
                                               'email': speaker.email.lower()})
-        links[ContributionPersonLink(person=person, is_speaker=True, author_type=AuthorType.none)] = True
+        # (an explicit order: Indico sorts links by it, and an unsaved link has none yet)
+        links[_link(contribution, person, is_speaker=True, author_type=AuthorType.none, display_order=order)] = True
     return links
 
 
@@ -119,11 +132,13 @@ class UpdateContributionArgs(ActionArgs):
 
 
 def _contribution_state(contribution):
+    """What an undo puts back: every person link as it is (authors too, guests without an email too)."""
     return {'contribution_id': contribution.id, 'title': contribution.title, 'start_dt': contribution.start_dt,
             'duration_minutes': int(contribution.duration.total_seconds() // 60),
-            'speakers': [{'user_id': link.person.user_id, 'first_name': link.first_name,
-                          'last_name': link.last_name, 'email': link.email}
-                         for link in contribution.person_links if link.is_speaker]}
+            'person_links': [{'person_id': link.person_id, 'is_speaker': link.is_speaker,
+                              'author_type': link.author_type.value, 'is_submitter': submitter,
+                              'display_order': link.display_order}
+                             for link, submitter in contribution.person_link_data.items()]}
 
 
 @register
@@ -165,11 +180,29 @@ class UpdateContribution(Action):
         if args.duration_minutes is not None:
             data['duration'] = timedelta(minutes=args.duration_minutes)
         if args.speakers is not None:
-            data['person_link_data'] = _person_links(contribution.event, args.speakers)
+            # the speakers are replaced; authors who do not speak stay (person_link_data replaces every link)
+            # ponytail: an author who also speaks is replaced as a speaker, not kept as an author
+            data['person_link_data'] = {**{link: submitter for link, submitter in contribution.person_link_data.items()
+                                           if not link.is_speaker},
+                                        **_person_links(contribution.event, args.speakers, contribution)}
         if args.start_dt is not None:
             data['start_dt'] = args.start_dt
         update_contribution(contribution, data)
         return {'created': None, 'before': before, 'after': _contribution_state(contribution)}
 
     def revert(self, user, result):
-        self.execute(user, UpdateContributionArgs.model_validate(result['before']))
+        before = result['before']
+        contribution = Contribution.get(before['contribution_id'])
+        if contribution is None or contribution.is_deleted:
+            return
+        data = {'title': before['title'], 'duration': timedelta(minutes=before['duration_minutes'])}
+        if before['start_dt'] is not None and contribution.timetable_entry is not None:
+            data['start_dt'] = datetime.fromisoformat(before['start_dt']) if isinstance(before['start_dt'], str) \
+                else before['start_dt']
+        if 'person_links' in before:  # the same people as before, from the event's own person records
+            data['person_link_data'] = {
+                _link(contribution, EventPerson.get(link['person_id']), is_speaker=link['is_speaker'],
+                      author_type=AuthorType(link['author_type']),
+                      display_order=link.get('display_order') or 0): link['is_submitter']
+                for link in before['person_links'] if EventPerson.get(link['person_id']) is not None}
+        update_contribution(contribution, data)
