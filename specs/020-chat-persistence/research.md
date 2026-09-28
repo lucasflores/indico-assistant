@@ -392,6 +392,19 @@ exists).
 - **A remembered id that's gone** (deleted elsewhere, retention) made Chainlit show "Couldn't resume chat".
   The page now checks it alongside the config fetch and drops it.
 
+**Found while building (2026-09-28, feedback): Chainlit's thumbs vote on the run, not on the answer.**
+
+In 2.12 the thumbs are drawn under the last answer of a run (the `on_message` step), and a vote's `forId` is
+the run's id. An answer outside a run has no thumbs.
+
+- **Live answers:** the panel sends its run's id with the question (`answer_id`), and Indico stores the answer
+  under it. An id already in use is ignored, and the answer then gets a new one.
+- **Reopened conversations:** the data layer wraps each stored answer in a run whose id is the answer's Indico id.
+  The answer's own step gets `<id>:answer`.
+- So a vote's `forId` is always the Indico answer.
+- Plan results (Confirm, Cancel) come from action callbacks, which have no run, so they have no thumbs.
+- A vote is counted against the read limit, not as a question.
+
 ## R13. Testing
 
 - **Indico side (pytest, as today).**

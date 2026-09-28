@@ -50,6 +50,10 @@ class FakeIndico:
             item = {k: SESSION[k] for k in ("session_id", "title", "updated_at", "created_at", "event_id")}
             return httpx.Response(200, json={"sessions": [item], "total": 3, "limit": 1, "offset": 0,
                                              "next_cursor": "CUR2"})
+        if request.method == "POST" and path == "/api/assistant/feedback":
+            return httpx.Response(201, json={"feedback_id": "f9"})
+        if request.method == "DELETE" and path.startswith("/api/assistant/feedback/"):
+            return httpx.Response(204)
         if request.method in ("PATCH", "DELETE", "PUT"):
             return httpx.Response(200, json={})
         return httpx.Response(404, json={})
@@ -76,11 +80,14 @@ async def test_a_session_becomes_a_thread(layer, as_lucas):
     thread = await layer.get_thread(T1)
     assert (thread["id"], thread["name"], thread["userIdentifier"]) == (T1, "Move the weekly sync", "20")
     assert thread["createdAt"] == SESSION["updated_at"]  # the sidebar groups by last activity
-    user, answer = thread["steps"]
+    user, run, answer = thread["steps"]
     assert (user["id"], user["type"], user["threadId"]) == ("a1", "user_message", T1)
     assert user["output"] == "move it to 3pm\n\n📎 agenda.pdf"
-    assert (answer["id"], answer["type"], answer["output"]) == ("a2", "assistant_message", "Here is the plan.")
-    assert answer["feedback"] == {"forId": "a2", "id": "f1", "value": 1, "comment": None}
+    # the answer is in a run, as Chainlit draws a live one; its thumbs are the run's, under the answer's id
+    assert (run["id"], run["type"], run["name"], run["parentId"]) == ("a2", "run", "on_message", "a1")
+    assert run["feedback"] == {"forId": "a2", "id": "f1", "value": 1, "comment": None}
+    assert (answer["type"], answer["parentId"], answer["output"]) == ("assistant_message", "a2", "Here is the plan.")
+    assert answer["id"] != "a2" and "feedback" not in answer
     assert thread["metadata"] == {"started_on_event_id": 351} and thread["elements"] == []
 
 
@@ -167,3 +174,23 @@ async def test_only_indico_may_frame_the_app_and_the_cookie_is_the_token(monkeyp
     response = TestClient(app).get("/probe", cookies={"access_token": LUCAS})
     assert response.headers["Content-Security-Policy"] == "frame-ancestors 'self' http://127.0.0.1:8000"
     assert seen["token"] == LUCAS and CURRENT_TOKEN.get() is None
+
+
+async def test_a_thumb_is_a_vote_in_indico(layer, indico, as_lucas):
+    from chainlit.types import Feedback
+    assert await layer.upsert_feedback(Feedback(forId="a2", value=0, comment="  wrong meeting ")) == "f9"
+    vote, comment = [call[3] for call in indico.calls[-2:]]
+    assert vote == {"message_id": "a2", "feedback_type": "thumbs_down", "value": True}
+    assert comment == {"message_id": "a2", "feedback_type": "comment", "value": "wrong meeting"}
+    await layer.upsert_feedback(Feedback(forId="a2", value=1))  # no comment: one call
+    assert indico.calls[-1][3]["feedback_type"] == "thumbs_up" and indico.calls[-2][3]["feedback_type"] == "comment"
+    assert await layer.delete_feedback("f9") is True and indico.calls[-1][:2] == ("DELETE", "/api/assistant/feedback/f9")
+
+
+async def test_a_vote_indico_did_not_keep_is_an_error(layer, indico, as_lucas):
+    from chainlit.types import Feedback
+    indico.status[("POST", "/api/assistant/feedback")] = 404
+    with pytest.raises(RuntimeError):
+        await layer.upsert_feedback(Feedback(forId="gone", value=1))
+    indico.status[("DELETE", "/api/assistant/feedback/f9")] = 404
+    assert await layer.delete_feedback("f9") is False

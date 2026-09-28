@@ -143,9 +143,26 @@ class IndicoDataLayer(BaseDataLayer):
             "userIdentifier": owner,
             "tags": [],
             "metadata": {"started_on_event_id": session.get("event_id")},
-            "steps": [IndicoDataLayer._step(m, thread_id) for m in session.get("messages", [])] if with_steps else [],
+            "steps": IndicoDataLayer._steps(session.get("messages", []), thread_id) if with_steps else [],
             "elements": [],
         }
+
+    @staticmethod
+    def _steps(messages: list[dict[str, Any]], thread_id: str) -> list[dict[str, Any]]:
+        """Each answer in a run, as Chainlit draws a live one: the thumbs belong to the run, so its id is the
+        answer's Indico id (a live answer is stored under its run's id, sent as answer_id)."""
+        steps, question = [], None
+        for message in messages:
+            step = IndicoDataLayer._step(message, thread_id)
+            if step["type"] == "user_message":
+                question = step
+                steps.append(step)
+                continue
+            run = {**step, "type": "run", "name": "on_message", "parentId": question and question["id"],
+                   "input": question["output"] if question else "", "output": ""}
+            step.pop("feedback", None)
+            steps += [run, {**step, "id": f"{step['id']}:answer", "parentId": run["id"]}]
+        return steps
 
     @staticmethod
     def _step(message: dict[str, Any], thread_id: str) -> dict[str, Any]:
@@ -193,10 +210,21 @@ class IndicoDataLayer(BaseDataLayer):
         await self._call("DELETE", f"/sessions/{thread_id}")
 
     async def upsert_feedback(self, feedback: Feedback) -> str:
-        return ""  # T047
+        # the thumb is the vote (its id is what Chainlit deletes later); a comment is stored beside it
+        body = {"message_id": feedback.forId, "feedback_type": "thumbs_up" if feedback.value else "thumbs_down",
+                "value": True}
+        response = await self._call("POST", "/feedback", json=body)
+        if response is None or response.status_code != 201:
+            # raised, so Chainlit tells the user it failed instead of showing a vote that was not kept
+            raise RuntimeError(f"Feedback on {feedback.forId} not saved: {getattr(response, 'status_code', None)}")
+        if feedback.comment and feedback.comment.strip():
+            await self._call("POST", "/feedback", json={"message_id": feedback.forId, "feedback_type": "comment",
+                                                         "value": feedback.comment.strip()})
+        return response.json()["feedback_id"]
 
     async def delete_feedback(self, feedback_id: str) -> bool:
-        return False  # T047
+        response = await self._call("DELETE", f"/feedback/{feedback_id}")
+        return response is not None and response.status_code == 204
 
     # --- users: built from the identifier, never stored ---------------------------------------------------
 

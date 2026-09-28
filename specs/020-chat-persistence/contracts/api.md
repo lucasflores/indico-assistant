@@ -71,3 +71,13 @@ job does. Earlier tokens stop working. The limit is the `read` rate bucket.
 ## `DELETE /feedback/<feedback_id>` (new)
 
 It removes the caller's own feedback entry: `204`. Someone else's: `403`. A missing one: `404`.
+
+## `POST /chat`: `answer_id` (new, optional)
+
+A UUID: the id the answer is stored under. The panel sends its Chainlit run's id, because the thumbs vote on the
+run (research.md, feedback). An id already in use is ignored.
+
+## `DELETE /feedback/<id>` (new)
+
+Takes back a thumbs vote, together with its comment: `204`. A vote that isn't the caller's gets `404`, which
+tells the caller nothing about it. `POST /feedback` counts against the read limit now, not the chat limit.

@@ -144,8 +144,9 @@ try {
   if (restored) {
     await chatFrame().evaluate(() => [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Cancel").click());
   }
-  check("FR-005 a waiting plan comes back with working buttons",
-        planShown && restored && (await waitFrameText((x) => /Cancelled; nothing was changed/.test(x), 15000)));
+  const cancelled = restored && (await waitFrameText((x) => /Cancelled; nothing was changed/.test(x), 15000));
+  check("FR-005 a waiting plan comes back with working buttons", planShown && restored && cancelled,
+        `shown=${!!planShown} restored=${restored} cancelled=${!!cancelled}`);
 
   // SC-004: ask, leave at once, the answer arrives on the next page
   const SLOW = "List every contribution of this event with its speakers and duration";

@@ -91,7 +91,8 @@ class ChatMessage(db.Model):
         session_id: uuid.UUID,
         role: Literal['user', 'assistant'],
         content: str,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        message_id: Optional[uuid.UUID] = None
     ) -> "ChatMessage":
         """Create a new chat message.
         
@@ -100,6 +101,7 @@ class ChatMessage(db.Model):
             role: 'user' or 'assistant'
             content: Message text content
             metadata: Optional metadata dict (for assistant messages)
+            message_id: Optional id to store it under (else a new one)
             
         Returns:
             Newly created ChatMessage instance
@@ -108,7 +110,8 @@ class ChatMessage(db.Model):
             session_id=session_id,
             role=role,
             content=content,
-            metadata_json=metadata
+            metadata_json=metadata,
+            **({'id': message_id} if message_id else {})
         )
         db.session.add(message)
         db.session.flush()  # Get the generated UUID

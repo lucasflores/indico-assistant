@@ -37,9 +37,9 @@ class RHFeedback(RHChatBase):
         """Verify user authentication and rate limits."""
         super()._check_access()
         
-        # Check rate limit for chat requests (feedback is a write operation)
+        # a vote spends no LLM money: not counted as a question (spec 020)
         rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "chat")
+        rate_result = rate_limiter.check_rate(self.user.id, "read")
         
         if not rate_result.allowed:
             raise self._rate_limit_error(rate_result.retry_after)
@@ -123,3 +123,25 @@ class RHFeedback(RHChatBase):
                 "Failed to submit feedback",
                 status=500
             )
+
+
+class RHFeedbackDelete(RHChatBase):
+    """DELETE /feedback/<id>: take back a thumbs vote and its comment (spec 020 T046). 204; 404 when the user has
+    no such vote, someone else's included."""
+
+    def _check_access(self) -> None:
+        super()._check_access()
+        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
+        if not rate_result.allowed:
+            raise self._rate_limit_error(rate_result.retry_after)
+
+    def _process(self):
+        try:
+            feedback_id = UUID(request.view_args["feedback_id"])
+        except ValueError:
+            return self._error_response("VALIDATION_ERROR", "Invalid feedback_id format", status=422)
+        feedback_service = get_feedback_service()
+        if not feedback_service.withdraw_feedback(self.user.id, feedback_id):
+            return self._error_response("FEEDBACK_NOT_FOUND", "Feedback not found", status=404)
+        feedback_service.commit()
+        return "", 204

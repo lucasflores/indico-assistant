@@ -123,6 +123,16 @@ class SessionManager:
                 item['comment'] = entry.value
         return {message_id: item for message_id, item in found.items() if item['id'] is not None}
 
+    def answer_id_of(self, message_id: UUID) -> UUID | None:
+        """The id the question's answer is to be stored under (spec 020: the chat panel's run, which its thumbs
+        vote on), unless a message has it already."""
+        message = ChatMessage.query.get(message_id)
+        wanted = (message.metadata_json or {}).get('answer_id') if message is not None else None
+        if not wanted:
+            return None
+        wanted = UUID(wanted)
+        return None if ChatMessage.query.get(wanted) is not None else wanted
+
     def page_event_of(self, message_id: UUID, fallback: int | None) -> int | None:
         """The event of the page a question was sent from (spec 020 R8). A question from before spec 020 has
         no page recorded: then the event its conversation started on."""
@@ -223,7 +233,8 @@ class SessionManager:
         self,
         session: ChatSession,
         content: str,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        message_id: Optional[UUID] = None
     ) -> ChatMessage:
         """Add an assistant message to a session.
         
@@ -239,7 +250,8 @@ class SessionManager:
             session_id=session.id,
             role='assistant',
             content=content,
-            metadata=metadata
+            metadata=metadata,
+            message_id=message_id
         )
         session.touch()  # Update session timestamp
         return message
