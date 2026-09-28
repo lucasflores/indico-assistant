@@ -170,6 +170,20 @@ the sidebar and cannot be opened any more, including from a second tab that had 
   actions with their buttons and choices, file uploads, suggested starters, the theme following Indico's
   light or dark mode, and keyboard and screen-reader use.
 
+**Feeling native (US1-US3)**
+
+- **FR-006a**: When the panel reopens on a new page, its frame MUST appear at once, at its remembered width,
+  so the page does not shift. A light placeholder shows until the conversation is drawn.
+- **FR-006b**: Links in answers (events, material, Indico pages) MUST open in the Indico page itself, never
+  inside the panel.
+- **FR-006c**: The user MUST NOT be asked to log in to the panel. Being logged in to Indico is enough, and
+  it keeps working while the panel stays open for hours.
+- **FR-006d**: The panel MUST be resizable by dragging its edge. It MUST remember its width, and whether it
+  was open, per browser. Esc closes it.
+- **FR-006e**: The panel's look MUST follow Indico: light or dark mode, with the assistant's own header and
+  colours toned to Indico's. The sidebar and chat keep Chainlit's own layout and behaviour: on a narrow
+  panel the sidebar becomes a drawer behind its menu button.
+
 **Page context (US2)**
 
 - **FR-007**: Each message MUST carry the page it was sent from, and "this event" MUST mean that page's event.
