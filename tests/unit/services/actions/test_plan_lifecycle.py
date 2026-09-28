@@ -57,6 +57,20 @@ def test_a_revision_supersedes_the_shown_plan(new_plan, dummy_user):
     assert executor.confirm(new.id, dummy_user, new_token) == 'confirmed'
 
 
+def test_a_chat_has_one_confirmable_plan(db, new_plan, dummy_user):
+    # (Copilot review, PR #3) two planners of one chat that saw the same (or no) open plan: only the later
+    # plan stays confirmable; another chat's plan is not touched
+    other_chat = ChatSession(user_id=dummy_user.id)
+    db.session.add(other_chat)
+    db.session.flush()
+    elsewhere, _ = executor.create_plan(dummy_user, other_chat.id, steps=[], summary='Elsewhere')
+    first, first_token = new_plan()
+    second, second_token = new_plan()  # planned without seeing ``first``
+    assert executor.confirm(first.id, dummy_user, first_token) == 'not_confirmable'
+    assert executor.confirm(second.id, dummy_user, second_token) == 'confirmed'
+    assert elsewhere.status == 'shown'
+
+
 def test_expiry_is_computed(new_plan):
     plan, _ = new_plan()
     assert plan.effective_status == 'shown' and plan.can_confirm

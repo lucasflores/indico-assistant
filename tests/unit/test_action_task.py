@@ -9,6 +9,12 @@ from indico_assistant.services.actions import executor
 from indico_assistant.tasks.actions import execute_plan
 
 
+@pytest.fixture(autouse=True)
+def all_enabled(monkeypatch):
+    from indico_assistant.tasks import actions
+    monkeypatch.setattr(actions, '_enabled_actions', lambda: frozenset({'create_event'}))
+
+
 @pytest.fixture
 def confirmed(db, dummy_user):
     chat = ChatSession(user_id=dummy_user.id)
@@ -30,7 +36,8 @@ def test_runs_as_a_request_context_task_on_the_chat_queue():
     ('failed', executor.FAILED_MESSAGE, executor.FAILED_MESSAGE),
 ])
 def test_outcome_goes_to_the_chat_and_the_job(confirmed, status, error, reply):
-    def fake_run(plan_id):
+    def fake_run(plan_id, enabled=None):
+        assert enabled == {'create_event'}  # the admin's switches as they are now
         confirmed.status, confirmed.error = status, error
         return confirmed
 
@@ -54,3 +61,11 @@ def test_the_reply_links_to_the_created_event(confirmed, dummy_event):
     from indico_assistant.tasks.actions import outcome_message
     confirmed.status, confirmed.result = 'done', [{'n': 1, 'action': 'create_event', 'created': {'event_id': dummy_event.id}}]
     assert f'[Open “{dummy_event.title}” in Indico]({dummy_event.external_url})' in outcome_message(confirmed)
+
+
+def test_a_skipped_step_is_not_reported_as_done(confirmed):
+    # (Copilot review, PR #3) a reminder that was too late to send is said so
+    from indico_assistant.tasks.actions import outcome_message
+    confirmed.status, confirmed.result = 'done', [
+        {'n': 1, 'action': 'add_reminder', 'created': None, 'skipped': 'the meeting starts too soon for a reminder'}]
+    assert outcome_message(confirmed) == 'Done:\n- Create “Sync” (not done: the meeting starts too soon for a reminder)'

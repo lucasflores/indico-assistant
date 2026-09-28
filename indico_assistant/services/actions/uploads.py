@@ -6,6 +6,7 @@ type the browser reports, so the plugin checks both here, by extension and by th
 """
 
 import io
+import zipfile
 
 from indico.core.config import config
 from indico.modules.files.models.files import File
@@ -28,7 +29,9 @@ ALLOWED = {
     '.txt': ('text/plain', None),
     '.md': ('text/markdown', None),
 }
-ALLOWED_NAMES = 'pdf, docx, pptx, xlsx, txt, md, png, jpg'
+ALLOWED_NAMES = 'pdf, docx, pptx, xlsx, txt, md, png, jpg/jpeg'
+# an Office file is a zip package with its content types and the part folder of its kind
+_OFFICE_PART = {'.docx': 'word/', '.pptx': 'ppt/', '.xlsx': 'xl/'}
 
 
 class UploadRefused(ValueError):
@@ -48,7 +51,9 @@ def content_type(filename, data):
     if extension not in ALLOWED:
         raise UploadRefused('UNSUPPORTED_FILE_TYPE', f'Allowed: {ALLOWED_NAMES}')
     mime, magic = ALLOWED[extension]
-    if magic is not None:
+    if extension in _OFFICE_PART:
+        ok = data.startswith(magic) and _is_office_package(data, _OFFICE_PART[extension])
+    elif magic is not None:
         ok = data.startswith(magic)
     else:
         try:
@@ -59,6 +64,15 @@ def content_type(filename, data):
     if not ok:
         raise UploadRefused('UNSUPPORTED_FILE_TYPE', f'This is not a {extension[1:]} file. Allowed: {ALLOWED_NAMES}')
     return mime
+
+
+def _is_office_package(data, part):
+    """(Copilot review, PR #3: any zip renamed to .docx passed the magic-bytes check.)"""
+    try:
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+    except zipfile.BadZipFile:
+        return False
+    return '[Content_Types].xml' in names and any(name.startswith(part) for name in names)
 
 
 def store(user, stream, filename, chat_session_id=None):

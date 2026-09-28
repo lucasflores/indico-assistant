@@ -47,7 +47,7 @@ class AddReminder(Action):
         event = Event.get(args.event_id)
         delta = timedelta(minutes=args.minutes_before)
         if event.start_dt - delta <= now_utc():
-            return {'created': None}  # too late for a reminder by now; the plan said when it would go out
+            return {'created': None, 'skipped': 'the meeting starts too soon for a reminder'}
         senders = event.get_allowed_sender_emails(include_noreply=True)
         reminder = EventReminder(creator=user, event=event, reminder_type=ReminderType.standard,
                                  scheduled_dt=event.start_dt - delta, event_start_delta=delta,
