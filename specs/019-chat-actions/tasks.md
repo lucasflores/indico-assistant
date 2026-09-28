@@ -228,7 +228,7 @@ builds on these.
 
 ### Tests first
 
-- [ ] T052 [P] [US4] `tests/integration/actions/test_people.py`. Covers:
+- [x] T052 [P] [US4] `tests/integration/actions/test_people.py`. Covers:
   - search follows the `RHUserSearch` rules (excludes deleted and blocked users, includes pending, `ALLOW_PUBLIC_USER_SEARCH` off → the token rule);
   - ranking by shared events and the user's own chats;
   - several matches → a question with email and affiliation;
@@ -238,9 +238,9 @@ builds on these.
 
 ### Implementation
 
-- [ ] T053 [US4] Full `find_person` in `indico_assistant/services/actions/resolve.py`: the search-token rule when public search is off, context ranking, `has_teams`.
-- [ ] T054 [US4] Guest speakers in `AddContribution` (`indico_assistant/services/actions/contributions.py`) through `persons.util.get_event_person`. Plan text: "add as guest speaker (name, email)".
-- [ ] T055 [US4] Plan flags in `resolve.py`: a time in the past (asks tomorrow / keep), and clashes with events the user or the named people manage or speak in (warns, does not block). These edge cases come from spec.md.
+- [x] T053 [US4] Full `find_person` in `indico_assistant/services/actions/resolve.py`: the search-token rule when public search is off, context ranking, `has_teams`.
+- [x] T054 [US4] Guest speakers in `AddContribution` (`indico_assistant/services/actions/contributions.py`) through `persons.util.get_event_person`. Plan text: "add as guest speaker (name, email)".
+- [x] T055 [US4] Plan flags in `resolve.py`: a time in the past (asks tomorrow / keep), and clashes with events the user or the named people manage or speak in (warns, does not block). These edge cases come from spec.md.
 
 **Checkpoint**: all P1 stories are done. SC-001 is manually checked with the example sentence: at most two assistant turns plus a confirmation.
 

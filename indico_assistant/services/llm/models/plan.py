@@ -28,6 +28,7 @@ class When(BaseModel):
     time: str | None = Field(None, description='"14:00", "2pm"; null when not given (the assistant suggests times)')
     duration_minutes: int | None = Field(None, description='Only if the user said how long the meeting is')
     timezone: str | None = Field(None, description='Only if the user named one')
+    keep_past: bool = Field(False, description='True only if the user confirmed a time that has already passed')
 
 
 class Slot(BaseModel):
