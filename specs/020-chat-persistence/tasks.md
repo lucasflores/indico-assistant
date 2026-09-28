@@ -34,19 +34,19 @@ The 17 already-failing plugin tests (the `main` baseline) must stay the only fai
 
 **Purpose**: the Chainlit upgrade (R1) and the test tooling the later phases need.
 
-- [ ] T001 Upgrade Chainlit (R1):
+- [x] T001 Upgrade Chainlit (R1):
   - pin `chainlit==2.12.0` in `chainlit_app/requirements.txt` and install it into `chainlit_app/.venv`
     (`uv pip install --python .venv/bin/python -r requirements.txt`);
   - in `chainlit_app/.chainlit/config.toml`, delete the `[features.mcp.sse]`, `[features.mcp.streamable-http]`
     and `[features.mcp.stdio]` blocks and set `generated_by = "2.12.0"`;
   - restart Chainlit and check `curl -sf http://127.0.0.1:8001/health`.
-- [ ] T002 Regression check of today's Copilot widget on 2.12.0, on the local stack. Run spec 019's
+- [x] T002 Regression check of today's Copilot widget on 2.12.0, on the local stack. Run spec 019's
   quickstart sections 2-3: a question, a plan confirmed, a cancelled plan, an upload. Record anything broken
   and fix it before Phase 2.
-- [ ] T003 [P] Add `chainlit_app/requirements-dev.txt` (`pytest`, `pytest-asyncio`) and install it. Add
+- [x] T003 [P] Add `chainlit_app/requirements-dev.txt` (`pytest`, `pytest-asyncio`) and install it. Add
   `chainlit_app/tests/conftest.py`, which sets `CHAINLIT_AUTH_SECRET` for the tests and puts `chainlit_app`
   on `sys.path`, and `chainlit_app/pytest.ini` (`asyncio_mode = auto`).
-- [ ] T004 [P] Add `tests/browser/package.json` (dev only: `puppeteer`), `tests/browser/README.md` (how to
+- [x] T004 [P] Add `tests/browser/package.json` (dev only: `puppeteer`), `tests/browser/README.md` (how to
   run, which stack) and a `tests/browser/node_modules` entry in `.gitignore`. Run `npm install` there once to
   fetch Chromium.
 
@@ -198,8 +198,9 @@ and waiting plans come back. Focus is not stolen.
 
   It learns the parent origin from `sessionStorage`, which `indico-login.html` sets.
 - [ ] T025 [P] [US1] In `indico_assistant/plugin.py: _render_widget_script`, add `data-user="<id>"` and the
-  inline snippet: read `localStorage['indico-assistant:<id>']`; if `open`, set
-  `document.documentElement.style.marginRight` to its `width` (inside try/catch). Make T020 pass.
+  inline snippet, as `<script nonce="{get_csp_nonce()}">` so it runs under Indico's CSP: read
+  `localStorage['indico-assistant:<id>']`; if `open`, set `document.documentElement.style.marginRight` to its
+  `width` (inside try/catch). Make T020 pass, including a check that the nonce is present.
 - [ ] T026 [US1] Rewrite `indico_assistant/static/js/chat_widget.js` as in contracts/panel.md:
   - the launcher, which is hidden while open;
   - the panel with the iframe (`indico-login.html?parent=…`) and a placeholder until `ready`;
