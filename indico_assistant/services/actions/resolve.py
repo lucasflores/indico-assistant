@@ -50,8 +50,12 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
     if isinstance(step, CreateMeeting):
         return _create_meeting(step, user, settings, topic or step.title or '')
     if isinstance(step, ChangeMeeting):
+        if step.meeting.strip().lower() in IT and (named := _meeting_named_in(topic, user)):
+            step.meeting = f'#{named.id}'
         return _change_meeting(step, user, settings, chat_session_id)
     if isinstance(step, Attach):
+        if step.target.strip().lower() in IT and (named := _meeting_named_in(topic, user)):
+            step.target = f'#{named.id}'
         return _attach(step, user, chat_session_id)
     if isinstance(step, Undo):
         return _undo(step, user, chat_session_id)
@@ -239,7 +243,7 @@ def _match_category(name, options):
     if exact:
         return exact, True
     if partial := [o for p, o in paths.items() if wanted in p]:
-        return partial, True
+        return partial, False  # "Science" for "Nothing Science": offered first, never picked
     titles = {o.category.title.lower(): o for o in options}
     close = difflib.get_close_matches(wanted, list(titles) + list(paths), n=MAX_CHOICES, cutoff=0.6)
     return list(dict.fromkeys(titles.get(c) or paths[c] for c in close)), False
@@ -409,14 +413,22 @@ def _create_meeting(step, user, settings, topic):
         if teams_plugin() is None:
             notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')
         else:
+            from indico_vc_teams.graph import GraphError
+
             everyone = [user, *others]
-            with_account = [u for u in everyone if u.id is not None and tenant_email(u)]
-            if without := [u.full_name for u in everyone if u not in with_account]:
-                notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '
-                             f'the reminder and the event page have the link.')
-            steps.append(_step(len(steps) + 1, 'add_teams_room', {
-                'name': title, 'coorganizer_ids': [u.id for u in with_account],
-            }, refs={'event_id': '$1'}))
+            try:
+                with_account = [u for u in everyone if u.id is not None and tenant_email(u)]
+            except GraphError as exc:  # Teams unreachable: plan the rest, say so (graceful degradation)
+                notes.append(f'Microsoft Teams cannot be reached right now ({exc.message}), so the meeting has no '
+                             f'Teams room; you can add one later.')
+                with_account = None
+            if with_account is not None:
+                if without := [u.full_name for u in everyone if u not in with_account]:
+                    notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '
+                                 f'the reminder and the event page have the link.')
+                steps.append(_step(len(steps) + 1, 'add_teams_room', {
+                    'name': title, 'coorganizer_ids': [u.id for u in with_account],
+                }, refs={'event_id': '$1'}))
 
     if start:
         notes.extend(_clashes(user, [user, *(p for p in others if p.id is not None)], start,
@@ -543,6 +555,14 @@ def _distinct(choices):
         if labels.count(choice['label']) > 1:
             choice['label'] += f' [{choice["value"].lstrip("#c")}]'
     return choices
+
+
+def _meeting_named_in(message, user):
+    """The one meeting the user manages whose title is in the message (models reduce "Planning with Makoto"
+    to "the meeting"; seen in the eval)."""
+    said = (message or '').lower()
+    named = [e for e in managed_meetings(user) if e.title.lower() in said] if said else []
+    return named[0] if len({e.title.lower() for e in named}) == 1 and len(named) == 1 else None
 
 
 def find_meeting(name, user, chat_session_id):

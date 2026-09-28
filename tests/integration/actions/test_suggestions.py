@@ -115,7 +115,7 @@ def test_accepting_two_adds_exactly_those_two(db, people, past, create_category)
             return planner.plan_turn(lucas, chat.id, message, [], executor.open_plan(chat.id), llm=llm,
                                      settings=SETTINGS).plan
 
-    shown = turn(REQUEST)
+    shown = turn(REQUEST + ' in Meetings tomorrow at 10')
     assert [s['id'] for s in shown['suggestions']] == ['s1', 's2', 's3']
     assert [s['n'] for s in shown['steps']] == [1]  # nothing applied yet
     turn('add suggestion s2')

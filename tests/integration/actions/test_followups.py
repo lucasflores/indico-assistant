@@ -71,3 +71,14 @@ def test_only_the_request_itself_is_planned(people, chat):
                      {'decision': 'new_request', 'steps': [MEETING, {'action': 'undo'}]})
     assert [s['n'] for s in result.plan['steps']] == [1, 2] and 'delete' not in str(result.plan).lower()
     assert ActionPlan.query.get(result.plan['id']).status == 'shown'  # and it still waits for confirmation
+
+
+def test_undo_is_recognised_even_when_the_model_calls_it_unrelated(people, chat):
+    result, _ = turn(people, chat, 'Undo that', {'decision': 'unrelated'})
+    assert result.handled and 'nothing of yours' in result.reply.lower()
+
+
+def test_a_category_the_user_did_not_name_is_not_used(people, chat):
+    result, _ = turn(people, chat, 'Set up a meeting with Makoto tomorrow at 2pm',
+                     {'decision': 'new_request', 'steps': [MEETING]})  # the model filled in "Meetings"
+    assert [q['id'] for q in result.plan['questions']] == ['category']

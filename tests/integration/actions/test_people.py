@@ -150,7 +150,8 @@ def test_the_model_cannot_accept_a_past_time_for_the_user(people, meetings, db):
                                               'when': {'date': yesterday, 'time': '10:00', 'keep_past': True}}]}))
     settings = {'actions_enabled': True, 'actions_allowed': ['create_event']}
     with acting_as(lucas):
-        result = planner.plan_turn(lucas, chat.id, 'Meeting yesterday at 10', [], None, llm=llm, settings=settings)
+        result = planner.plan_turn(lucas, chat.id, 'Meeting yesterday at 10 in Meetings', [], None, llm=llm,
+                                   settings=settings)
         assert [q['id'] for q in result.plan['questions']] == ['past']
         kept = planner.plan_turn(lucas, chat.id, 'Keep that time', [], executor.open_plan(chat.id), llm=llm,
                                  settings=settings)
