@@ -394,10 +394,12 @@ async def _ask(text: str):
         await _forget_plan_buttons()  # only the latest plan can be confirmed
         await loading_msg.send()
         cl.user_session.set("plan_message", loading_msg)
+        cl.user_session.set("plan_id", plan["id"])
         return
 
     loading_msg.content = reply
     await loading_msg.send()
+    await _drop_stale_plan_buttons(client, auth_token)
 
 
 # --- Chat actions (Feature 019): the plan card and its buttons ------------------------------------------
@@ -425,6 +427,19 @@ def render_plan(plan: dict) -> tuple[str, list[cl.Action]]:
                                  payload={"plan_id": plan["id"], "token": plan.get("token")}))
     actions.append(cl.Action(name="cancel_plan", label="Cancel", icon="x", payload={"plan_id": plan["id"]}))
     return "\n".join(lines), actions
+
+
+async def _drop_stale_plan_buttons(client: httpx.AsyncClient, auth_token: str):
+    """A plan answered in words ("yes", "cancel") keeps no buttons that could only fail now."""
+    plan_id = cl.user_session.get("plan_id")
+    if not plan_id or cl.user_session.get("plan_message") is None:
+        return
+    try:
+        response = await client.get(f"/api/assistant/plans/{plan_id}", headers={"X-Assistant-Auth": auth_token})
+    except httpx.RequestError:
+        return
+    if response.status_code != 200 or response.json().get("status") != "shown":
+        await _forget_plan_buttons()
 
 
 async def _forget_plan_buttons():

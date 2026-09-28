@@ -1,5 +1,7 @@
 """Shared setup for chat-action tests: Indico's own page checks to compare against, and Teams in fake mode."""
 
+import itertools
+
 import pytest
 from werkzeug.exceptions import HTTPException
 
@@ -65,3 +67,14 @@ def teams(app, db, monkeypatch):
     fake = FakeGraph()
     monkeypatch.setattr(graph, 'get_client', lambda: fake)
     return plugin, fake
+
+
+@pytest.fixture
+def create_category(create_category):
+    """Indico's factory with explicit ids: dummy_category is always id 42, and the id sequence (never rolled
+    back between tests) reaches 42 in a long run."""
+    ids = itertools.count(9001)
+
+    def _create(id_=None, **kwargs):
+        return create_category(id_ if id_ is not None else next(ids), **kwargs)
+    return _create

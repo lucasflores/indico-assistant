@@ -5,12 +5,13 @@ Runs in the chat worker inside ``acting_as(user)``: resolving names and checking
 the user.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from indico_assistant.services.actions import enabled_actions, executor, validate_plan
-from indico_assistant.services.actions.context import user_timezone
+from indico_assistant.services.actions.context import fence, user_timezone
 from indico_assistant.services.llm.models.plan import PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
@@ -34,6 +35,8 @@ Rules:
 - Keep people's names exactly as the user wrote them. "me", "I" and "us" include the user.
 - Talks (slots, contributions) for people: one slot per person, with that person as its speaker. "Add both
   of us as contributors with 20 min slots" = a 20-minute slot with speaker "me" and one with the other person.
+- With an open plan, "revise" returns the whole updated request (every field of the request shown to you,
+  with the user's change applied), not only the change.
 - decision: "new_request" for a new change; with an open plan, "revise" (change it), "confirm" (the user
   agrees: "yes", "go ahead", "create it"), "cancel" (the user declines); "unrelated" when the message is
   a question rather than a change.
@@ -141,8 +144,12 @@ def _prompt(user, message, open_plan, enabled):
         f'Available changes: {", ".join(sorted(enabled))}',
     ]
     if open_plan is not None:
-        lines.append(f'Open plan (waiting for the user):\n{open_plan.summary}')
+        # the plan's text holds Indico content (titles, category paths): data, fenced
+        shown = [open_plan.summary]
         if open_plan.questions:
-            lines.append('Its questions: ' + ' | '.join(q.get('text', '') for q in open_plan.questions))
+            shown.append('Its questions: ' + ' | '.join(q.get('text', '') for q in open_plan.questions))
+        if open_plan.draft:
+            shown.append('The request it was made from: ' + json.dumps(open_plan.draft.get('steps', [])))
+        lines.append('Open plan (waiting for the user):\n' + fence('\n'.join(shown)))
     lines.append(f'Message: {message}')
     return '\n'.join(lines)

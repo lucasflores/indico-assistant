@@ -45,3 +45,8 @@ def user_timezone(user):
 
 def local_today(user):
     return now_utc().astimezone(user_timezone(user)).date()
+
+
+def fence(text):
+    """Text from Indico for a prompt: marked as data (FR-017), and unable to close its own fence."""
+    return '<context>\n' + str(text).replace('<', '‹').replace('>', '›') + '\n</context>'
