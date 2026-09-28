@@ -147,3 +147,16 @@ def test_a_slot_each_when_the_model_drops_the_speakers(people, categories, teams
     plan = plan_for(people['manager'], category='Meetings', slots=[{'duration_minutes': 20}, {'duration_minutes': 20}])
     speakers = [s['args']['speakers'][0]['user_id'] for s in plan.steps if s['action'] == 'add_contribution']
     assert speakers == [people['manager'].id, people['makoto'].id]
+
+
+def test_teams_unreachable_still_plans_the_meeting(people, categories, teams, monkeypatch):
+    # seen in the eval run: without Graph credentials the resolver crashed
+    from indico_vc_teams.graph import GraphError
+
+    from indico_assistant.services.actions import teams as teams_action
+    def unreachable(user):
+        raise GraphError(401, 'auth', 'Could not obtain a Microsoft Graph token')
+    monkeypatch.setattr(teams_action, 'tenant_email', unreachable)
+    plan = plan_for(people['manager'], category='Meetings')
+    assert 'add_teams_room' not in [s['action'] for s in plan.steps] and 'cannot be reached' in plan.summary
+    assert plan.steps[0]['action'] == 'create_event'

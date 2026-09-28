@@ -51,6 +51,7 @@ Rules:
 - suggestions: optional additions the user did not ask for (a title, description, agenda item, person,
   material, duration), ONLY from the items in <context> (source_ref = the item's id, e.g. "event:12") or
   from earlier messages of this chat (source_ref "chat"). Nothing useful there: no suggestions.
+- "Undo that", "revert it", "take that back": decision "new_request" with an undo step.
 - reply: one or two plain sentences to the user.
 """
 
@@ -86,8 +87,12 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
-    draft = _only_what_the_user_said(_only_what_the_user_confirmed(response.result, open_plan), message)
-    draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')])
+    draft = response.result
+    if not draft.steps and re.match(r'\s*(undo|revert|take (that|it) back)\b', message, re.IGNORECASE):
+        draft = PlanDraft(decision='new_request', steps=[{'action': 'undo'}])  # seen in the eval: "unrelated"
+    draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), message)
+    draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
+                                          open_plan)
     offered = [*draft.suggestions, *context_suggestions.automatic(context, draft, user)]
     turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message,
                   suggestions=context_suggestions.validate(offered, context))
@@ -157,11 +162,14 @@ RELATIVE_DAY = re.compile(r'\b(?:(?:next|this|on) )?(?:mon|tues|wednes|thurs|fri
 TALK_WORDS = ('slot', 'talk', 'contribut', 'present', 'speaker', 'speak')
 
 
-def _only_what_the_user_asked_for(draft, user_messages):
+def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
     """Steps come from the user's own messages, never from context (FR-017): talks only if the user asked for
     talks, people only if the user named them. (Seen live: the model copied a past meeting's talks, which
     were in the context block, into a new meeting.) What context offers is shown as suggestions instead."""
     said = ' '.join(user_messages).lower()
+    # what the open plan already holds was settled earlier (the user's words or choices): a revision keeps it
+    earlier = ((open_plan.draft or {}).get('steps') or [{}])[0] if open_plan is not None else {}
+    said += ' ' + json.dumps(earlier).lower()
     for step in draft.steps:
         refs = [*getattr(step, 'people', ()), *(s.speaker for s in getattr(step, 'slots', ()) if s.speaker),
                 *(c.speaker for c in getattr(step, 'change_slots', ()) if c.speaker),
@@ -173,6 +181,8 @@ def _only_what_the_user_asked_for(draft, user_messages):
             continue
         if not any(word in said for word in TALK_WORDS):
             step.slots = []
+        if step.category and not any(w in said for w in re.findall(r'\w{4,}', step.category.lower())):
+            step.category = None  # seen in the eval: a category taken from the context block
         step.people = [p for p in step.people
                        if not p.name or p.name.lower() in resolve_me or p.name.split()[0].lower() in said
                        or (p.email and p.email.lower() in said)]

@@ -73,7 +73,7 @@ def test_the_chat_topic_breaks_ties(people, cats, create_event, monkeypatch):
 
 
 @pytest.mark.parametrize(('said', 'expected'), [('Engineering', 'Home » Engineering'),
-                                                ('home » social', 'Home » Social')])
+                                                ('home » social', 'Home » Social'), ('social', 'Home » Social')])
 def test_a_named_category_is_matched(people, cats, said, expected):
     result = plan(people['manager'], category=said)
     assert not [q for q in result.questions if q['id'] == 'category']
@@ -106,3 +106,9 @@ def test_propose_only_while_unlisted_events_are_off_explains_why(people, cats):
     cats['board'].update_principal(stranger, read_access=True)  # the board is moderated: they may propose
     result = plan(stranger)
     assert 'Home » Board' in result.refusal and 'unlisted events' in result.refusal
+
+
+def test_part_of_a_name_is_offered_not_picked(people, cats):
+    # seen in the eval: "in Science" picked "Nothing Science"
+    result = plan(people['manager'], category='Engin')
+    assert choices(result)[0]['label'] == 'Home » Engineering'
