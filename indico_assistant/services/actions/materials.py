@@ -129,7 +129,8 @@ class AttachLink(Action):
         return _attach_refusal(_target(args), user)
 
     def describe(self, args):
-        return f'Add the link {args.url} to “{_target(args).title}”', []
+        obj = _target(args)
+        return f'Add the link {args.url} to {f"“{obj.title}”" if obj else "the new meeting"}', []
 
     def execute(self, user, args):
         from indico.modules.attachments.models.attachments import AttachmentType

@@ -16,6 +16,8 @@ from indico_assistant.services.actions.context import fence, user_timezone
 from indico_assistant.services.llm.models.plan import CreateMeeting, PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
+resolve_me = {'me', 'i', 'myself', 'us', 'we', 'both of us'}
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,9 @@ Rules:
 - decision: "new_request" for a new change; with an open plan, "revise" (change it), "confirm" (the user
   agrees: "yes", "go ahead", "create it"), "cancel" (the user declines); "unrelated" when the message is
   a question rather than a change.
+- suggestions: optional additions the user did not ask for (a title, description, agenda item, person,
+  material, duration), ONLY from the items in <context> (source_ref = the item's id, e.g. "event:12") or
+  from earlier messages of this chat (source_ref "chat"). Nothing useful there: no suggestions.
 - reply: one or two plain sentences to the user.
 """
 
@@ -63,24 +68,34 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE)
-    if open_plan is not None and (draft := answered_draft(open_plan, message)) is not None:
-        # a choice offered in the plan (a button, or its label typed): no LLM needed
-        return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
-                      (open_plan.draft or {}).get('topic', ''))
+    if open_plan is not None:
+        # a choice offered in the plan, or a suggestion accepted (a button, or typed): no LLM needed
+        if (draft := answered_draft(open_plan, message)) is not None:
+            return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
+                          (open_plan.draft or {}).get('topic', ''), suggestions=open_plan.suggestions)
+        if (accepted := accepted_suggestion(open_plan, message)) is not None:
+            draft, remaining = accepted
+            return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
+                          (open_plan.draft or {}).get('topic', ''), suggestions=remaining)
+    from indico_assistant.services.actions import suggestions as context_suggestions
+    context = context_suggestions.build_context(user, message, chat_session_id, history)
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
-        response = llm.generate(_prompt(user, message, open_plan, enabled, chat_session_id), PlanDraft,
+        response = llm.generate(_prompt(user, message, open_plan, enabled, chat_session_id, context), PlanDraft,
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
     draft = _only_what_the_user_said(_only_what_the_user_confirmed(response.result, open_plan), message)
-    turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message)
+    draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')])
+    offered = [*draft.suggestions, *context_suggestions.automatic(context, draft, user)]
+    turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message,
+                  suggestions=context_suggestions.validate(offered, context))
     turn.llm_calls = calls
     return turn
 
 
-def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, topic=''):
+def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, topic='', suggestions=()):
     from indico_assistant.services.actions import resolve
     from indico_assistant.tasks.actions import outcome_message
 
@@ -111,7 +126,8 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
     if errors := validate_plan(resolved.steps, enabled):
         return PlanTurn('I cannot plan that: ' + '; '.join(errors))
     plan, token = executor.create_plan(user, chat_session_id, steps=resolved.steps, summary=resolved.summary,
-                                       questions=resolved.questions, suggestions=resolved.suggestions,
+                                       questions=resolved.questions,
+                                       suggestions=list(suggestions) if isinstance(draft.steps[0], CreateMeeting) else [],
                                        supersedes=open_plan if open_plan is not None else None,
                                        llm_calls=calls, draft={**draft.model_dump(mode='json'), 'topic': topic})
     from indico_assistant.schemas.actions import PlanView
@@ -137,6 +153,25 @@ RELATIVE_DAY = re.compile(r'\b(?:(?:next|this|on) )?(?:mon|tues|wednes|thurs|fri
                           re.IGNORECASE)
 
 
+TALK_WORDS = ('slot', 'talk', 'contribut', 'present', 'speaker', 'speak')
+
+
+def _only_what_the_user_asked_for(draft, user_messages):
+    """Steps come from the user's own messages, never from context (FR-017): talks only if the user asked for
+    talks, people only if the user named them. (Seen live: the model copied a past meeting's talks, which
+    were in the context block, into a new meeting.) What context offers is shown as suggestions instead."""
+    said = ' '.join(user_messages).lower()
+    for step in draft.steps:
+        if not isinstance(step, CreateMeeting):
+            continue
+        if not any(word in said for word in TALK_WORDS):
+            step.slots = []
+        step.people = [p for p in step.people
+                       if not p.name or p.name.lower() in resolve_me or p.name.split()[0].lower() in said
+                       or (p.email and p.email.lower() in said)]
+    return draft
+
+
 def _only_what_the_user_said(draft, message):
     """Dates as the user said them, worked out by our code (models get weekdays wrong: "Thursday" came back as
     a Tuesday); and a move keeps the meeting's day unless the user named one ("move it to 3pm" came back
@@ -156,6 +191,21 @@ def _only_what_the_user_said(draft, message):
         elif isinstance(step, ChangeMeeting) and not names_a_day:
             when.date = None
     return draft
+
+
+def accepted_suggestion(open_plan, message):
+    """(the open plan's draft with the suggestion applied, the other suggestions) for "add suggestion s1"."""
+    from indico_assistant.services.actions.suggestions import accept
+
+    wanted = re.fullmatch(r'\s*add suggestion (s\d+)\s*', message.lower())
+    if not wanted or not open_plan.draft:
+        return None
+    chosen = next((s for s in open_plan.suggestions if s['id'] == wanted.group(1)), None)
+    if chosen is None:
+        return None
+    draft = accept(PlanDraft.model_validate(open_plan.draft), chosen)
+    draft.decision, draft.reply = 'revise', ''
+    return draft, [s for s in open_plan.suggestions if s is not chosen]
 
 
 def answered_draft(open_plan, message):
@@ -197,7 +247,7 @@ def answered_draft(open_plan, message):
     return None
 
 
-def _prompt(user, message, open_plan, enabled, chat_session_id=None):
+def _prompt(user, message, open_plan, enabled, chat_session_id=None, context=None):
     tz = user_timezone(user)
     lines = [
         f'User: {user.full_name} <{user.email}>',
@@ -215,5 +265,7 @@ def _prompt(user, message, open_plan, enabled, chat_session_id=None):
         if open_plan.draft:
             shown.append('The request it was made from: ' + json.dumps(open_plan.draft.get('steps', [])))
         lines.append('Open plan (waiting for the user):\n' + fence('\n'.join(shown)))
+    if context is not None and context.text:
+        lines.append('Context (the user\'s similar meetings and chats, for suggestions only):\n' + fence(context.text))
     lines.append(f'Message: {message}')
     return '\n'.join(lines)
