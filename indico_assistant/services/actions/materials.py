@@ -63,6 +63,8 @@ class AddReminder(Action):
         return {'created': {'reminder_id': reminder.id}}
 
     def revert(self, user, result):
+        if not result.get('created'):
+            return  # it was too late to add it, so there is nothing to undo
         reminder = EventReminder.get(result['created']['reminder_id'])
         if reminder is not None and not reminder.is_sent:
             db.session.delete(reminder)

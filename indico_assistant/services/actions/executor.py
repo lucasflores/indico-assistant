@@ -128,12 +128,13 @@ def run(plan_id, enabled=None):
 
     ``enabled``: the actions the admin allows now (the task passes them; an action turned off since the
     plan was confirmed refuses the plan)."""
-    plan = ActionPlan.query.get(plan_id)
-    if plan is None or plan.status != 'confirmed':
-        raise NotConfirmed(plan_id)
-    plan.status = 'running'
-    plan.started_at = _now()
+    # claimed in one conditional UPDATE: a second delivery of the task finds it running and does nothing
+    claimed = (ActionPlan.query.filter(ActionPlan.id == plan_id, ActionPlan.status == 'confirmed')
+               .update({'status': 'running', 'started_at': _now()}, synchronize_session=False))
     db.session.commit()
+    if not claimed:
+        raise NotConfirmed(plan_id)
+    plan = ActionPlan.query.get(plan_id)
 
     g.assistant_rollback_callbacks = []
     g.pop('assistant_new_events', None)

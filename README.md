@@ -94,7 +94,7 @@ confirmed plans.
 | Add Teams room | A Microsoft Teams meeting, with co-organizers; needs the `vc_teams` plugin |
 | Add reminder | A reminder to the invitees and speakers (default: **Reminder before a meeting**, 15 minutes) |
 | Attach link / Attach file | Links, or files sent in the chat, on a meeting or one of its talks |
-| Delete created | Undo: removes what one of your plans created, within 24 hours, if nobody changed it since |
+| Delete created | Undo: reverses one of your plans from the last 24 hours; if someone changed the objects since, the plan says what differs before you confirm |
 
 **What the user can do, and nothing more.** Each step is checked with Indico's own permissions as the user, when
 the plan is made and again when it runs. The assistant can only do what the user could do on the page, and
@@ -103,8 +103,9 @@ Teams meetings and emails. Plans are single-use: a plan expires after 30 minutes
 **Confirm** works once. A plan has at most 25 steps.
 
 **Help while planning.** Unclear requests get a question instead of a guess, such as which category or which
-"Makoto". Missing times are offered from free slots in Indico: yours and the named people's. Optionally Outlook
-free/busy is used too (**Use Outlook free/busy for time suggestions**, which needs `Calendars.ReadBasic`).
+"Makoto". Missing times are offered from free slots in Indico: yours and the named people's. Outlook free/busy is
+not used yet: it waits for a check that Microsoft Graph allows it with the Teams app's scoped setup. Until then
+the **Use Outlook free/busy** switch only makes the suggestions say that Outlook was not consulted.
 Suggestions come from the user's similar past meetings: material, attendees and length. Each names its source
 and is added only when the user accepts it. The language model sees Indico content only as fenced data, and
 anything in a plan that the user did not ask for is dropped.

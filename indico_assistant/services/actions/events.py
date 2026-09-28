@@ -254,10 +254,20 @@ class DeleteCreated(Action):
 
 
 def _undo_target(result):
-    """The Indico object a step result is about (to check it can still be managed)."""
+    """The event a step result is about (to check it can still be managed, and is not locked)."""
+    from indico.modules.attachments.models.attachments import Attachment
     from indico.modules.events.contributions.models.contributions import Contribution
+    from indico.modules.events.reminders.models.reminders import EventReminder
+    from indico.modules.vc.models.vc_rooms import VCRoom
 
     created, before = result.get('created') or {}, result.get('before') or {}
+    # what a plan added to an existing meeting is undone under that meeting's rules too
+    for key, model, event_of in (('vc_room_id', VCRoom, lambda r: r.events[0].event if r.events else None),
+                                 ('attachment_id', Attachment, lambda a: a.folder.event),
+                                 ('reminder_id', EventReminder, lambda r: r.event)):
+        if key in created:
+            obj = model.get(created[key])
+            return event_of(obj) if obj is not None else None
     if 'event_id' in created or 'event_id' in before:
         return Event.get(created.get('event_id', before.get('event_id')))
     if 'contribution_id' in created or 'contribution_id' in before:
