@@ -25,7 +25,7 @@ def test_runs_as_a_request_context_task_on_the_chat_queue():
 
 
 @pytest.mark.parametrize(('status', 'error', 'reply'), [
-    ('done', None, 'Done: Create “Sync”.'),
+    ('done', None, 'Done:\n- Create “Sync”'),
     ('refused', 'You cannot create events here', 'I did not change anything: You cannot create events here'),
     ('failed', executor.FAILED_MESSAGE, executor.FAILED_MESSAGE),
 ])
@@ -48,3 +48,9 @@ def test_an_unconfirmed_plan_fails_the_job(confirmed):
             patch('indico_assistant.services.chat.jobs.finish') as finish, patch('indico_assistant.services.chat.jobs.start'):
         execute_plan.run('job1', confirmed.id)
     assert finish.call_args.kwargs['error'] == 'PLAN_NOT_CONFIRMABLE'
+
+
+def test_the_reply_links_to_the_created_event(confirmed, dummy_event):
+    from indico_assistant.tasks.actions import outcome_message
+    confirmed.status, confirmed.result = 'done', [{'n': 1, 'action': 'create_event', 'created': {'event_id': dummy_event.id}}]
+    assert f'[Open “{dummy_event.title}” in Indico]({dummy_event.external_url})' in outcome_message(confirmed)

@@ -126,47 +126,47 @@ builds on these.
 
 ### Tests first
 
-- [ ] T025 [P] [US1] Parity test `tests/integration/actions/test_parity_events.py`. `create_event.check` refuses exactly when `EventCreationFormBase.validate_category` would, for an admin, a category creator (`create` permission), a category manager, an open-mode category user and an unrelated user.
-- [ ] T026 [P] [US1] Parity test `tests/integration/actions/test_parity_contributions.py`. `add_contribution.check` matches `RHLegacyTimetableAddContribution` (full `can_manage`), including a locked event and a contribution-only manager.
-- [ ] T027 [P] [US1] Parity test `tests/integration/actions/test_parity_teams.py`. `add_teams_room.check` matches `RHVCManageEventCreate`: event manager, and the plugin `acl` / `managers` settings. It refuses when vc_teams is absent.
-- [ ] T028 [P] [US1] Parity test `tests/integration/actions/test_parity_reminders.py`. `add_reminder.check` matches `RHAddReminder`.
-- [ ] T029 [P] [US1] Execution test `tests/integration/actions/test_create_meeting.py`. A confirmed plan for the example:
+- [x] T025 [P] [US1] Parity test `tests/integration/actions/test_parity_events.py`. `create_event.check` refuses exactly when `EventCreationFormBase.validate_category` would, for an admin, a category creator (`create` permission), a category manager, an open-mode category user and an unrelated user.
+- [x] T026 [P] [US1] Parity test `tests/integration/actions/test_parity_contributions.py`. `add_contribution.check` matches `RHLegacyTimetableAddContribution` (full `can_manage`), including a locked event and a contribution-only manager.
+- [x] T027 [P] [US1] Parity test `tests/integration/actions/test_parity_teams.py`. `add_teams_room.check` matches `RHVCManageEventCreate`: event manager, and the plugin `acl` / `managers` settings. It refuses when vc_teams is absent.
+- [x] T028 [P] [US1] Parity test `tests/integration/actions/test_parity_reminders.py`. `add_reminder.check` matches `RHAddReminder`.
+- [x] T029 [P] [US1] Execution test `tests/integration/actions/test_create_meeting.py`. A confirmed plan for the example:
   - creates the event (meeting, the user's timezone, the right category);
   - creates two scheduled contributions back to back, each with one speaker link;
   - creates the reminder (`send_to_speakers`, invitee recipients, `-15 min`);
   - creates a Teams room with co-organizers (FakeGraph records the meeting);
   - attributes every `EventLogEntry.user` to the user;
   - queues the emails and sends them only after commit (use the `smtp` fixture).
-- [ ] T030 [P] [US1] Rollback test `tests/integration/actions/test_rollback.py` (SC-006). Covers:
+- [x] T030 [P] [US1] Rollback test `tests/integration/actions/test_rollback.py` (SC-006). Covers:
   - FakeGraph `fail_next` on create;
   - a raised exception in a step after the Teams step;
   - a commit failure (patched).
 
   Each case must leave no event, contribution, reminder, VC room, FakeGraph meeting or queued email.
-- [ ] T031 [P] [US1] Planner test `tests/unit/services/actions/test_planner_create.py`, using recorded `PlanDraft`s for the example sentence and three variants:
+- [x] T031 [P] [US1] Planner test `tests/unit/services/actions/test_planner_create.py`, using recorded `PlanDraft`s for the example sentence and three variants:
   - no end time → the end fits the slots, with a note (AS-3);
   - a named category → no question;
   - "both of us" → the requester is included.
 
 ### Implementation
 
-- [ ] T032 [P] [US1] `indico_assistant/services/actions/events.py` `CreateEvent`:
+- [x] T032 [P] [US1] `indico_assistant/services/actions/events.py` `CreateEvent`:
   - check: `can_create_events` + not locked;
   - describe;
   - execute: `create_event(category, EventType.meeting, data)` + `notify_event_creation`;
   - revert: `event.delete`.
-- [ ] T033 [P] [US1] `indico_assistant/services/actions/contributions.py` `AddContribution`: speakers through `EventPerson.for_user`; `ContributionPersonLink(is_speaker=True)` with submitter `True`; `create_contribution(..., extend_parent=True)`; revert with `delete_contribution` (R3).
-- [ ] T034 [P] [US1] `indico_assistant/services/actions/materials.py` `AddReminder`, as in R6: `reply_to_address` from the allowed senders; the reminder is left out when its time has passed; the executor writes `reminder.log`.
-- [ ] T035 [P] [US1] `indico_assistant/services/actions/teams.py` `AddTeamsRoom`:
+- [x] T033 [P] [US1] `indico_assistant/services/actions/contributions.py` `AddContribution`: speakers through `EventPerson.for_user`; `ContributionPersonLink(is_speaker=True)` with submitter `True`; `create_contribution(..., extend_parent=True)`; revert with `delete_contribution` (R3).
+- [x] T034 [P] [US1] `indico_assistant/services/actions/materials.py` `AddReminder`, as in R6: `reply_to_address` from the allowed senders; the reminder is left out when its time has passed; the executor writes `reminder.log`.
+- [x] T035 [P] [US1] `indico_assistant/services/actions/teams.py` `AddTeamsRoom`:
   - the R5 sequence with two dict copies and vc_teams setting defaults;
   - `has_teams` via `find_tenant_email`;
   - it exposes `external_undo(result)` = `cancel_event(graph_event_id)` for the executor.
-- [ ] T036 [US1] `indico_assistant/services/actions/resolve.py`:
+- [x] T036 [US1] `indico_assistant/services/actions/resolve.py`:
   - basic `find_person`: `search_users` as `RHUserSearch` does; 1 match → resolved, several → question, 0 → question;
   - basic `list_categories`: the R9 candidate query + `can_create_events`, `' » '` paths; unspecified → question listing them;
   - `draft_to_steps(CreateMeeting)`: When → aware datetimes in the user's timezone; slots back to back; the meeting extended to fit; Teams step last; reminder recipients = non-speaker invitees.
-- [ ] T037 [US1] Wire `CreateMeeting` in `indico_assistant/services/actions/planner.py` to the resolvers. The plan summary lists every object, times with the timezone, people with email, the category path and side effects (FR-006).
-- [ ] T038 [US1] Success reply in `indico_assistant/services/actions/executor.py`: link to the event (`event.external_url`) and a list of what was created (AS-4).
+- [x] T037 [US1] Wire `CreateMeeting` in `indico_assistant/services/actions/planner.py` to the resolvers. The plan summary lists every object, times with the timezone, people with email, the category path and side effects (FR-006).
+- [x] T038 [US1] Success reply in `indico_assistant/services/actions/executor.py`: link to the event (`event.external_url`) and a list of what was created (AS-4).
 - [ ] T039 [US1] Manual run of quickstart.md §2 on the local stack: restart the worker, run the example sentence, check the event in the UI. Record the results in the PR description.
 
 **Checkpoint**: the MVP works. Confirmed plans create the meeting exactly as Indico's pages would.
