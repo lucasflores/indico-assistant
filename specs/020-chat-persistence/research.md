@@ -98,6 +98,11 @@ panel that our widget script docks to the right edge of every Indico page.
   accepts it; it only ever carries what Indico signed a moment before. The app no longer needs the
   `auth_token` it copied out of the header callback.
 
+- **Login must stay required.** `auth/__init__.py: require_login()` is true only while an auth callback
+  exists, or `CHAINLIT_CUSTOM_AUTH` is set. When the Copilot's `header_auth_callback` is retired, set
+  `CHAINLIT_CUSTOM_AUTH=true` for the Chainlit server. Otherwise websocket connections would be accepted
+  without a user.
+
 **Alternatives**:
 
 - The token in the iframe URL (rejected: it leaks through logs and `Referer`).
