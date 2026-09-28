@@ -203,3 +203,41 @@ def test_nothing_waiting_for_the_commit_starts_before_it(run, monkeypatch):
     finally:
         signals.core.after_commit.disconnect(receiver)
     assert plan.status == 'done' and fired == []  # (commits are flushes in tests: only a savepoint could fire it)
+
+
+def test_a_failed_final_commit_undoes_the_side_effects(run, db, monkeypatch, dummy_event):
+    # (Copilot review, PR #3) the outcome is committed with the changes: if that commit fails, the plan is
+    # 'failed' (not stuck in 'running') and the Teams-like side effect is undone
+    commit, calls = db.session.commit, []
+
+    def failing_commit():
+        calls.append(1)
+        if len(calls) == 2:  # 1: 'running', 2: the steps with their outcome
+            raise RuntimeError('database went away')
+        commit()
+    monkeypatch.setattr(db.session, 'commit', failing_commit)
+    plan, _ = run('test_note', 'test_external')
+    assert plan.status == 'failed' and plan.result is None
+    assert External.undone == [dummy_event.id]
+
+
+def test_an_action_turned_off_since_confirming_refuses_the_plan(chat, dummy_user, dummy_event):
+    plan, token = executor.create_plan(dummy_user, chat.id, summary='test', steps=[
+        {'n': 1, 'action': 'test_note', 'args': {'text': 'n1'}},
+        {'n': 2, 'action': 'test_external', 'args': {'event_id': dummy_event.id}}])
+    executor.confirm(plan.id, dummy_user, token)
+    plan = executor.run(plan.id, enabled={'test_note'})
+    assert plan.status == 'refused' and 'test_external' in plan.error
+    assert notes(chat) == 0 and External.undone == []
+
+
+def test_done_is_committed_with_the_changes(run, db, monkeypatch):
+    # one commit carries the steps and 'done': no later commit can fail and leave the plan 'running'
+    commit, seen = db.session.commit, []
+
+    def recording_commit():
+        seen.append(sorted({p.status for p in db.session.identity_map.values() if isinstance(p, ActionPlan)}))
+        commit()
+    monkeypatch.setattr(db.session, 'commit', recording_commit)
+    plan, _ = run('test_note', 'test_external')
+    assert plan.status == 'done' and seen == [['running'], ['done']]

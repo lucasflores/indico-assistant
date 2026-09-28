@@ -82,7 +82,7 @@ Each of these goes through the same plan and confirm steps:
 
 ```bash
 cd ~/indico-assistant/eval   # branch 019-actions-eval
-INDICO_CONFIG=~/indico-assistant/instance/indico.conf \
+VC_TEAMS_FAKE_GRAPH=1 INDICO_CONFIG=~/indico-assistant/instance/indico.conf \
   ~/indico-assistant/instance/env/bin/python scripts/actions_eval/run.py
 ```
 

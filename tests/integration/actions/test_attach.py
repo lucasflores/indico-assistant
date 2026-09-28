@@ -28,6 +28,18 @@ from indico_assistant.services.llm.models.plan import PlanDraft
 PDF = b'%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n'
 
 
+def _zip(*names):
+    import zipfile
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as package:
+        for name in names:
+            package.writestr(name, '<x/>')
+    return buffer.getvalue()
+
+
+DOCX = _zip('[Content_Types].xml', 'word/document.xml')
+
+
 @pytest.fixture
 def upload(monkeypatch, people):
     request = MagicMock()
@@ -54,11 +66,18 @@ def test_an_allowed_file_is_kept_unclaimed_for_its_uploader(upload, people):
     assert uploads.usable_upload(body['uuid'], people['stranger']) is None  # FR-025
 
 
+def test_an_office_package_is_accepted(upload):
+    status, body = upload(DOCX, 'report.docx')
+    assert status == 201 and body['content_type'].endswith('wordprocessingml.document')
+
+
 @pytest.mark.parametrize(('data', 'filename', 'status', 'code'), [
     (b'MZ\x90\x00 an exe renamed', 'slides.pdf', 415, 'UNSUPPORTED_FILE_TYPE'),  # checked by content
     (PDF, 'tool.exe', 415, 'UNSUPPORTED_FILE_TYPE'),
     (b'\x00\x01binary', 'notes.txt', 415, 'UNSUPPORTED_FILE_TYPE'),
     (b'', 'empty.txt', 422, 'EMPTY_FILE'),
+    (_zip('payload.sh'), 'report.docx', 415, 'UNSUPPORTED_FILE_TYPE'),  # any zip renamed (Copilot, PR #3)
+    (DOCX, 'report.xlsx', 415, 'UNSUPPORTED_FILE_TYPE'),  # a Word package is not a spreadsheet
 ])
 def test_refused_uploads(upload, data, filename, status, code):
     got, body = upload(data, filename)

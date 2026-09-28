@@ -169,7 +169,7 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
     said = ' '.join(user_messages).lower()
     # what the open plan already holds was settled earlier (the user's words or choices): a revision keeps it
     earlier = ((open_plan.draft or {}).get('steps') or [{}])[0] if open_plan is not None else {}
-    said += ' ' + json.dumps(earlier).lower()
+    said += ' ' + json.dumps(earlier, ensure_ascii=False).lower()
     for step in draft.steps:
         refs = [*getattr(step, 'people', ()), *(s.speaker for s in getattr(step, 'slots', ()) if s.speaker),
                 *(c.speaker for c in getattr(step, 'change_slots', ()) if c.speaker),
@@ -177,8 +177,16 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
         for ref in refs:
             if ref.email and ref.email.lower() not in said:
                 ref.email = None  # seen live: an invented address turned an Indico user into a "guest"
+        # text and links that become writes but are not all shown in the plan: only as the user gave them
+        # (Copilot review, PR #3: a link or description copied from the context would otherwise be written)
+        if getattr(step, 'description', None) and step.description.lower().strip(' .') not in said:
+            step.description = None
+        if getattr(step, 'url', None) and step.url.lower() not in said:
+            step.url = None
         if not isinstance(step, CreateMeeting):
             continue
+        step.links = [url for url in step.links if url.lower() in said]  # (accepted suggestions are in ``earlier``)
+        step.teams = step.teams and 'teams' in said
         if not any(word in said for word in TALK_WORDS):
             step.slots = []
         if step.category and not any(w in said for w in re.findall(r'\w{4,}', step.category.lower())):

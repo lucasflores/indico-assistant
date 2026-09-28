@@ -47,10 +47,17 @@ def _hash(token):
 
 def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(), supersedes=None,
                 undoes=None, message_id=None, llm_calls=(), draft=None):
-    """Save a plan to show; returns (plan, confirm token). A revision supersedes the plan it replaces."""
+    """Save a plan to show; returns (plan, confirm token). A chat has one plan waiting at most: the new one
+    supersedes every other shown plan of the chat."""
+    from indico_assistant.models import ChatSession
+
     token = secrets.token_urlsafe(24)
-    if supersedes is not None and supersedes.status == 'shown':
-        supersedes.status = 'superseded'
+    # the chat's row lock orders concurrent planners of one chat (two quick messages): the second sees the
+    # first one's plan once that has committed, and supersedes it, so two plans are never both confirmable
+    ChatSession.query.filter_by(id=session_id).with_for_update().first()
+    (ActionPlan.query
+     .filter(ActionPlan.session_id == session_id, ActionPlan.status == 'shown')
+     .update({'status': 'superseded'}, synchronize_session='fetch'))
     plan = ActionPlan(user_id=user.id, session_id=session_id, steps=list(steps), summary=summary,
                       questions=list(questions), suggestions=list(suggestions), token_hash=_hash(token),
                       supersedes_id=supersedes.id if supersedes else None, undoes_id=undoes.id if undoes else None,
@@ -106,8 +113,11 @@ def cancel(plan_id, user):
     return bool(cancelled)
 
 
-def run(plan_id):
-    """Carry out a confirmed plan as its owner. Needs a request context (the execute_plan task)."""
+def run(plan_id, enabled=None):
+    """Carry out a confirmed plan as its owner. Needs a request context (the execute_plan task).
+
+    ``enabled``: the actions the admin allows now (the task passes them; an action turned off since the
+    plan was confirmed refuses the plan)."""
     plan = ActionPlan.query.get(plan_id)
     if plan is None or plan.status != 'confirmed':
         raise NotConfirmed(plan_id)
@@ -121,11 +131,16 @@ def run(plan_id):
         user = User.get(plan.user_id, is_deleted=False)
         if user is None:
             raise Refused('Your account is no longer active')
+        if enabled is not None and (off := [s['action'] for s in plan.steps if s['action'] not in enabled]):
+            raise Refused(f'An administrator turned off {", ".join(sorted(set(off)))} since you confirmed')
         try:
             with acting_as(user):
                 results = _execute(plan, user)
         except PermissionError as exc:
             raise Refused(str(exc)) from exc
+        # the plan's outcome is committed with its changes: a failed commit leaves neither, and is
+        # undone below like a failed step (Teams meeting cancelled), never a plan stuck in 'running'
+        _mark(plan, 'done', result=results)
         db.session.commit()
     except Refused as exc:
         _abort()
@@ -135,7 +150,7 @@ def run(plan_id):
         _abort()
         return _finish(plan_id, 'failed', error=FAILED_MESSAGE)
     g.pop('assistant_rollback_callbacks', None)
-    return _finish(plan_id, 'done', result=results)
+    return plan
 
 
 @contextmanager
@@ -174,7 +189,8 @@ def _execute(plan, user):
                     raise Refused(reason)
                 outcome = action.execute(user, args) or {}
                 results[step['n']] = {'n': step['n'], 'action': step['action'], 'created': outcome.get('created'),
-                                      'before': outcome.get('before'), 'after': outcome.get('after')}
+                                      'before': outcome.get('before'), 'after': outcome.get('after'),
+                                      **({'skipped': outcome['skipped']} if outcome.get('skipped') else {})}
     return to_jsonable_python(list(results.values()))
 
 
@@ -209,9 +225,13 @@ def _discard_vc_pending():
 
 def _finish(plan_id, status, *, error=None, result=None):
     plan = ActionPlan.query.get(plan_id)
+    _mark(plan, status, error=error, result=result)
+    db.session.commit()
+    return plan
+
+
+def _mark(plan, status, *, error=None, result=None):
     plan.status = status
     plan.error = error
     plan.result = result
     plan.finished_at = _now()
-    db.session.commit()
-    return plan

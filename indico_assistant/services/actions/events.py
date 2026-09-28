@@ -228,14 +228,15 @@ class DeleteCreated(Action):
     Args = DeleteCreatedArgs
 
     def check(self, user, args):
+        from indico_assistant.services.actions.contributions import _manage_refusal
 
         plan = undoable_plan(args.plan_id, user)
         if plan is None:
             return 'That can no longer be undone (only your own changes of the last 24 hours, once)'
         for result in plan.result or ():
             target = _undo_target(result)
-            if target is not None and not target.is_deleted and not target.can_manage(user):
-                return f'You can no longer manage “{target.title}”'
+            if target is not None and not target.is_deleted and (reason := _manage_refusal(target, user)):
+                return reason  # a locked meeting too, like every other write
         return None
 
     def describe(self, args):

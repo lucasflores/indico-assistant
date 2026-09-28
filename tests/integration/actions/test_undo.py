@@ -102,3 +102,16 @@ def test_never_someone_elses_or_older_than_a_day(db, people, made):
     assert undo(people['stranger'], new_chat(db, people['stranger'])).refusal
     plan.finished_at = now_utc() - timedelta(hours=25)
     assert undo(people['manager'], chat).refusal
+
+
+def test_a_locked_meeting_is_not_undone(db, people, made):
+    # (Copilot review, PR #3) undo is a write like any other: a locked event refuses it
+    lucas = people['manager']
+    chat, plan, event = made
+    resolved = undo(lucas, chat)
+    event.is_locked = True  # locked after the undo was planned
+    undo_plan, token = executor.create_plan(lucas, chat.id, steps=resolved.steps, summary='undo', undoes=plan)
+    executor.confirm(undo_plan.id, lucas, token)
+    result = executor.run(undo_plan.id)
+    assert result.status == 'refused' and 'locked' in result.error
+    assert not event.is_deleted
