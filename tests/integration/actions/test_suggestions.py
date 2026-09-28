@@ -39,6 +39,8 @@ def past(db, people, create_event, create_attachment, create_user):
     from indico.modules.events.models.persons import EventPerson, EventPersonLink
     q3.person_links.append(EventPersonLink(person=EventPerson.for_user(people['makoto'], q3)))
     slides = create_attachment(lucas, q3, 'Q3 budget slides')
+    from indico.modules.events.notes.models.notes import EventNote, RenderMode
+    EventNote.get_or_create(q3).create_revision(RenderMode.html, '<p>Agreed: <b>cut travel</b> by 10%</p>', lucas)
     secret = create_event(title='Budget cuts (board only)', start_dt=when, end_dt=when + timedelta(hours=1),
                           creator=create_user(80), protection_mode=ProtectionMode.protected)
     secret.update_principal(lucas, permissions={'submit'})  # linked to him, but he cannot open it
@@ -64,6 +66,7 @@ def test_context_holds_only_what_the_user_may_see(people, past, monkeypatch):
     assert f'event:{past["secret"].id}' not in context.sources and 'Budget cuts' not in context.text
     assert f'past_chat:{past["theirs"].id}' not in context.sources and 'Stan' not in context.text
     assert 'Makoto Tanaka' in context.text
+    assert f'note:{past["q3"].id}' in context.sources and 'Agreed: cut travel by 10%' in context.text  # minutes
 
 
 def test_nothing_useful_means_no_suggestions(people):
@@ -155,3 +158,12 @@ def test_emails_come_from_the_user_not_the_model():
                    {'name': 'Kaori Ito', 'email': 'kaori@ito.org'}]}]})
     step = _only_what_the_user_asked_for(draft, ['meet Makoto and Kaori Ito (kaori@ito.org)']).steps[0]
     assert [p.email for p in step.people] == [None, 'kaori@ito.org']
+
+
+@pytest.mark.parametrize('step', [{'action': 'undo'}, {'action': 'change_meeting', 'move_to': {'time': '3pm'}},
+                                  {'action': 'attach', 'target': 'the meeting', 'upload': 'this'}])
+def test_other_requests_get_no_suggestions(people, past, step):
+    with acting_as(people['manager']):
+        context = suggestions.build_context(people['manager'], REQUEST)
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [step]})
+    assert suggestions.automatic(context, draft, people['manager']) == []

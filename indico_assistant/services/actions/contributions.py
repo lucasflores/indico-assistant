@@ -105,7 +105,9 @@ class AddContribution(Action):
         return {'created': {'contribution_id': contribution.id}}
 
     def revert(self, user, result):
-        delete_contribution(Contribution.get(result['created']['contribution_id']))
+        contribution = Contribution.get(result['created']['contribution_id'])
+        if contribution is not None and not contribution.is_deleted:
+            delete_contribution(contribution)
 
 
 class UpdateContributionArgs(ActionArgs):

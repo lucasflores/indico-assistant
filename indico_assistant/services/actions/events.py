@@ -74,7 +74,9 @@ class CreateEvent(Action):
         }
 
     def revert(self, user, result):
-        Event.get(result['created']['event_id']).delete('Undone from the assistant chat', user)
+        event = Event.get(result['created']['event_id'])
+        if not event.is_deleted:
+            event.delete('Undone from the assistant chat', user)
 
 
 class ProposeEventArgs(CreateEventArgs):
@@ -114,7 +116,9 @@ class ProposeEvent(Action):
         return {'created': {'event_id': event.id, 'request_id': request.id}}
 
     def revert(self, user, result):
-        Event.get(result['created']['event_id']).delete('Undone from the assistant chat', user)  # withdraws the request
+        event = Event.get(result['created']['event_id'])
+        if not event.is_deleted:
+            event.delete('Undone from the assistant chat', user)  # withdraws the request
 
 
 class UpdateEventArgs(ActionArgs):
@@ -189,3 +193,74 @@ class UpdateEvent(Action):
 
     def revert(self, user, result):
         self.execute(user, UpdateEventArgs.model_validate(result['before']))
+
+
+UNDO_WINDOW = timedelta(hours=24)
+
+
+class DeleteCreatedArgs(ActionArgs):
+    plan_id: str
+
+
+def undoable_plan(plan_id, user):
+    """The user's own carried-out plan from the last 24 hours that nothing has undone yet (US7), or None."""
+    from indico_assistant.models import ActionPlan
+
+    plan = ActionPlan.query.filter_by(id=plan_id, user_id=user.id, status='done').first()
+    if plan is None or plan.undoes_id is not None or plan.finished_at < _now_utc() - UNDO_WINDOW:
+        return None
+    if ActionPlan.query.filter_by(undoes_id=plan.id, status='done').count():
+        return None
+    return plan
+
+
+def _now_utc():
+    from indico.util.date_time import now_utc
+    return now_utc()
+
+
+@register
+class DeleteCreated(Action):
+    """Undo: every step of a plan reversed with Indico's own operations, last step first (deleting a meeting
+    deletes its Teams room, which cancels the Teams meeting, as the delete page does)."""
+
+    name = 'delete_created'
+    Args = DeleteCreatedArgs
+
+    def check(self, user, args):
+        from indico_assistant.services import actions
+
+        plan = undoable_plan(args.plan_id, user)
+        if plan is None:
+            return 'That can no longer be undone (only your own changes of the last 24 hours, once)'
+        for result in plan.result or ():
+            target = _undo_target(result)
+            if target is not None and not target.is_deleted and not target.can_manage(user):
+                return f'You can no longer manage “{target.title}”'
+        return None
+
+    def describe(self, args):
+        from indico_assistant.models import ActionPlan
+        plan = ActionPlan.query.get(args.plan_id)
+        return f'Undo: {plan.summary}', []
+
+    def execute(self, user, args):
+        from indico_assistant.services import actions
+
+        plan = undoable_plan(args.plan_id, user)
+        for result in reversed(plan.result or ()):
+            actions.ACTIONS[result['action']].revert(user, result)
+        return {'created': None, 'before': {'plan_id': str(plan.id)}}
+
+
+def _undo_target(result):
+    """The Indico object a step result is about (to check it can still be managed)."""
+    from indico.modules.events.contributions.models.contributions import Contribution
+
+    created, before = result.get('created') or {}, result.get('before') or {}
+    if 'event_id' in created or 'event_id' in before:
+        return Event.get(created.get('event_id', before.get('event_id')))
+    if 'contribution_id' in created or 'contribution_id' in before:
+        contribution = Contribution.get(created.get('contribution_id', before.get('contribution_id')))
+        return contribution.event if contribution else None
+    return None

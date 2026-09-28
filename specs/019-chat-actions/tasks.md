@@ -347,7 +347,7 @@ builds on these.
 
 ### Tests first
 
-- [ ] T075 [P] [US7] `tests/integration/actions/test_undo.py`:
+- [x] T075 [P] [US7] `tests/integration/actions/test_undo.py`:
   - the undo plan lists the user's `done` plans from the last 24 hours across chats;
   - a confirmed undo reverts in reverse order (event deleted → VC room deleted → the vc_teams cancel queued);
   - an object changed since → the differences are listed and must be confirmed (AS-2);
@@ -355,7 +355,7 @@ builds on these.
 
 ### Implementation
 
-- [ ] T076 [US7] `DeleteCreated` in `indico_assistant/services/actions/events.py`, using each action's `revert`, plus the `Undo` draft → steps in `resolve.py`. Diff `after` against the current values.
+- [x] T076 [US7] `DeleteCreated` in `indico_assistant/services/actions/events.py`, using each action's `revert`, plus the `Undo` draft → steps in `resolve.py`. Diff `after` against the current values.
 
 ---
 

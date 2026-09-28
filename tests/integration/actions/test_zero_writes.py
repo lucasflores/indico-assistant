@@ -5,6 +5,8 @@ import io
 from datetime import timedelta
 
 import pytest
+
+from indico.core.db import db
 from flask import g
 
 from indico.modules.categories.models.categories import EventCreationMode
@@ -43,9 +45,23 @@ def writable(people, dummy_event, create_category, create_contribution, teams):
         'attach_link': {'target_type': 'event', 'target_id': dummy_event.id, 'url': 'https://example.test/doc'},
         'attach_file': {'target_type': 'event', 'target_id': dummy_event.id, 'upload_uuid': str(uploads.store(
             people['manager'], io.BytesIO(b'%PDF-1.4 x'), 'slides.pdf').uuid)},
+        'delete_created': {'plan_id': _done_plan(people['manager'], dummy_event)},
         'update_contribution': {'contribution_id': create_contribution(dummy_event, 'Old talk').id, 'title': 'New talk'},
         'add_teams_room': {'event_id': dummy_event.id, 'name': 'Sync', 'coorganizer_ids': [people['manager'].id]},
     }
+
+
+def _done_plan(user, event):
+    """A carried-out plan (a talk added) for undo to reverse."""
+    chat = ChatSession(user_id=user.id)
+    db.session.add(chat)
+    db.session.flush()
+    plan, token = executor.create_plan(user, chat.id, summary='Add a talk', steps=[
+        {'n': 1, 'action': 'add_contribution', 'args': {'event_id': event.id, 'title': 'To undo',
+                                                        'start_dt': START.isoformat(), 'duration_minutes': 20}}])
+    executor.confirm(plan.id, user, token)
+    assert executor.run(plan.id).status == 'done'
+    return str(plan.id)
 
 
 def footprint(fake):
@@ -62,7 +78,7 @@ def test_every_write_action_is_covered(writable):
     assert implemented == set(writable)  # a new action needs a case here
 
 
-@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution', 'attach_link', 'attach_file'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution', 'attach_link', 'attach_file', 'delete_created'])
 @pytest.mark.parametrize('state', ['unconfirmed', 'cancelled', 'expired', 'superseded'])
 def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, state):
     lucas = people['manager']
@@ -88,7 +104,7 @@ def test_nothing_runs_unless_confirmed(db, people, writable, teams, action, stat
     assert fake.calls == []  # no Teams call either
 
 
-@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution', 'attach_link', 'attach_file'])
+@pytest.mark.parametrize('action', ['create_event', 'propose_event', 'add_contribution', 'add_reminder', 'add_teams_room', 'update_event', 'update_contribution', 'attach_link', 'attach_file', 'delete_created'])
 def test_a_double_confirmation_runs_once(db, people, writable, teams, action):
     lucas = people['manager']
     _, fake = teams
