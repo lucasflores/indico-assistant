@@ -175,7 +175,7 @@ class AttachFile(Action):
     def execute(self, user, args):
         from indico.modules.attachments.models.attachments import AttachmentFile, AttachmentType
 
-        from indico_assistant.services.actions.uploads import usable_upload
+        from indico_assistant.services.actions.uploads import mark_used, usable_upload
 
         upload = usable_upload(args.upload_uuid, user)
         attachment = _new_attachment(_target(args), user, type=AttachmentType.file,
@@ -186,7 +186,9 @@ class AttachFile(Action):
         storage, file_id = attachment.file.storage, attachment.file.storage_file_id
         on_rollback(lambda: storage.delete(file_id))  # written to storage now, not undone by a rollback
         _announce(attachment, user)
-        # the chat upload stays unclaimed: Indico's own cleanup removes it (as with paper uploads)
+        # the chat upload stays unclaimed (Indico's own cleanup removes it, as with paper uploads), marked as
+        # used so it is neither sent nor attached again
+        mark_used(upload)
         return {'created': {'attachment_id': attachment.id}}
 
     def revert(self, user, result):

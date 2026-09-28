@@ -112,3 +112,15 @@ def test_part_of_a_name_is_offered_not_picked(people, cats):
     # seen in the eval: "in Science" picked "Nothing Science"
     result = plan(people['manager'], category='Engin')
     assert choices(result)[0]['label'] == 'Home » Engineering'
+
+
+@pytest.mark.parametrize(('name', 'said', 'named'), [
+    ('HR', 'Set up a meeting in HR tomorrow', True),  # (code review, PR #3) no 4-letter word in the name
+    ('IT', 'Set up a meeting tomorrow, make it 30 minutes', False),  # "it" is not "IT"
+    ('R&D', 'Set up a meeting in R&D tomorrow', True),
+])
+def test_short_category_names_can_be_named(name, said, named):
+    from indico_assistant.services.actions.planner import _only_what_the_user_asked_for
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'create_meeting', 'category': name, 'when': {}}]})
+    assert (_only_what_the_user_asked_for(draft, [said]).steps[0].category == name) is named

@@ -188,6 +188,14 @@ class TestChatService:
         result = run()
         assert result.plan == {"id": "p1"} and plan.call_args.args[-1] is None  # no open plan
 
+    def test_a_change_request_the_planner_turns_down_still_gets_a_reply(self, routed):
+        # (code review, PR #3) NL2SQL said write_request, the planner said "unrelated": never a blank bubble
+        from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
+        run, plan, nl2sql = routed
+        nl2sql.return_value = ("", {"write_request": True})
+        plan.return_value = None
+        assert run().response == NOT_UNDERSTOOD
+
     def test_questions_never_reach_the_planner(self, routed):
         run, plan, nl2sql = routed
         assert run().plan is None

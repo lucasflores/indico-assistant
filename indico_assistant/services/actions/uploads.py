@@ -91,8 +91,24 @@ def store(user, stream, filename, chat_session_id=None):
 
 
 def usable_upload(uuid, user):
-    """The user's own, still unclaimed upload with this uuid, or None."""
+    """The user's own upload with this uuid that no plan has attached yet (or the running plan did), or None.
+
+    Uploads stay unclaimed (Indico deletes them daily): an attached one is marked with its plan instead, so
+    it cannot be sent or attached again (FR-025).
+    """
+    from flask import g
+
     file = File.query.filter_by(uuid=str(uuid), claimed=False).first()
-    if file is None or (file.meta or {}).get('assistant_user_id') != user.id:
+    meta = (file.meta or {}) if file is not None else {}
+    if file is None or meta.get('assistant_user_id') != user.id:
+        return None
+    if meta.get('assistant_used') not in (None, g.get('assistant_plan_id')):
         return None
     return file
+
+
+def mark_used(file):
+    """``file`` was attached by the running plan (rolled back with it if the plan fails)."""
+    from flask import g
+
+    file.meta = {**(file.meta or {}), 'assistant_used': g.get('assistant_plan_id')}

@@ -51,10 +51,23 @@ def execute_plan(job_id, plan_id):
     except executor.NotConfirmed:
         jobs.finish(job_id, status='failed', error='PLAN_NOT_CONFIRMABLE', message='This plan was not confirmed.')
         return
+    except Exception:
+        # outside the plan's own rollback (e.g. its first commit): the job must not stay pending. (The soft
+        # time limit raises inside the plan, which then rolls back as failed; only the hard kill at
+        # time_limit leaves a plan in 'running'.)
+        logger.exception('Plan %s could not be run', plan_id)
+        jobs.finish(job_id, status='failed', error='PLAN_FAILED', message=executor.FAILED_MESSAGE)
+        return
     reply = outcome_message(plan)
-    manager = get_session_manager()
-    message = manager.add_assistant_message(ChatSession.query.get(plan.session_id), reply,
-                                            {'plan_id': str(plan.id), 'plan_status': plan.status})
-    manager.commit()
-    jobs.finish(job_id, status='done', message_id=str(message.id), response=reply,
+    message_id = None
+    try:
+        # the plan is carried out; saving the reply in the chat must not turn that into a failure
+        if plan.session_id is not None and (chat := ChatSession.query.get(plan.session_id)) is not None:
+            manager = get_session_manager()
+            message = manager.add_assistant_message(chat, reply, {'plan_id': str(plan.id), 'plan_status': plan.status})
+            manager.commit()
+            message_id = str(message.id)
+    except Exception:
+        logger.exception('The outcome of plan %s could not be saved in its chat', plan_id)
+    jobs.finish(job_id, status='done', message_id=message_id, response=reply,
                 plan=PlanView.of(plan).model_dump(mode='json'))

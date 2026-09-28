@@ -176,3 +176,72 @@ def test_the_users_own_words_decide_the_day(message, model_date, used):
     draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
         {'action': 'create_meeting', 'when': {'date': model_date, 'time': '14:00'}}]})
     assert _only_what_the_user_said(draft, message).steps[0].when.date == used
+
+
+@pytest.mark.parametrize(('message', 'used'), [
+    ("Move Friday's standup to tomorrow", 'tomorrow'),  # (code review, PR #3) the day that names the meeting
+    ("Create a prep meeting tomorrow for Monday's review", 'tomorrow'),
+    ('move the Monday sync to next Friday', 'next friday'),
+])
+def test_the_day_is_the_one_the_meeting_is_for(message, used):
+    from indico_assistant.services.actions.planner import _only_what_the_user_said
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'change_meeting', 'move_to': {'date': '2026-09-29', 'time': '15:00'}}]})
+    assert _only_what_the_user_said(draft, message).steps[0].move_to.date == used
+
+
+@pytest.mark.parametrize('message', ['move the follow-up to 3pm', 'move the Q&A/demo to 3pm'])
+def test_a_dash_or_slash_is_not_a_date(message):
+    from indico_assistant.services.actions.planner import _only_what_the_user_said
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'change_meeting', 'move_to': {'date': '2026-09-29', 'time': '15:00'}}]})
+    assert _only_what_the_user_said(draft, message).steps[0].move_to.date is None  # the model's date is dropped
+
+
+def test_a_revision_keeps_the_day_already_named():
+    # "move it to Tuesday 3pm", then "actually make it 4pm": still Tuesday, whatever the model says
+    from types import SimpleNamespace
+
+    from indico_assistant.services.actions.planner import _only_what_the_user_said
+    open_plan = SimpleNamespace(draft={'steps': [{'action': 'change_meeting',
+                                                  'move_to': {'date': 'tuesday', 'time': '3pm'}}]})
+    draft = PlanDraft.model_validate({'decision': 'revise', 'steps': [
+        {'action': 'change_meeting', 'move_to': {'date': '2026-09-30', 'time': '4pm'}}]})
+    assert _only_what_the_user_said(draft, 'actually make it 4pm', open_plan).steps[0].move_to.date == 'tuesday'
+
+
+def test_undoing_a_speaker_change_restores_every_person(db, people, dummy_event, create_contribution):
+    # (code review, PR #3) a guest speaker without an email crashed the undo, and changing the speaker
+    # dropped the authors who do not speak
+    from indico.modules.events.contributions.models.persons import AuthorType, ContributionPersonLink
+    from indico.modules.events.models.persons import EventPerson
+
+    lucas = people['manager']
+    dummy_event.update_principal(lucas, full_access=True)
+    talk = create_contribution(dummy_event, 'Talk')
+    guest = EventPerson(event=dummy_event, first_name='Kaori', last_name='Ito', email='')
+    author = EventPerson.for_user(people['stranger'], dummy_event)
+    db.session.add_all([guest, author])
+    talk.person_links = [
+        ContributionPersonLink(person=guest, is_speaker=True, author_type=AuthorType.none, display_order=0),
+        ContributionPersonLink(person=author, is_speaker=False, author_type=AuthorType.primary, display_order=1)]
+    db.session.flush()
+
+    def people_of(contribution):
+        return sorted((link.full_name, link.is_speaker, link.author_type) for link in contribution.person_links)
+    original = people_of(talk)
+    changed = run(lucas, ChatSession.query.first() or _chat(db, lucas), [
+        {'n': 1, 'action': 'update_contribution', 'args': {'contribution_id': talk.id,
+                                                           'speakers': [{'user_id': lucas.id}]}}])
+    assert (author.full_name, False, AuthorType.primary) in people_of(talk)  # the author stayed
+    assert guest.full_name not in [name for name, *_ in people_of(talk)]  # the speaker was replaced
+    with acting_as(lucas):
+        ACTIONS['update_contribution'].revert(lucas, changed.result[0])
+    assert people_of(talk) == original
+
+
+def _chat(db, user):
+    chat = ChatSession(user_id=user.id)
+    db.session.add(chat)
+    db.session.flush()
+    return chat

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from indico_assistant.models import ChatSession
+from indico_assistant.models import ActionPlan, ChatSession
 from indico_assistant.services.actions import executor, planner
 from indico_assistant.services.llm.models.base import LLMResponse
 from indico_assistant.services.llm.models.plan import PlanDraft
@@ -66,16 +66,31 @@ def test_cancel(dummy_user, chat, shown):
 def test_typed_confirmation_runs_the_open_plan(dummy_user, chat, shown):
     with patch.object(executor, 'run') as run:
         run.return_value = MagicMock(status='done', steps=shown.steps)
-        result = turn(dummy_user, chat, llm_returning(decision='confirm'), open_plan=shown)
-    run.assert_called_once_with(shown.id)
-    assert result.reply.startswith('Done')
+        llm = llm_returning(decision='confirm')
+        result = turn(dummy_user, chat, llm, open_plan=shown, message='Yes please!')
+    run.assert_called_once_with(shown.id, enabled=planner.enabled_actions(ON))  # the admin's switches, as now
+    assert result.reply.startswith('Done') and not llm.generate.called  # a plain yes needs no model
+
+
+@pytest.mark.parametrize(('message', 'steps'), [('ok, and add Makoto', []),
+                                                ('yes but make it 3pm', [{'action': 'change_meeting'}])])
+def test_the_model_cannot_confirm_for_the_user(dummy_user, chat, shown, message, steps):
+    # (code review, PR #3) only a message that is nothing but a yes runs the plan; the model's reading of
+    # anything else is at most a revision
+    with patch.object(executor, 'run') as run:
+        result = turn(dummy_user, chat, llm_returning(decision='confirm', steps=steps), open_plan=shown,
+                      message=message)
+    run.assert_not_called()
+    assert ActionPlan.query.get(shown.id).status in ('shown', 'superseded')
+    if not steps:
+        assert result.reply == planner.CONFIRM_HOW
 
 
 def test_typed_confirmation_waits_for_open_questions(dummy_user, chat):
     plan, _ = executor.create_plan(dummy_user, chat.id, summary='x', steps=[{'n': 1, 'action': 'create_event', 'args': {}}],
                                    questions=[{'id': 'category', 'text': 'Which category?'}])
     with patch.object(executor, 'run') as run:
-        result = turn(dummy_user, chat, llm_returning(decision='confirm'), open_plan=plan)
+        result = turn(dummy_user, chat, llm_returning(decision='confirm'), open_plan=plan, message='yes')
     run.assert_not_called()
     assert 'questions' in result.reply
 

@@ -71,6 +71,25 @@ def test_a_chat_has_one_confirmable_plan(db, new_plan, dummy_user):
     assert elsewhere.status == 'shown'
 
 
+def test_a_revision_of_a_plan_confirmed_meanwhile_is_refused(new_plan, dummy_user):
+    # (code review, PR #3) the revision read the plan before the user pressed Confirm
+    plan, token = new_plan()
+    assert executor.confirm(plan.id, dummy_user, token) == 'confirmed'
+    with pytest.raises(executor.AlreadyConfirmed):
+        new_plan(supersedes=plan)
+
+
+def test_deleting_the_chat_keeps_its_plans(db, new_plan, dummy_user, chat):
+    # (code review, PR #3) chat retention must not take the plans' audit trail with it
+    plan, token = new_plan()
+    db.session.delete(chat)
+    db.session.flush()
+    db.session.expire_all()
+    kept = ActionPlan.query.get(plan.id)
+    assert kept is not None and kept.session_id is None
+    assert executor.confirm(plan.id, dummy_user, token) == 'not_confirmable'  # nowhere to show the outcome
+
+
 def test_expiry_is_computed(new_plan):
     plan, _ = new_plan()
     assert plan.effective_status == 'shown' and plan.can_confirm

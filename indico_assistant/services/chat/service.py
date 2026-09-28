@@ -167,6 +167,9 @@ class ChatService:
             )
             if metadata.get("write_request"):
                 planned = self._plan(user, session.id, message, context, None)
+                if planned is None:  # the planner found no change in it after all: never an empty reply
+                    from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
+                    response_text = response_text or NOT_UNDERSTOOD
         plan = None
         if planned is not None:
             response_text, metadata, plan = planned
