@@ -10,8 +10,13 @@ import pytest
 import indico_assistant.controllers.chat as chat_module
 import indico_assistant.controllers.sessions as sessions_module
 from indico_assistant.controllers.chat import RHChat
-from indico_assistant.controllers.sessions import (RHSessionDelete, RHSessionDetail, RHSessionList, RHSessionOpen,
-                                                   RHSessionRename)
+from indico_assistant.controllers.sessions import (
+    RHSessionDelete,
+    RHSessionDetail,
+    RHSessionList,
+    RHSessionOpen,
+    RHSessionRename,
+)
 from indico_assistant.models import ChatMessage, ChatSession
 from indico_assistant.models.feedback import FeedbackEntry
 from indico_assistant.services.chat.session_manager import get_session_manager
