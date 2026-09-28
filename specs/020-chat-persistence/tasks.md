@@ -276,22 +276,22 @@ and waiting plans come back. Focus is not stolen.
 
 ### Tests first
 
-- [ ] T037 [P] [US3] In `tests/integration/chat/test_sessions_endpoint.py`:
+- [x] T037 [P] [US3] In `tests/integration/chat/test_session_history.py`:
   - `search` matches the title or the caller's own messages, case-insensitively, and never another user's;
   - two users on one browser: user A's remembered session id sent by user B to `GET/PATCH/DELETE
     /sessions/<id>` and to `POST /chat` gets `403`/`404` (SC-005).
-- [ ] T038 [P] [US3] In `chainlit_app/tests/test_data_layer.py`:
+- [x] T038 [P] [US3] In `chainlit_app/tests/test_data_layer.py`:
   - `list_threads` passes `filter.search` and `pagination.cursor` to Indico, and `filter.userId` is ignored
     (Indico decides);
   - a thread fetched with another user's token is not returned.
 
 ### Implementation
 
-- [ ] T039 [US3] Search in `session_manager.list_sessions`: `ILIKE` on `title` OR an `EXISTS` on the
+- [x] T039 [US3] (Done in Phase 2, in `session_manager.page_sessions`.) Search in `session_manager.list_sessions`: `ILIKE` on `title` OR an `EXISTS` on the
   caller's messages, bound parameters, with a ponytail note naming the trigram upgrade (R12). Wire the
   `search` parameter in `controllers/sessions.py`. Make T037 pass.
-- [ ] T040 [US3] Pass `search` and `cursor` through `IndicoDataLayer.list_threads`. Make T038 pass.
-- [ ] T041 [US3] SC-006: seed 100 conversations for the local admin with a scratchpad script. Extend
+- [x] T040 [US3] Pass `search` and `cursor` through `IndicoDataLayer.list_threads`. Make T038 pass.
+- [x] T041 [US3] SC-006: seed 100 conversations for the local admin with a scratchpad script. Extend
   `walk.mjs` to time opening the sidebar and opening the oldest conversation (each under 2 s). Remove the
   seeded rows afterwards, counting them first.
 

@@ -10,7 +10,7 @@ import pytest
 import indico_assistant.controllers.chat as chat_module
 import indico_assistant.controllers.sessions as sessions_module
 from indico_assistant.controllers.chat import RHChat
-from indico_assistant.controllers.sessions import RHSessionDetail, RHSessionList
+from indico_assistant.controllers.sessions import RHSessionDelete, RHSessionDetail, RHSessionList
 from indico_assistant.models import ChatMessage, ChatSession
 from indico_assistant.models.feedback import FeedbackEntry
 from indico_assistant.services.chat.session_manager import get_session_manager
@@ -147,3 +147,43 @@ def test_each_answer_carries_only_the_callers_feedback(db, users, monkeypatch):
     _, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args={'session_id': str(chat.id)})
     assert body['messages'][1]['feedback'] == {'id': str(mine.id), 'value': 1, 'comment': None}
     assert body['messages'][0].get('feedback') is None
+
+
+
+# --- US3: Past Chats search, and two users on one browser (T037, SC-005) ----------------------------------
+
+def titles(body):
+    return [item['title'] for item in body['sessions']]
+
+
+def test_search_finds_words_in_the_title_or_the_messages(db, users, monkeypatch):
+    session_of(db, users['lucas'], ('user', 'move the weekly sync'), title='Weekly sync')
+    session_of(db, users['lucas'], ('user', 'who speaks?'), ('assistant', 'The Q4 BUDGET review has two talks'))
+    session_of(db, users['lucas'], ('user', 'lunch plans'))
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'search': 'budget'})
+    assert titles(body) == ['who speaks?']  # case-insensitive, in an answer too
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'search': 'WEEKLY'})
+    assert titles(body) == ['Weekly sync']
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'search': 'weekly lunch'})
+    assert titles(body) == []  # every word must match
+
+
+def test_search_never_reaches_someone_elses_conversations(db, users, monkeypatch):
+    session_of(db, users['makoto'], ('user', 'the secret budget'))
+    session_of(db, users['lucas'], ('user', 'my budget'))
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'search': 'budget'})
+    assert titles(body) == ['my budget']
+
+
+def test_a_remembered_conversation_id_is_worthless_to_another_user(db, users, monkeypatch, queued):
+    # SC-005: the browser keeps the conversation id per user, but even sent on purpose, it opens nothing
+    lucas_chat = session_of(db, users['lucas'], ('user', 'mine'))
+    view = {'session_id': str(lucas_chat.id)}
+    assert call(RHSessionDetail, users['makoto'], sessions_module, monkeypatch, view_args=view)[0] == 403
+    assert call(RHSessionDelete, users['makoto'], sessions_module, monkeypatch, view_args=view)[0] == 403
+    assert call(RHChat, users['makoto'], chat_module, monkeypatch,
+                json={'message': 'hi', 'session_id': str(lucas_chat.id)})[0] == 403
+    _, body = call(RHSessionList, users['makoto'], sessions_module, monkeypatch)
+    assert str(lucas_chat.id) not in [item['session_id'] for item in body['sessions']]
+    assert ChatSession.query.get(lucas_chat.id) is not None
+    assert ChatMessage.query.filter_by(session_id=lucas_chat.id).count() == 1
