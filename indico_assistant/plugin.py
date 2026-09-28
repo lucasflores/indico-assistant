@@ -9,6 +9,7 @@ import os
 
 from indico.core.plugins import IndicoPlugin, IndicoPluginBlueprint
 from indico.core import signals
+from indico.web.flask.util import get_csp_nonce
 
 from indico_assistant.default_settings import DEFAULT_SETTINGS, EVENT_SETTINGS_DEFAULTS
 from indico_assistant.forms import SettingsForm
@@ -60,13 +61,24 @@ class AssistantPlugin(IndicoPlugin):
         """One deferred, cacheable <script> for logged-in users; it fetches its config only when opened."""
         self.template_hook("html-head", self._render_widget_script)
 
+    # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
+    # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
+    _PANEL_SNIPPET = (
+        "try{{var s=JSON.parse(localStorage.getItem('indico-assistant:{uid}')||'{{}}');"
+        "if(s.open&&innerWidth>=768)document.documentElement.style.marginRight="
+        "Math.round(Math.max(320,Math.min(s.width||440,innerWidth/2)))+'px'}}catch(e){{}}"
+        "window.__assistantInitialMargin=getComputedStyle(document.documentElement).marginRight;"
+    )
+
     def _render_widget_script(self, **kwargs):
         from flask import session
         from indico_assistant.blueprint import widget_script_url
 
         if session.user is None or not self.settings.get("chat_widget_enabled"):
             return None  # anonymous visitors (and a disabled widget) cost nothing
-        return f'<script src="{widget_script_url()}" defer></script>'
+        uid = int(session.user.id)
+        return (f'<script nonce="{get_csp_nonce()}">{self._PANEL_SNIPPET.format(uid=uid)}</script>'
+                f'<script src="{widget_script_url()}" data-user="{uid}" defer></script>')
 
     @property
     def llm_client(self):

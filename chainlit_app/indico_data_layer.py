@@ -199,7 +199,9 @@ class IndicoDataLayer(BaseDataLayer):
     # --- users: built from the identifier, never stored ---------------------------------------------------
 
     async def get_user(self, identifier: str) -> PersistedUser | None:
-        return PersistedUser(id=identifier, identifier=identifier, createdAt=datetime.now(UTC).isoformat())
+        # None: users are never stored. Chainlit then calls create_user with the signed-in user, which keeps its
+        # metadata (the page's event, R3); a user built here from the identifier alone would replace it.
+        return None
 
     async def create_user(self, user: User) -> PersistedUser | None:
         return PersistedUser(id=user.identifier, identifier=user.identifier, metadata=user.metadata,

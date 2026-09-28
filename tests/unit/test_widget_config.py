@@ -96,9 +96,20 @@ class TestWidgetLoading:
     def test_logged_in_gets_one_deferred_versioned_script(self):
         from indico_assistant.blueprint import widget_script_url
 
-        html = self._script(MagicMock())
-        assert html == f'<script src="{widget_script_url()}" defer></script>'
+        with patch("indico_assistant.plugin.get_csp_nonce", return_value="N0NCE"):
+            html = self._script(MagicMock(id=7))
+        assert f'<script src="{widget_script_url()}" data-user="7" defer></script>' in html
         assert "?v=" in widget_script_url()
+
+    def test_the_panels_space_is_kept_before_the_page_paints(self):
+        # spec 020 FR-006a: an open panel's width is reserved by a tiny inline script, allowed by the CSP nonce
+        with patch("indico_assistant.plugin.get_csp_nonce", return_value="N0NCE"):
+            html = self._script(MagicMock(id=7))
+        inline = html.split("</script>")[0]
+        assert inline.startswith('<script nonce="N0NCE">')
+        assert "indico-assistant:7" in inline and "marginRight" in inline and ".open" in inline
+        assert "try" in inline and "catch" in inline  # storage may throw (private mode, blocked site data)
+        assert len(inline) < 500
 
     def test_config_route_needs_a_user_and_is_never_cached(self, app):
         from indico_assistant import blueprint as bp

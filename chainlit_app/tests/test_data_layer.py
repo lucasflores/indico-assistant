@@ -139,10 +139,11 @@ async def test_the_websocket_path_uses_the_session_token(layer, monkeypatch):
 
 async def test_users_are_not_stored(layer):
     from chainlit.user import User
-    persisted = await layer.create_user(User(identifier="20", metadata={"name": "Lucas Flores"}))
-    again = await layer.get_user("20")
-    assert (persisted.id, persisted.identifier, again.id) == ("20", "20", "20")
-    datetime.fromisoformat(again.createdAt)
+    # (seen live: a user rebuilt from the identifier replaced the signed-in one and lost the page's event)
+    persisted = await layer.create_user(User(identifier="20", metadata={"name": "Lucas Flores", "event_id": 351}))
+    assert (persisted.id, persisted.identifier, persisted.metadata["event_id"]) == ("20", "20", 351)
+    assert await layer.get_user("20") is None
+    datetime.fromisoformat(persisted.createdAt)
     assert datetime.now(UTC)  # (no Indico call, no storage)
 
 
