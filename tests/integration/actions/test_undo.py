@@ -9,7 +9,7 @@ from indico.modules.categories.models.categories import EventCreationMode
 from indico.modules.events import Event
 from indico.util.date_time import now_utc
 
-from indico_assistant.models import ActionPlan, ChatSession
+from indico_assistant.models import ChatSession
 from indico_assistant.services.actions import executor, resolve
 from indico_assistant.services.actions.context import acting_as
 from indico_assistant.services.llm.models.plan import PlanDraft

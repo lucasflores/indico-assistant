@@ -19,7 +19,6 @@ from uuid import UUID
 
 from indico.core.db import db
 
-from indico_assistant.models.message import ChatMessage
 from indico_assistant.models.session import ChatSession
 from indico_assistant.services.chat.context_builder import (
     ContextBuilder,
@@ -31,7 +30,6 @@ from indico_assistant.services.chat.session_manager import (
 )
 from indico_assistant.services.chat.citations import (
     CitationBuilder,
-    SourceCitation,
 )
 
 logger = logging.getLogger(__name__)

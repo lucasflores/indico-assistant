@@ -196,7 +196,7 @@ def _embed(texts):
 
 
 def _cosine(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm = (sum(x * x for x in a) * sum(y * y for y in b)) ** 0.5
     return dot / norm if norm else 0.0
 
@@ -218,7 +218,7 @@ def category_options(user, topic=''):
     similar = {}
     if topic and (titles := sorted({t for ts in mine.values() for t in ts})):
         if (vectors := _embed([topic, *titles])) is not None:
-            scores = {t: _cosine(vectors[0], v) for t, v in zip(titles, vectors[1:])}
+            scores = {t: _cosine(vectors[0], v) for t, v in zip(titles, vectors[1:], strict=True)}
             for category_id, ts in mine.items():
                 best = max(ts, key=scores.get)
                 if scores[best] >= TOPIC_MATCH:
@@ -335,7 +335,7 @@ def _create_meeting(step, user, settings, topic):
     if slots and not any(speaker for _, speaker in slots) and len(slots) == 1 + len(invitees):
         # ponytail: models sometimes drop the speakers of "a slot for each of us"; one slot per person, the
         # user first, is what was asked. The plan shows the speakers before anything is confirmed.
-        slots = [(slot, who) for (slot, _), who in zip(slots, [user, *invitees])]
+        slots = [(slot, who) for (slot, _), who in zip(slots, [user, *invitees], strict=True)]
 
     # where
     chosen = None
@@ -392,7 +392,7 @@ def _create_meeting(step, user, settings, topic):
         'start_dt': start, 'end_dt': start + timedelta(minutes=minutes) if start else None, 'timezone': tz.zone,
     })]
     offset = 0
-    for (slot, speaker), length in zip(slots, slot_minutes):
+    for (slot, speaker), length in zip(slots, slot_minutes, strict=True):
         steps.append(_step(len(steps) + 1, 'add_contribution', {
             'title': slot.title or (speaker.full_name if speaker else 'Talk'),
             'start_dt': start + timedelta(minutes=offset) if start else None, 'duration_minutes': length,
@@ -484,7 +484,7 @@ def _describe(steps):
     """Plain-language descriptions for the plan; complete steps are validated and stored as JSON."""
     for step in steps:
         action = ACTIONS[step['action']]
-        args = {**step['args'], **{name: 0 for name in step['refs']}}  # (refs are filled at execution)
+        args = {**step['args'], **dict.fromkeys(step['refs'], 0)}  # (refs are filled at execution)
         try:
             validated = action.Args.model_validate(args)
         except ValueError:

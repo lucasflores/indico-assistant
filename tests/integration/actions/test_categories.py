@@ -50,7 +50,7 @@ def test_only_allowed_categories_and_propose_only_when_unlisted_events_are_on(pe
 def test_recent_activity_decides_the_suggestion(people, cats, create_event):
     lucas = people['manager']
     for day in (10, 40, 70):
-        event = create_event(title=f'Team sync {day}', category=cats['social'], creator=lucas,
+        create_event(title=f'Team sync {day}', category=cats['social'], creator=lucas,
                              creator_has_privileges=True,
                              start_dt=now_utc() - timedelta(days=day), end_dt=now_utc() - timedelta(days=day, hours=-1))
     first, second = choices(plan(lucas))

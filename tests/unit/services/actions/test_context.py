@@ -6,7 +6,6 @@ import pytest
 import pytz
 from flask import session
 
-from indico.util.date_time import now_utc
 
 from indico_assistant.services.actions.context import acting_as, local_today, user_timezone
 
