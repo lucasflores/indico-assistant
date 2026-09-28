@@ -73,6 +73,16 @@ class ContextBuilder:
             for msg in messages
         ]
 
+    def page_note(self, event_id: int | None, user: Any) -> dict[str, str]:
+        """Which page the user is on now, for the model (spec 020 FR-009): one conversation spans pages, so
+        earlier messages about other events must not be taken as "this event". The id only: seen live, a title
+        here made the SQL generator search for it by keyword (and match its namesakes) instead of :event_id."""
+        if event_id is None:
+            return {"role": "system", "content": "The user is not on an event page now."}
+        return {"role": "system",
+                "content": f"The user is on the page of event {event_id} now: “this event” and “this meeting” "
+                           f"mean that event (:event_id), not the events of earlier messages."}
+
     def build_context_with_metadata(
         self,
         session_id: UUID

@@ -286,6 +286,17 @@ layer anyway, and Chainlit's resume draws them natively).
 - Letting the page always win (rejected: "add a talk to it", right after making a meeting from another event's
   page, would change the wrong meeting).
 
+**Found while building (2026-09-28, SC-003 runs):**
+
+- **The page line names the event's id, not its title.** With the title, the SQL generator searched for it
+  by keyword instead of using `:event_id`, and the planner wrote the title into the plan, which then matched
+  the meeting's namesakes on other pages.
+- **"This meeting" stays "this meeting"** unless the user named a meeting: `planner._the_meeting_the_user_meant`.
+- **A waiting plan changes only on the user's words.** A plain question ("What is this event about?") is
+  never a revision or a cancel. A revision identical to the waiting plan is no revision. A cancel needs a
+  cancel word. Before these rules, a question asked on another page moved the plan to that page, or cancelled
+  it.
+
 ## R9. Answers still in progress
 
 **Decision**:

@@ -16,6 +16,13 @@ from indico_assistant.models.feedback import FeedbackEntry
 from indico_assistant.services.chat.session_manager import get_session_manager
 
 
+@pytest.fixture(autouse=True)
+def fresh_chat_service(monkeypatch):
+    # (unit tests build the get_chat_service() singleton around mocks; these tests need the real one)
+    import indico_assistant.services.chat.service as service_module
+    monkeypatch.setattr(service_module, '_chat_service', None)
+
+
 @pytest.fixture
 def users(create_user):
     return {'lucas': create_user(20, first_name='Lucas'), 'makoto': create_user(21, first_name='Makoto')}

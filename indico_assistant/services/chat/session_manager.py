@@ -108,6 +108,13 @@ class SessionManager:
                 item['comment'] = entry.value
         return {message_id: item for message_id, item in found.items() if item['id'] is not None}
 
+    def page_event_of(self, message_id: UUID, fallback: int | None) -> int | None:
+        """The event of the page a question was sent from (spec 020 R8). A question from before spec 020 has
+        no page recorded: then the event its conversation started on."""
+        message = ChatMessage.query.get(message_id)
+        metadata = (message.metadata_json or {}) if message is not None else {}
+        return metadata['event_id'] if 'event_id' in metadata else fallback
+
     def set_message_metadata(self, message_id: UUID, **keys: Any) -> None:
         """Merge ``keys`` into a message's metadata."""
         message = ChatMessage.query.get(message_id)

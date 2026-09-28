@@ -45,7 +45,11 @@ class Resolved:
     undoes: object = None  # the plan an undo plan reverses
 
 
-def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None, topic=''):
+PAGE_FROM_CHAT = object()  # no page given: the event the chat was opened on (as before spec 020)
+
+
+def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None, topic='',
+                  page_event_id=PAGE_FROM_CHAT):
     settings = {**DEFAULT_SETTINGS, **(settings or {})}
     step = draft.steps[0]
     if isinstance(step, CreateMeeting):
@@ -53,11 +57,11 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
     if isinstance(step, ChangeMeeting):
         if step.meeting.strip().lower() in IT and (named := _meeting_named_in(topic, user)):
             step.meeting = f'#{named.id}'
-        return _change_meeting(step, user, settings, chat_session_id)
+        return _change_meeting(step, user, settings, chat_session_id, page_event_id)
     if isinstance(step, Attach):
         if step.target.strip().lower() in IT and (named := _meeting_named_in(topic, user)):
             step.target = f'#{named.id}'
-        return _attach(step, user, chat_session_id)
+        return _attach(step, user, chat_session_id, page_event_id)
     if isinstance(step, Undo):
         return _undo(step, user, chat_session_id)
     raise NotImplementedError
@@ -514,11 +518,16 @@ ORDINALS = {'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2, '
 
 def made_in_chat(chat_session_id, user=None):
     """The meeting the user's latest carried-out plan in this chat created ("it", US6 AS-1)."""
+    return _made_in_chat(chat_session_id, user)[0]
+
+
+def _made_in_chat(chat_session_id, user=None):
+    """(that meeting, when its plan finished), or (None, None)."""
     from indico.modules.events import Event
 
     from indico_assistant.models import ActionPlan
     if chat_session_id is None:
-        return None
+        return None, None
     plans = ActionPlan.query.filter_by(session_id=chat_session_id, status='done')
     if user is not None:
         plans = plans.filter_by(user_id=user.id)
@@ -526,8 +535,21 @@ def made_in_chat(chat_session_id, user=None):
         for result in plan.result or ():
             if (event_id := (result.get('created') or {}).get('event_id')) is not None:
                 if (event := Event.get(event_id, is_deleted=False)) is not None:
-                    return event
-    return None
+                    return event, plan.finished_at
+    return None, None
+
+
+def _arrived_on_page(chat_session_id, page_event_id):
+    """When the user came to the page they are on: their first message of the latest run sent from it."""
+    from indico_assistant.models import ChatMessage
+
+    arrived = None
+    for message in (ChatMessage.query.filter_by(session_id=chat_session_id, role='user')
+                    .order_by(ChatMessage.created_at.desc())):
+        if (message.metadata_json or {}).get('event_id') != page_event_id:
+            break
+        arrived = message.created_at
+    return arrived
 
 
 def chat_event(chat_session_id):
@@ -539,9 +561,20 @@ def chat_event(chat_session_id):
     return Event.get(chat.event_id, is_deleted=False) if chat and chat.event_id else None
 
 
-def meeting_in_view(chat_session_id, user):
-    """What "this meeting" / "it" means: the one made in this chat, else the one the chat was opened on."""
-    return made_in_chat(chat_session_id, user) or chat_event(chat_session_id)
+def meeting_in_view(chat_session_id, user, page_event_id=PAGE_FROM_CHAT):
+    """What "this meeting" / "it" means (spec 020 R8): the meeting of the page the user is on, or the one this
+    chat made. Whichever came later wins: the page if the user moved to it after the meeting was made, the
+    meeting made if they made it while already on this page ("add a talk to it")."""
+    from indico.modules.events import Event
+
+    if page_event_id is PAGE_FROM_CHAT:
+        return made_in_chat(chat_session_id, user) or chat_event(chat_session_id)
+    page = Event.get(page_event_id, is_deleted=False) if page_event_id else None
+    made, made_at = _made_in_chat(chat_session_id, user)
+    if made is None or page is None or made.id == page.id:
+        return page or made
+    arrived = _arrived_on_page(chat_session_id, page_event_id)
+    return page if arrived is not None and arrived > made_at else made
 
 
 def managed_meetings(user):
@@ -575,7 +608,7 @@ def _meeting_named_in(message, user):
     return named[0] if len({e.title.lower() for e in named}) == 1 and len(named) == 1 else None
 
 
-def find_meeting(name, user, chat_session_id):
+def find_meeting(name, user, chat_session_id, page_event_id=PAGE_FROM_CHAT):
     """(event, question): the meeting the user means, or a question listing the candidates."""
     from indico.modules.events import Event
 
@@ -583,7 +616,7 @@ def find_meeting(name, user, chat_session_id):
     said = (name or '').strip().lower()
     if said.startswith('#') and said[1:].isdigit():  # an answer to the "which meeting?" question
         return Event.get(int(said[1:]), is_deleted=False), None
-    here = meeting_in_view(chat_session_id, user)
+    here = meeting_in_view(chat_session_id, user, page_event_id)
     if here is not None and (said in IT or said in here.title.lower()):
         return here, None  # the meeting made or opened in this chat wins over others with the same name
     candidates = managed_meetings(user)
@@ -616,8 +649,8 @@ def _talk(which, talks):
     return matching[0] if len(matching) == 1 else None
 
 
-def _change_meeting(step, user, settings, chat_session_id):
-    event, question = find_meeting(step.meeting, user, chat_session_id)
+def _change_meeting(step, user, settings, chat_session_id, page_event_id=PAGE_FROM_CHAT):
+    event, question = find_meeting(step.meeting, user, chat_session_id, page_event_id)
     if question:
         return Resolved(summary='Which meeting do you want to change?', questions=[question])
     if event is None:
@@ -745,11 +778,11 @@ def my_talks(user, event=None):
     return sorted(talks, key=lambda c: (c.start_dt or c.event.start_dt))
 
 
-def _attach(step, user, chat_session_id):
+def _attach(step, user, chat_session_id, page_event_id=PAGE_FROM_CHAT):
     tz = user_timezone(user)
     wanted = step.target.strip().lower()
     wants_talk = any(word in wanted for word in TALK_TARGET_WORDS)
-    here = meeting_in_view(chat_session_id, user)
+    here = meeting_in_view(chat_session_id, user, page_event_id)
     questions = []
     target = None
     if wants_talk:
@@ -772,7 +805,7 @@ def _attach(step, user, chat_session_id):
         target = ('contribution', Contribution.get(int(wanted[2:]), is_deleted=False))
     else:
         name = wanted.removeprefix('the ').removesuffix(' meeting') if wanted not in IT else wanted
-        event, question = find_meeting(name, user, chat_session_id)
+        event, question = find_meeting(name, user, chat_session_id, page_event_id)
         if question:
             questions.append(question)
         elif event is None:

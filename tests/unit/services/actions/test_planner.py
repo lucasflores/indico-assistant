@@ -59,7 +59,7 @@ def test_unrelated_follow_up_goes_back_to_questions(dummy_user, chat, shown):
 
 
 def test_cancel(dummy_user, chat, shown):
-    result = turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown)
+    result = turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message='never mind')
     assert 'cancelled' in result.reply and executor.open_plan(chat.id) is None
 
 
@@ -103,3 +103,52 @@ def test_llm_failure_is_a_question_not_an_error(dummy_user, chat):
     llm = MagicMock()
     llm.generate.return_value = MagicMock(success=False)
     assert turn(dummy_user, chat, llm).reply == planner.NOT_UNDERSTOOD
+
+
+
+# --- spec 020 US2: "this meeting" follows the page -------------------------------------------------------
+
+def test_this_meeting_stays_this_meeting_unless_the_user_named_it():
+    # (seen live: the model wrote the page's title, which also matched the meeting's namesakes on other pages)
+    from indico_assistant.services.actions.planner import _the_meeting_the_user_meant
+    draft = lambda meeting: PlanDraft.model_validate({'decision': 'new_request', 'steps': [  # noqa: E731
+        {'action': 'change_meeting', 'meeting': meeting, 'move_to': {'time': '4pm'}}]})
+    assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move this meeting to 4pm').steps[0].meeting == 'this meeting'
+    assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move it to 4pm').steps[0].meeting == 'this meeting'
+    assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move Sync with Makoto to 4pm').steps[0].meeting == \
+        'Sync with Makoto'
+    assert _the_meeting_the_user_meant(draft('#354'), 'Move it to 4pm').steps[0].meeting == '#354'  # a chosen answer
+    attach = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'attach', 'target': 'my talk at Sync with Makoto', 'upload': 'this'}]})
+    assert _the_meeting_the_user_meant(attach, 'attach this to my talk').steps[0].target == 'my talk at Sync with Makoto'
+
+
+def test_a_revision_that_changes_nothing_is_a_question(dummy_user, chat):
+    step = {'action': 'change_meeting', 'meeting': 'this meeting', 'move_to': {'time': '4pm'}}
+    waiting, _ = executor.create_plan(dummy_user, chat.id, summary='Move it', steps=[],
+                                      draft={'decision': 'new_request', 'steps': [step], 'topic': 'move it'})
+    result = turn(dummy_user, chat, llm_returning(decision='revise', steps=[step]), open_plan=waiting,
+                  message='What is this event about?')
+    assert not result.handled  # answered as a question (NL2SQL), the plan still waiting
+    assert ActionPlan.query.get(waiting.id).status == 'shown'
+
+
+
+@pytest.mark.parametrize(('message', 'question'), [
+    ('What is this event about?', True), ('Who are the speakers?', True), ('When does it start?', True),
+    ('Can you move it to 3pm?', False), ('What if we make it 30 minutes?', False), ('make it an hour', False),
+    ('How about moving it earlier?', False), ('Why not renaming it?', False), ('Which setup do we use?', False),
+])
+def test_a_plain_question_never_revises_the_waiting_plan(message, question):
+    from indico_assistant.services.actions.planner import _only_a_question
+    assert _only_a_question(message) is question
+
+
+
+@pytest.mark.parametrize(('message', 'cancelled'), [('What is this event about?', False), ('cancel that', True),
+                                                     ('never mind', True), ('Tell me about the speakers', False)])
+def test_only_the_user_cancels_the_waiting_plan(dummy_user, chat, shown, message, cancelled):
+    # (seen live: the model answered "What is this event about?" on another page with "cancel")
+    result = turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message=message)
+    assert (ActionPlan.query.get(shown.id).status == 'cancelled') is cancelled
+    assert result.handled is cancelled  # otherwise answered as a question

@@ -127,10 +127,12 @@ class ChatService:
         """
         try:
             session, created = self._get_or_create_session(session_id, user.id, event_id)
-            if session.event_id:
-                self._validate_event_access(user, session.event_id)
-            user_message = self._session_manager.add_user_message(
-                session, message, {"uploads": uploads} if uploads else None)
+            # "this event" is the page the message is sent from (spec 020 R8): checked, and kept on the message
+            self._validate_event_access(user, event_id)
+            metadata: dict[str, Any] = {"event_id": event_id}
+            if uploads:
+                metadata["uploads"] = uploads
+            user_message = self._session_manager.add_user_message(session, message, metadata)
             self._session_manager.commit()
             return session.id, created, user_message.id
         except Exception:
@@ -155,24 +157,30 @@ class ChatService:
         user = self._load_user(user_id)
         if session is None or user is None:
             raise SessionNotFoundError(f"Session {session_id} not found")
-        event_id = session.event_id
+        # the page this question was sent from; a question from before spec 020 has the session's event
+        event_id = (self._session_manager.page_event_of(message_id, session.event_id) if message_id
+                    else session.event_id)
         self._validate_event_access(user, event_id)  # again: access may have been revoked while queued
         # plain values: touching expired ORM objects later would open a transaction mid-pipeline
         viewer = SimpleNamespace(id=user.id, is_admin=bool(user.is_admin))
         context = self._context_builder.build_context(session.id, up_to=message_id)
+        if note := self._context_builder.page_note(event_id, user):
+            # right before the question: earlier messages about other events are not "this event" (FR-009)
+            at = len(context) - 1 if context and context[-1].get("role") == "user" else len(context)
+            context = [*context[:at], note, *context[at:]]
         from indico_assistant.services.actions.executor import open_plan
         waiting_plan = open_plan(session.id)
         db.session.commit()
 
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
-        planned = self._plan(user, session.id, message, context, waiting_plan) if waiting_plan else None
+        planned = self._plan(user, session.id, message, context, waiting_plan, event_id) if waiting_plan else None
         if planned is None:
             response_text, metadata = self._process_with_nl2sql(
                 message, context, event_id, user_id=viewer.id, auth_user=viewer
             )
             if metadata.get("write_request"):
-                planned = self._plan(user, session.id, message, context, None)
+                planned = self._plan(user, session.id, message, context, None, event_id)
                 if planned is None:  # the planner found no change in it after all: never an empty reply
                     from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
                     response_text = response_text or NOT_UNDERSTOOD
@@ -192,7 +200,7 @@ class ChatService:
             plan=plan,
         )
 
-    def _plan(self, user, session_id, message, context, waiting_plan):
+    def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None):
         """The chat-action planner's answer, or None when the message turns out to be a question."""
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.actions.context import acting_as
@@ -202,7 +210,7 @@ class ChatService:
         history = context[:-1] if context and context[-1].get("content") == message else context
         with acting_as(user):  # resolving names and checking permissions reads Indico as the user
             turn = plan_turn(user, session_id, message, history, waiting_plan,
-                             llm=plugin.llm_service, settings=plugin.settings.get_all())
+                             llm=plugin.llm_service, settings=plugin.settings.get_all(), page_event_id=page_event_id)
         if not turn.handled:
             return None
         return turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None}, turn.plan
@@ -236,9 +244,7 @@ class ChatService:
             
             if not self._session_manager.validate_session_ownership(session, user_id):
                 raise SessionAccessDeniedError("Session belongs to another user")
-            if event_id is not None and session.event_id != event_id:
-                # the session's scope is what gets answered; a different one would be silently ignored
-                raise EventAccessDeniedError(event_id, "This chat belongs to a different event scope")
+            # (a conversation spans pages: each message carries its own event, spec 020 R8)
 
             return session, False
         

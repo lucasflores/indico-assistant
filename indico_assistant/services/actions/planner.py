@@ -13,7 +13,7 @@ from datetime import datetime
 
 from indico_assistant.services.actions import enabled_actions, executor, validate_plan
 from indico_assistant.services.actions.context import fence, user_timezone
-from indico_assistant.services.actions.resolve import ME
+from indico_assistant.services.actions.resolve import IT, ME, PAGE_FROM_CHAT, TALK_TARGET_WORDS
 from indico_assistant.services.llm.models.plan import CreateMeeting, PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
@@ -68,22 +68,25 @@ class PlanTurn:
     llm_calls: list = field(default_factory=list)
 
 
-def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings):
+def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings,
+              page_event_id=PAGE_FROM_CHAT):
     """Answer one message that asks for (or follows up on) a change."""
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE)
     if open_plan is not None:
         if AFFIRMATIVE.fullmatch(message):
-            return _apply(PlanDraft(decision='confirm'), user, chat_session_id, open_plan, enabled, [], settings)
+            return _apply(PlanDraft(decision='confirm'), user, chat_session_id, open_plan, enabled, [], settings,
+                          page_event_id=page_event_id)
         # a choice offered in the plan, or a suggestion accepted (a button, or typed): no LLM needed
         if (draft := answered_draft(open_plan, message)) is not None:
             return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
-                          (open_plan.draft or {}).get('topic', ''), suggestions=open_plan.suggestions)
+                          (open_plan.draft or {}).get('topic', ''), suggestions=open_plan.suggestions,
+                          page_event_id=page_event_id)
         if (accepted := accepted_suggestion(open_plan, message)) is not None:
             draft, remaining = accepted
             return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
-                          (open_plan.draft or {}).get('topic', ''), suggestions=remaining)
+                          (open_plan.draft or {}).get('topic', ''), suggestions=remaining, page_event_id=page_event_id)
     from indico_assistant.services.actions import suggestions as context_suggestions
     context = context_suggestions.build_context(user, message, chat_session_id, history)
     with collect_calls() as calls:
@@ -103,14 +106,20 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), message, open_plan)
     draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
                                           open_plan)
+    draft = _the_meeting_the_user_meant(draft, message)
+    if open_plan is not None and draft.decision in ('revise', 'cancel') and (
+            _only_a_question(message) or _changes_nothing(draft, open_plan)
+            or (draft.decision == 'cancel' and not CANCEL_WORDS.search(message))):
+        draft.decision = 'unrelated'  # answered as a question; the waiting plan stays as it is
     offered = [*draft.suggestions, *context_suggestions.automatic(context, draft, user)]
     turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message,
-                  suggestions=context_suggestions.validate(offered, context))
+                  suggestions=context_suggestions.validate(offered, context), page_event_id=page_event_id)
     turn.llm_calls = calls
     return turn
 
 
-def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, topic='', suggestions=()):
+def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, topic='', suggestions=(),
+           page_event_id=PAGE_FROM_CHAT):
     from indico_assistant.services.actions import resolve
     from indico_assistant.tasks.actions import outcome_message
 
@@ -133,7 +142,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
-                                         settings=settings, topic=topic)
+                                         settings=settings, topic=topic, page_event_id=page_event_id)
     except NotImplementedError:
         return PlanTurn(NOT_SUPPORTED)
     if resolved.refusal:
@@ -216,6 +225,53 @@ def _category_named(category, said, raw):
     if words := re.findall(r'\w{4,}', category.lower()):
         return any(word in said for word in words)
     return re.search(rf'(?<!\w){re.escape(category)}(?!\w)', raw) is not None
+
+
+GENERIC_MEETING = re.compile(r"\b(this|that|the) (meeting|event)\b|\bit\b", re.IGNORECASE)
+
+
+def _the_meeting_the_user_meant(draft, message):
+    """"This meeting" stays "this meeting" (spec 020 R8): the model tends to fill in the page's title (which
+    the prompt now names), and a title matches its namesakes on other pages. Kept only when the user named it."""
+    if not GENERIC_MEETING.search(message):
+        return draft
+    said = message.lower()
+    for step in draft.steps:
+        for attr in ('meeting', 'target'):  # ChangeMeeting.meeting, Attach.target
+            value = getattr(step, attr, None)
+            if not isinstance(value, str) or value.strip().lower() in IT or value.startswith('#'):
+                continue
+            if attr == 'target' and any(word in value.lower() for word in TALK_TARGET_WORDS):
+                continue  # "my talk": a talk, resolved by its own rules
+            if value.strip().lower() not in said:
+                setattr(step, attr, 'this meeting')
+    return draft
+
+
+# the model's "cancel" needs the user's words for it (seen live: "What is this event about?" cancelled a plan)
+CANCEL_WORDS = re.compile(r"\b(cancel|never ?mind|forget (it|that|about it)|scrap|drop (it|that|the plan)|stop|"
+                          r"don'?t|do not|no|nope|not anymore)\b", re.IGNORECASE)
+QUESTION = re.compile(r"\s*(what|who|whom|whose|when|where|which|why|how)\b", re.IGNORECASE)
+CHANGE_WORDS = re.compile(r"\b(mov|chang|renam|call it|add|mak|set|put|shift|push|postpon|reschedul|extend|shorten|"
+                          r"cancel|remov|delet|attach|invit|swap|replac|instead|earlier|later)", re.IGNORECASE)
+
+
+def _only_a_question(message):
+    """A plain question ("What is this event about?") never revises the waiting plan (seen live: on another
+    page it came back as a revision moving the plan to that page's meeting). "Can you move it to 3pm?" does."""
+    return bool(QUESTION.match(message)) and message.rstrip().endswith('?') and not CHANGE_WORDS.search(message)
+
+
+def _changes_nothing(draft, open_plan):
+    """Whether a revision would leave the waiting plan as it is (seen live: a question asked on another page
+    came back as the same request)."""
+    if open_plan is None or draft.decision != 'revise' or not draft.steps or not open_plan.draft:
+        return False
+    try:
+        before = PlanDraft.model_validate(open_plan.draft).steps
+    except Exception:
+        return False
+    return [s.model_dump() for s in draft.steps] == [s.model_dump() for s in before]
 
 
 def _only_what_the_user_said(draft, message, open_plan=None):
