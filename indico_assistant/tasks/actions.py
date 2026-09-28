@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 
 def outcome_message(plan):
     if plan.status == 'done':
-        return 'Done: ' + '; '.join(step.get('description', step['action']) for step in plan.steps) + '.'
+        from indico.modules.events import Event
+
+        lines = ['Done:', *(f'- {step.get("description", step["action"])}' for step in plan.steps)]
+        event_ids = [r['created']['event_id'] for r in plan.result or ()
+                     if (r.get('created') or {}).get('event_id') is not None]
+        lines += [f'[Open “{event.title}” in Indico]({event.external_url})'
+                  for event in map(Event.get, dict.fromkeys(event_ids)) if event is not None]
+        return '\n'.join(lines)
     if plan.status == 'refused':
         return f'I did not change anything: {plan.error}'
     return plan.error or 'The plan could not be carried out; nothing was changed.'

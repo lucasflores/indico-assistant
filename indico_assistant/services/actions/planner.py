@@ -55,12 +55,12 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
-    turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls)
+    turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls, settings)
     turn.llm_calls = calls
     return turn
 
 
-def _apply(draft, user, chat_session_id, open_plan, enabled, calls):
+def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings):
     from indico_assistant.services.actions import resolve
     from indico_assistant.tasks.actions import outcome_message
 
@@ -82,7 +82,8 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls):
         return PlanTurn(draft.reply or NOT_UNDERSTOOD)
 
     try:
-        resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan)
+        resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
+                                         settings=settings)
     except NotImplementedError:
         return PlanTurn(NOT_SUPPORTED)
     if resolved.refusal:

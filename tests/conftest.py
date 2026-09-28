@@ -12,6 +12,16 @@ import yaml
 pytest_plugins = ("indico.testing.fixtures",)
 
 
+@pytest.hookimpl(trylast=True)
+def pytest_configure(config):
+    """Chat-action tests use the real Teams plugin (fake Graph) when it is installed (Feature 019)."""
+    import importlib.util
+
+    plugins = list(getattr(config, 'indico_plugins', None) or [])
+    if importlib.util.find_spec('indico_vc_teams') and 'vc_teams' not in plugins:
+        config.indico_plugins = [*plugins, 'vc_teams']
+
+
 @pytest.fixture
 def plugin_settings():
     """Fixture providing default plugin settings for testing."""

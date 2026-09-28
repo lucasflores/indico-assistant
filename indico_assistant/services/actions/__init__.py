@@ -11,8 +11,14 @@ from indico_assistant.default_settings import WRITE_ACTIONS
 
 MAX_STEPS = 25  # FR-012: bigger requests belong in Indico's timetable
 
-# name -> Action instance; filled by the action modules as they are added
+# name -> Action instance, filled by @register in the action modules imported at the bottom
 ACTIONS = {}
+
+
+def register(cls):
+    ACTIONS[cls.name] = cls()
+    return cls
+
 
 _REF = re.compile(r'^\$(\d+)(?:\.(\w+))?$')
 
@@ -54,3 +60,6 @@ def validate_plan(steps, enabled):
         elif seen_external:
             errors.append(f'Step {n}: steps that call other systems (Teams) must come last')
     return errors
+
+
+from indico_assistant.services.actions import contributions, events, materials, teams  # noqa: E402, F401
