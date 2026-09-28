@@ -15,8 +15,10 @@ from indico_assistant.services.llm.models.sql import (
     SQLCorrection,
 )
 from indico_assistant.services.llm.models.summary import ResponseSummary
+from indico_assistant.services.llm.models.plan import PlanDraft
 
 __all__ = [
+    "PlanDraft",
     # Base models
     "LLMResponse",
     "HealthStatus",

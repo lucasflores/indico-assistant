@@ -38,11 +38,18 @@ Analyze the user's question and classify it into one of these intents:
 - **attachment_query**: Questions about file metadata (filenames, types, storage locations)
 - **document_content_query**: Questions about the CONTENT within files (what slides say, paper contents)
 - **general_info**: General questions about the system or unclear queries
+- **write_request**: An instruction to CREATE, CHANGE, MOVE, ADD, ATTACH, CANCEL or UNDO something in Indico
+  (a meeting, its talks or speakers, a reminder, a Teams meeting, material): "Create a meeting tomorrow at
+  2pm", "move it to 3pm", "attach this to my talk", "undo that". Not a question about existing data.
 - **out_of_scope**: Questions not related to events/registrations/contributions/documents
 
 ## CLASSIFICATION HINTS
 
 ### Intent Selection Rules
+
+**PRIORITY 0 - write_request**: the user tells the assistant to make a change ("create", "schedule",
+"set up", "book a meeting", "add ... as a speaker", "move", "rename", "attach", "undo"). A question about
+what exists ("which meetings are tomorrow?", "who is speaking?") is never a write_request.
 
 **PRIORITY 1 - topic_search** (use when searching for a topic/keyword/project across the system):
 - User mentions a specific topic, project name, keyword, or subject they want to find

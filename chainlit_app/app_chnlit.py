@@ -239,6 +239,11 @@ async def starters():
 @cl.on_message
 async def on_message(message: cl.Message):
     """Forward message to Indico assistant API and return response."""
+    await _ask(message.content)
+
+
+async def _ask(text: str):
+    """Send ``text`` to the Indico assistant as the user's next message and show the answer."""
     indico_api_url = _get_indico_api_url()
     if not indico_api_url:
         await cl.Message(
@@ -263,7 +268,7 @@ async def on_message(message: cl.Message):
     loading_msg = cl.Message(content="")
     
     client = await _get_http_client(indico_api_url)
-    payload: dict[str, object] = {"message": message.content}
+    payload: dict[str, object] = {"message": text}
     session_id = cl.user_session.get("indico_session_id")
     if session_id:
         payload["session_id"] = session_id
@@ -381,8 +386,106 @@ async def on_message(message: cl.Message):
         followup_text += "\n\nJust say the word!"
         reply += followup_text
     
+    plan = data.get("plan")
+    if plan:
+        card, actions = render_plan(plan)
+        loading_msg.content = f"{reply}\n\n{card}" if reply else card
+        loading_msg.actions = actions
+        await _forget_plan_buttons()  # only the latest plan can be confirmed
+        await loading_msg.send()
+        cl.user_session.set("plan_message", loading_msg)
+        return
+
     loading_msg.content = reply
     await loading_msg.send()
+
+
+# --- Chat actions (Feature 019): the plan card and its buttons ------------------------------------------
+
+
+def render_plan(plan: dict) -> tuple[str, list[cl.Action]]:
+    """The plan as the user confirms it (contracts/api.md), and its buttons."""
+    lines = [f"**{plan['summary']}**", ""]
+    for step in plan.get("steps", []):
+        lines.append(f"{step['n']}. {step['description']}")
+        lines.extend(f"    - {effect}" for effect in step.get("side_effects", []))
+    actions: list[cl.Action] = []
+    for question in plan.get("questions", []):
+        lines += ["", f"**{question['text']}**"]
+        for choice in question.get("choices", []):
+            note = f" ({choice['note']})" if choice.get("note") else ""
+            lines.append(f"- {choice['label']}{note}")
+            actions.append(cl.Action(name="plan_choice", label=choice["label"], payload={"text": choice["label"]}))
+    for suggestion in plan.get("suggestions", []):
+        lines += ["", f"Suggestion ({suggestion['source']['label']}): {suggestion['content']}"]
+        actions.append(cl.Action(name="plan_choice", label=f"Add: {suggestion['kind']}",
+                                 payload={"text": f"add suggestion {suggestion['id']}"}))
+    if plan.get("can_confirm"):
+        actions.append(cl.Action(name="confirm_plan", label="Confirm", icon="check",
+                                 payload={"plan_id": plan["id"], "token": plan.get("token")}))
+    actions.append(cl.Action(name="cancel_plan", label="Cancel", icon="x", payload={"plan_id": plan["id"]}))
+    return "\n".join(lines), actions
+
+
+async def _forget_plan_buttons():
+    previous = cl.user_session.get("plan_message")
+    if previous is not None:
+        await previous.remove_actions()
+        cl.user_session.set("plan_message", None)
+
+
+async def _plan_call(path: str, body: dict | None = None) -> httpx.Response | None:
+    indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
+    if not indico_api_url or not auth_token:
+        await cl.Message(content="Authentication token missing. Please re-authenticate.").send()
+        return None
+    client = await _get_http_client(indico_api_url)
+    try:
+        response = await client.post(path, json=body or {}, headers={"X-Assistant-Auth": auth_token})
+        if response.status_code == 202:  # confirmed: wait for the worker to carry it out
+            response = await _wait_for_answer(client, response.json()["job_id"], auth_token)
+    except httpx.RequestError:
+        logger.exception("Failed to reach Indico assistant API")
+        await cl.Message(content="Unable to reach the assistant service. Please try again later.").send()
+        return None
+    return response
+
+
+def _plan_outcome(response: httpx.Response) -> str:
+    if response.status_code == 200:
+        return response.json().get("response") or "Done."
+    if response.status_code == 202:
+        return "This is taking longer than expected; the result will appear in the event shortly."
+    if response.status_code == 409:
+        return "This plan changed or expired, so nothing was done. Ask again for a new plan."
+    if response.status_code == 403:
+        return response.json().get("message") or "You cannot confirm this plan."
+    return "The assistant encountered an error. Nothing was changed; please try again."
+
+
+@cl.action_callback("confirm_plan")
+async def on_confirm_plan(action: cl.Action):
+    await _forget_plan_buttons()
+    response = await _plan_call(f"/api/assistant/plans/{action.payload['plan_id']}/confirm",
+                                {"token": action.payload.get("token")})
+    if response is not None:
+        await cl.Message(content=_plan_outcome(response)).send()
+
+
+@cl.action_callback("cancel_plan")
+async def on_cancel_plan(action: cl.Action):
+    await _forget_plan_buttons()
+    response = await _plan_call(f"/api/assistant/plans/{action.payload['plan_id']}/cancel")
+    if response is not None:
+        text = "Cancelled; nothing was changed." if response.status_code == 200 else _plan_outcome(response)
+        await cl.Message(content=text).send()
+
+
+@cl.action_callback("plan_choice")
+async def on_plan_choice(action: cl.Action):
+    """A choice or suggestion button answers the plan as if the user had typed it."""
+    await cl.Message(content=action.payload["text"], type="user_message").send()
+    await _ask(action.payload["text"])
 
 
 if __name__ == "__main__":

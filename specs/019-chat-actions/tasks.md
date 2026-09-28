@@ -55,58 +55,58 @@ builds on these.
 
 ### Tests first
 
-- [ ] T008 [P] `tests/unit/services/actions/test_context.py`:
+- [x] T008 [P] `tests/unit/services/actions/test_context.py`:
   - `acting_as(user)` yields `session.user == user` **with `memoize_request` enabled** (patch `config.TESTING` off for the check);
   - `session.set_session_user` would fail the same test (regression note, R1);
   - `user_timezone(user)` / `local_today(user)` follow R11.
-- [ ] T009 [P] `tests/unit/services/actions/test_plan_lifecycle.py`, the state machine from data-model.md on the test DB:
+- [x] T009 [P] `tests/unit/services/actions/test_plan_lifecycle.py`, the state machine from data-model.md on the test DB:
   - `confirm()` succeeds once, and returns `None` for a second call, a wrong token, an expired plan, a superseded plan and a plan with open questions;
   - `cancel()` works only from `shown`;
   - `expired` is computed.
-- [ ] T010 [P] `tests/integration/actions/test_plan_endpoints.py`:
+- [x] T010 [P] `tests/integration/actions/test_plan_endpoints.py`:
   - `GET /plans/<id>`, `POST /plans/<id>/confirm` and `POST /plans/<id>/cancel` status codes per contracts/api.md: 202 / 404 / 409 / 403 `INVALID_TOKEN` / 403 `ACTIONS_DISABLED`;
   - the `read` rate limit;
   - `Cache-Control: private, no-store`.
-- [ ] T011 [P] `tests/unit/services/actions/test_executor.py`, using a fake write action and a fake external step:
+- [x] T011 [P] `tests/unit/services/actions/test_executor.py`, using a fake write action and a fake external step:
   - every step runs inside one `track_time_changes` / `track_location_changes` block;
   - a failing step rolls back everything, runs the external undo, calls `discard_pending()`, resets `g.email_queue`, and records `failed` in a new transaction;
   - a refused re-check records `refused` and writes nothing.
 
 ### Implementation
 
-- [ ] T012 `indico_assistant/services/actions/context.py`: `acting_as(user)` (R1: `session['_user_id']`, `g.pop('memoize_cache')`, assert, lang/timezone), `user_timezone`, `local_today`.
-- [ ] T013 `indico_assistant/services/actions/base.py`:
+- [x] T012 `indico_assistant/services/actions/context.py`: `acting_as(user)` (R1: `session['_user_id']`, `g.pop('memoize_cache')`, assert, lang/timezone), `user_timezone`, `local_today`.
+- [x] T013 `indico_assistant/services/actions/base.py`:
   - the `Action` protocol, `StepResult`;
   - `refuse_if_locked(event)`;
   - the resolved-args Pydantic base with aware-datetime validation;
   - `describe()` helpers that format times with the timezone and category paths with `' » '`.
-- [ ] T014 `indico_assistant/services/actions/__init__.py`: catalogue registry `ACTIONS`, `enabled_actions()` (honours `actions_enabled` / `actions_allowed`, FR-021), and `validate_plan(steps)`: 25-step cap, backward refs only, Teams step last, disabled actions refused (FR-005, FR-012).
-- [ ] T015 `indico_assistant/services/actions/executor.py`:
+- [x] T014 `indico_assistant/services/actions/__init__.py`: catalogue registry `ACTIONS`, `enabled_actions()` (honours `actions_enabled` / `actions_allowed`, FR-021), and `validate_plan(steps)`: 25-step cap, backward refs only, Teams step last, disabled actions refused (FR-005, FR-012).
+- [x] T015 `indico_assistant/services/actions/executor.py`:
   - `create_plan(...)` (row + token, token hash, `expires_at`);
   - `revise(plan, ...)` (supersede);
   - `confirm(plan_id, user, token)` as the atomic UPDATE;
   - `cancel`;
   - `run(plan_id)`: re-check → steps in one transaction → external step last → commit, plus the R2 rollback path.
   - Makes T009 and T011 pass.
-- [ ] T016 `indico_assistant/tasks/actions.py`: `execute_plan(plan_id, user_id, job_id)`. Decorated `@celery.task(request_context=True, plugin='assistant', queue='assistant', soft_time_limit=60, time_limit=90)`. It runs inside `acting_as`, calls `executor.run` and reports through `jobs.finish`. Import it in `indico_assistant/__init__.py`.
-- [ ] T017 [P] `indico_assistant/schemas/actions.py`: `PlanView` (without args or token, except where contracts/api.md includes the token), `ConfirmRequest`. Add `plan: PlanView | None` to `ChatResponse` in `indico_assistant/schemas/chat.py`.
-- [ ] T018 `indico_assistant/controllers/actions.py`: `RHPlan`, `RHPlanConfirm` (queues `execute_plan`, returns a job id), `RHPlanCancel`. Register the routes in `indico_assistant/blueprint.py`. Makes T010 pass.
-- [ ] T019 `indico_assistant/services/llm/service.py`: optional `messages=` parameter on `generate` (chat turns before the prompt). Test in `tests/unit/services/llm/test_service.py` that existing callers are unchanged.
-- [ ] T020 [P] `indico_assistant/services/llm/models/plan.py`: `PlanDraft` and step models exactly as in contracts/plan-draft.md. Contract test in `tests/contract/test_plan_draft.py` that its JSON schema is valid for instructor MD_JSON, and that recorded sample drafts parse.
-- [ ] T021 `indico_assistant/services/actions/planner.py` skeleton:
+- [x] T016 `indico_assistant/tasks/actions.py`: `execute_plan(plan_id, user_id, job_id)`. Decorated `@celery.task(request_context=True, plugin='assistant', queue='assistant', soft_time_limit=60, time_limit=90)`. It runs inside `acting_as`, calls `executor.run` and reports through `jobs.finish`. Import it in `indico_assistant/__init__.py`.
+- [x] T017 [P] `indico_assistant/schemas/actions.py`: `PlanView` (without args or token, except where contracts/api.md includes the token), `ConfirmRequest`. Add `plan: PlanView | None` to `ChatResponse` in `indico_assistant/schemas/chat.py`.
+- [x] T018 `indico_assistant/controllers/actions.py`: `RHPlan`, `RHPlanConfirm` (queues `execute_plan`, returns a job id), `RHPlanCancel`. Register the routes in `indico_assistant/blueprint.py`. Makes T010 pass.
+- [x] T019 `indico_assistant/services/llm/service.py`: optional `messages=` parameter on `generate` (chat turns before the prompt). Test in `tests/unit/services/llm/test_service.py` that existing callers are unchanged.
+- [x] T020 [P] `indico_assistant/services/llm/models/plan.py`: `PlanDraft` and step models exactly as in contracts/plan-draft.md. Contract test in `tests/contract/test_plan_draft.py` that its JSON schema is valid for instructor MD_JSON, and that recorded sample drafts parse.
+- [x] T021 `indico_assistant/services/actions/planner.py` skeleton:
   - `plan_turn(user, session, message, open_plan)` builds the prompt (facts, open plan, last 20 turns, fenced context block) and calls `generate(response_model=PlanDraft)` inside `collect_calls()`;
   - it regenerates once on validation errors, then falls back to a question;
   - it stores `llm_calls` on the plan (FR-020);
   - no resolvers yet: stubs raise `NotImplementedError` per draft type.
-- [ ] T022 Routing in `indico_assistant/services/chat/service.py` `answer()` (R13):
+- [x] T022 Routing in `indico_assistant/services/chat/service.py` `answer()` (R13):
   - an open plan in the session → planner;
   - otherwise the classifier's `write_request` intent → planner;
   - otherwise NL2SQL, unchanged;
   - actions disabled → a fixed "not available" reply.
 
   Add `write_request` to `CLASSIFICATION_PROMPT` in `indico_assistant/services/nl2sql/classifier.py`. Make `answer_chat` in `indico_assistant/tasks/chat.py` `request_context=True`, and run planning inside `acting_as`. Tests go in `tests/unit/services/chat/test_service.py` and `tests/unit/services/nl2sql/test_classifier.py`.
-- [ ] T023 Job response: `RHChatJob` in `indico_assistant/controllers/chat.py` returns `plan` when the job has one. `jobs.finish(..., plan=...)` is set by the planner path. Extend `tests/integration/chat/test_chat_endpoint.py`.
-- [ ] T024 Chainlit `chainlit_app/app_chnlit.py`:
+- [x] T023 Job response: `RHChatJob` in `indico_assistant/controllers/chat.py` returns `plan` when the job has one. `jobs.finish(..., plan=...)` is set by the planner path. Extend `tests/integration/chat/test_chat_endpoint.py`.
+- [x] T024 Chainlit `chainlit_app/app_chnlit.py`:
   - render a plan answer: summary, numbered steps, side effects, questions as choice buttons, suggestions;
   - `cl.Action` `confirm_plan` (only when `can_confirm`) and `cancel_plan`;
   - `@cl.action_callback` handlers that call the endpoints, poll the job, post the outcome and `remove_actions()`;

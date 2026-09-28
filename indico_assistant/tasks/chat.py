@@ -16,7 +16,8 @@ SOFT_TIME_LIMIT = 120
 HARD_TIME_LIMIT = SOFT_TIME_LIMIT + 30
 
 
-@celery.task(name='indico_assistant_answer_chat', queue=CHAT_QUEUE, ignore_result=True,
+# request_context: the chat-action planner checks permissions as the user (services/actions/context.py)
+@celery.task(name='indico_assistant_answer_chat', queue=CHAT_QUEUE, ignore_result=True, request_context=True,
              soft_time_limit=SOFT_TIME_LIMIT, time_limit=HARD_TIME_LIMIT)
 def answer_chat(job_id, user_id, session_id, message, message_id=None):
     from indico_assistant.services.chat import get_chat_service, jobs
@@ -41,4 +42,4 @@ def answer_chat(job_id, user_id, session_id, message, message_id=None):
         jobs.finish(job_id, status='failed', error='INTERNAL_ERROR', message='An unexpected error occurred')
     else:
         jobs.finish(job_id, status='done', message_id=str(result.message_id), response=result.response,
-                    metadata=result.metadata)
+                    metadata=result.metadata, plan=result.plan)
