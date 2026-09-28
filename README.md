@@ -14,6 +14,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 - [Demo](#-demo)
 - [Features](#features)
+- [Chat actions](#chat-actions)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -72,6 +73,54 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 - **Langfuse Observability**: Integrated tracing and monitoring for all LLM interactions with privacy filters. See [Langfuse Setup](docs/LANGFUSE_SETUP.md)
 - **Test Coverage**: Comprehensive unit, integration, and contract tests (80%+ coverage on services)
+
+## Chat actions
+
+Besides answering questions, the assistant can create and change meetings from the chat ("Set up a Teams meeting
+with Makoto tomorrow at 2pm, 20 minutes each"). It never writes on its own: every request becomes a **plan**, a
+list of the exact changes, which the user reads and confirms. Nothing touches Indico or Microsoft until then.
+
+**Enabling.** Off by default. In **Administration → Plugins → Assistant**, tick **Enable chat actions**, then untick
+any action under **Allowed actions** you do not want offered. Run `indico db --all-plugins upgrade` first (it
+adds `plugin_assistant.action_plans`), and run the Celery worker on the `assistant` queue, which carries out the
+confirmed plans.
+
+| Action | What it does |
+| --- | --- |
+| Create event | A new meeting in a category you can create events in |
+| Propose event | In a moderated category: an unlisted meeting plus a publication request |
+| Update event | Move, retime, rename or re-describe one of your meetings (its timetable moves with it) |
+| Add contribution / Update contribution | Talks with speakers (Indico users, or guests with an email) |
+| Add Teams room | A Microsoft Teams meeting, with co-organizers; needs the `vc_teams` plugin |
+| Add reminder | A reminder to the invitees and speakers (default: **Reminder before a meeting**, 15 minutes) |
+| Attach link / Attach file | Links, or files sent in the chat, on a meeting or one of its talks |
+| Delete created | Undo: removes what one of your plans created, within 24 hours, if nobody changed it since |
+
+**What the user can do, and nothing more.** Each step is checked with Indico's own permissions as the user, when
+the plan is made and again when it runs. The assistant can only do what the user could do on the page, and
+Indico's event log attributes every change to them. If anything fails, the whole plan is rolled back, including
+Teams meetings and emails. Plans are single-use: a plan expires after 30 minutes or when it is revised, and
+**Confirm** works once. A plan has at most 25 steps.
+
+**Help while planning.** Unclear requests get a question instead of a guess, such as which category or which
+"Makoto". Missing times are offered from free slots in Indico: yours and the named people's. Optionally Outlook
+free/busy is used too (**Use Outlook free/busy for time suggestions**, which needs `Calendars.ReadBasic`).
+Suggestions come from the user's similar past meetings: material, attendees and length. Each names its source
+and is added only when the user accepts it. The language model sees Indico content only as fenced data, and
+anything in a plan that the user did not ask for is dropped.
+
+**Uploads.** Up to 5 files per message, 25 MB each (or Indico's `MAX_UPLOAD_FILE_SIZE`, if lower). Only PDF,
+Word, PowerPoint and Excel (`.docx/.pptx/.xlsx`), PNG, JPEG, text and Markdown files are accepted, checked by
+extension and by content. A file stays unattached until a confirmed plan attaches it; Indico removes unclaimed
+files after a day.
+
+**Teams.** `add_teams_room` needs the `vc_teams` plugin, configured with a Microsoft 365 tenant. Co-organizers
+must have a tenant account; the plan says so when they do not. If Microsoft is unreachable, the plan is offered
+without the room.
+
+**Keeping plans.** Plans are kept for **Keep chat action plans** days (default 90) for audit.
+
+The design is in `specs/019-chat-actions/`, and the local walkthrough is in its `quickstart.md`.
 
 ## Requirements
 

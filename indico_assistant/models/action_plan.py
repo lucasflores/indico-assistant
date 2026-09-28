@@ -9,7 +9,7 @@ plan runs until the user confirms that exact version (see services/actions/execu
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from indico.core.db import db
 from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text
@@ -23,7 +23,7 @@ TERMINAL = frozenset({'done', 'failed', 'refused', 'cancelled', 'superseded', 'e
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ActionPlan(db.Model):

@@ -228,7 +228,6 @@ class DeleteCreated(Action):
     Args = DeleteCreatedArgs
 
     def check(self, user, args):
-        from indico_assistant.services import actions
 
         plan = undoable_plan(args.plan_id, user)
         if plan is None:

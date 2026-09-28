@@ -361,12 +361,12 @@ builds on these.
 
 ## Phase 12: Polish and cross-cutting
 
-- [ ] T077 [P] Eval set in `~/indico-assistant/eval`: 50 meeting requests (varied phrasing, dates, people, ambiguity) with their expected plans and questions. Add a runner mode that scores intended-plan-or-right-question (≥ 90 %) and never-unasked-object (0 %) (SC-004).
-- [ ] T078 [P] Latency check: time plan display and execution on the local stack, 10 runs each, against SC-005 (≤ 10 s / ≤ 15 s p50). Record the results in the PR description.
-- [ ] T079 [P] README (`README.md`): a "Chat actions" section covering enabling, the per-action switches, what each action can do, the permission model ("the assistant can only do what you could do on the page"), uploads and their limits, and the vc_teams requirement.
-- [ ] T080 [P] The admin note in `~/indico-assistant/indico-plugin-vc-teams/README.md`: in-process callers must pass co-organizers with tenant accounts, and `discard_pending()` is available.
-- [ ] T081 Full plugin suite plus the vc_teams suite: only the 17 baseline failures. `ruff check` on the changed files.
-- [ ] T082 Update `specs/019-chat-actions/quickstart.md` with anything learned during implementation.
+- [x] T077 [P] Eval set in `~/indico-assistant/eval`: 50 meeting requests (varied phrasing, dates, people, ambiguity) with their expected plans and questions. Add a runner mode that scores intended-plan-or-right-question (≥ 90 %) and never-unasked-object (0 %) (SC-004).
+- [x] T078 [P] Latency check: time plan display and execution on the local stack, 10 runs each, against SC-005 (≤ 10 s / ≤ 15 s p50). Record the results in the PR description.
+- [x] T079 [P] README (`README.md`): a "Chat actions" section covering enabling, the per-action switches, what each action can do, the permission model ("the assistant can only do what you could do on the page"), uploads and their limits, and the vc_teams requirement.
+- [x] T080 [P] The admin note in `~/indico-assistant/indico-plugin-vc-teams/README.md`: in-process callers must pass co-organizers with tenant accounts, and `discard_pending()` is available.
+- [x] T081 Full plugin suite plus the vc_teams suite: only the 17 baseline failures. `ruff check` on the changed files.
+- [x] T082 Update `specs/019-chat-actions/quickstart.md` with anything learned during implementation.
 
 ---
 

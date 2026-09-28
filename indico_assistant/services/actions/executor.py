@@ -9,7 +9,7 @@ import hashlib
 import logging
 import secrets
 from contextlib import contextmanager, suppress
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from flask import g
 from pydantic_core import to_jsonable_python
@@ -38,7 +38,7 @@ class Refused(Exception):
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _hash(token):

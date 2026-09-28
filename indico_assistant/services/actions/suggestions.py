@@ -54,8 +54,10 @@ def build_context(user, topic, chat_session_id=None, history=()):
     if not texts or (vectors := _embed([topic, *texts])) is None:
         return context
     scores = [_cosine(vectors[0], v) for v in vectors[1:]]
-    similar_events = sorted(((s, e) for s, e in zip(scores, events) if s >= TOPIC_MATCH), key=lambda x: -x[0])
-    similar_chats = sorted(((s, c) for s, c in zip(scores[len(events):], chats) if s >= TOPIC_MATCH),
+    # (scores holds the events' then the chats' scores: zip stops at the events)
+    similar_events = sorted(((s, e) for s, e in zip(scores, events, strict=False) if s >= TOPIC_MATCH),
+                            key=lambda x: -x[0])
+    similar_chats = sorted(((s, c) for s, c in zip(scores[len(events):], chats, strict=True) if s >= TOPIC_MATCH),
                            key=lambda x: -x[0])
 
     for _, event in similar_events[:MAX_MEETINGS]:

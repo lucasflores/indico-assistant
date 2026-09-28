@@ -8,7 +8,7 @@ Feature: 019-chat-actions
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -85,7 +85,7 @@ class Undo(BaseModel):
     which: str = 'last'
 
 
-Step = Annotated[Union[CreateMeeting, ChangeMeeting, Attach, Undo], Field(discriminator='action')]
+Step = Annotated[CreateMeeting | ChangeMeeting | Attach | Undo, Field(discriminator='action')]
 
 
 class SuggestionDraft(BaseModel):
