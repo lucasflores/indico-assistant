@@ -161,6 +161,10 @@ def _create_meeting(step, user, settings):
 
     invitees = [p for p in (person(ref) for ref in step.people) if p is not None and p != user]
     slots = [(slot, person(slot.speaker) if slot.speaker else None) for slot in step.slots]
+    if slots and not any(speaker for _, speaker in slots) and len(slots) == 1 + len(invitees):
+        # ponytail: models sometimes drop the speakers of "a slot for each of us"; one slot per person, the
+        # user first, is what was asked. The plan shows the speakers before anything is confirmed.
+        slots = [(slot, who) for (slot, _), who in zip(slots, [user, *invitees])]
 
     # where
     category = None
@@ -190,7 +194,8 @@ def _create_meeting(step, user, settings):
         notes.append(f'It lasts {DEFAULT_DURATION} minutes; say so if it should be longer.')
     start = tz.localize(datetime.combine(day, at)) if day and at else None
 
-    title = step.title or _default_title(invitees, user)
+    others = [*invitees, *(s for _, s in slots if s and s != user and s not in invitees)]
+    title = step.title or _default_title(others, user)
     steps = [_step(1, 'create_event', {
         'category_id': category.id if category else None, 'title': title, 'description': step.description or '',
         'start_dt': start, 'end_dt': start + timedelta(minutes=minutes) if start else None, 'timezone': tz.zone,
@@ -213,7 +218,7 @@ def _create_meeting(step, user, settings):
         if teams_plugin() is None:
             notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')
         else:
-            everyone = [user, *invitees, *(s for _, s in slots if s and s not in invitees and s != user)]
+            everyone = [user, *others]
             with_account = [u for u in everyone if tenant_email(u)]
             if without := [u.full_name for u in everyone if u not in with_account]:
                 notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '

@@ -47,6 +47,7 @@ def upgrade():
         sa.Column('result', JSONB, nullable=True),
         sa.Column('error', sa.Text(), nullable=True),
         sa.Column('llm_calls', JSONB, nullable=False, server_default='[]'),
+        sa.Column('draft', JSONB, nullable=True),
         sa.CheckConstraint(f"status IN ({', '.join(repr(s) for s in STATUSES)})", name='valid_status'),
         schema='plugin_assistant',
     )

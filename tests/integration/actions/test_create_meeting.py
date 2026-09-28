@@ -138,3 +138,14 @@ def test_a_failure_leaves_nothing_behind(run_example, teams, monkeypatch, failur
         assert meetings() == [] and VCRoom.query.filter_by(name='Sync with Makoto').count() == 0
     assert all(meeting['cancelled'] for meeting in fake.state['events'].values())  # no live Teams meeting
     assert g.email_queue == []  # no mail about a meeting that does not exist
+
+
+def test_talks_of_a_new_meeting_are_numbered_on_the_meeting(run_example, monkeypatch):
+    # Indico allocates contribution numbers in a separate session, which cannot see the uncommitted new
+    # event on a real database (the test fixture shares one session, so fail loudly if it is used here)
+    from indico.core.db.sqlalchemy.util import queries
+    monkeypatch.setattr(queries, 'increment_and_get', lambda *a, **kw: pytest.fail('separate-session allocation'))
+    plan = run_example()
+    assert plan.status == 'done', plan.error
+    (event,) = meetings()
+    assert sorted(c.friendly_id for c in event.contributions) == [1, 2]

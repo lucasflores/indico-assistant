@@ -47,3 +47,12 @@ def test_follow_ups_parse():
 def test_anything_else_is_rejected(bad):
     with pytest.raises(ValidationError):
         PlanDraft.model_validate(bad)
+
+
+def test_what_real_models_send_is_accepted():
+    # seen from gpt-4o-mini: speakers as plain names, no reply
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'create_meeting', 'when': {'date': '2026-09-28', 'time': '14:00'}, 'people': ['Makoto'],
+         'slots': [{'speaker': 'Makoto', 'duration_minutes': 20}]}]})
+    assert draft.steps[0].slots[0].speaker.name == 'Makoto' and draft.steps[0].people[0].name == 'Makoto'
+    assert draft.reply == ''

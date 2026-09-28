@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from flask import g
 from pydantic import model_validator
 
 from indico.modules.categories import Category
@@ -67,6 +68,7 @@ class CreateEvent(Action):
                               'address': args.address},
         }
         event = create_event(Category.get(args.category_id), EventType.meeting, data)
+        g.setdefault('assistant_new_events', set()).add(event.id)  # uncommitted until the plan is done
         notify_event_creation(event)  # the page does this after the operation
         return {'created': {'event_id': event.id}}
 
