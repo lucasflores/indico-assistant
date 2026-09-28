@@ -25,6 +25,7 @@ def service():
 
 def test_runs_on_its_own_queue_with_a_time_limit():
     assert answer_chat.queue == CHAT_QUEUE
+    assert answer_chat.request_context  # the chat-action planner checks permissions as the user
     assert answer_chat.soft_time_limit and answer_chat.time_limit > answer_chat.soft_time_limit
 
 
@@ -35,7 +36,7 @@ def test_done(finish, service):
     answer_chat.run('job1', 7, session_id, 'hello')
     service.answer.assert_called_once_with(7, session_id, 'hello', None)
     finish.assert_called_once_with('job1', status='done', message_id=str(message_id), response='Hi',
-                                   metadata={'confidence': 0.9})
+                                   metadata={'confidence': 0.9}, plan=None)
 
 
 @pytest.mark.parametrize(('error', 'code'), [

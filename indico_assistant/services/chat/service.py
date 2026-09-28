@@ -53,6 +53,7 @@ class ChatResult:
     message_id: UUID
     metadata: dict[str, Any]
     created_session: bool = False
+    plan: Optional[dict[str, Any]] = None  # Feature 019: a plan to confirm (PlanView, with its token)
 
 
 class ChatServiceError(Exception):
@@ -153,11 +154,22 @@ class ChatService:
         # plain values: touching expired ORM objects later would open a transaction mid-pipeline
         viewer = SimpleNamespace(id=user.id, is_admin=bool(user.is_admin))
         context = self._context_builder.build_context(session.id, up_to=message_id)
+        from indico_assistant.services.actions.executor import open_plan
+        waiting_plan = open_plan(session.id)
         db.session.commit()
 
-        response_text, metadata = self._process_with_nl2sql(
-            message, context, event_id, user_id=viewer.id, auth_user=viewer
-        )
+        # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
+        # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
+        planned = self._plan(user, session.id, message, context, waiting_plan) if waiting_plan else None
+        if planned is None:
+            response_text, metadata = self._process_with_nl2sql(
+                message, context, event_id, user_id=viewer.id, auth_user=viewer
+            )
+            if metadata.get("write_request"):
+                planned = self._plan(user, session.id, message, context, None)
+        plan = None
+        if planned is not None:
+            response_text, metadata, plan = planned
 
         assistant_msg = self._session_manager.add_assistant_message(
             self._session_manager.get_session(session_id), response_text, metadata
@@ -168,7 +180,23 @@ class ChatService:
             session_id=session_id,
             message_id=assistant_msg.id,
             metadata=metadata or {},
+            plan=plan,
         )
+
+    def _plan(self, user, session_id, message, context, waiting_plan):
+        """The chat-action planner's answer, or None when the message turns out to be a question."""
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.actions.context import acting_as
+        from indico_assistant.services.actions.planner import plan_turn
+
+        plugin = AssistantPlugin.instance
+        history = context[:-1] if context and context[-1].get("content") == message else context
+        with acting_as(user):  # resolving names and checking permissions reads Indico as the user
+            turn = plan_turn(user, session_id, message, history, waiting_plan,
+                             llm=plugin.llm_service, settings=plugin.settings.get_all())
+        if not turn.handled:
+            return None
+        return turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None}, turn.plan
 
     def _get_or_create_session(
         self,
@@ -452,6 +480,7 @@ class ChatService:
                 "pipeline_success": result.success,
                 "pipeline_error": error_payload,
                 "suggested_followups": getattr(result, 'suggested_followups', []),
+                "write_request": getattr(result, 'write_request', False),
             })
 
             return response_text, metadata

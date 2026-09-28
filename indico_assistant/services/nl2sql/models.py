@@ -53,6 +53,10 @@ class PipelineResult(BaseModel):
     """Complete result from NL2SQL pipeline execution."""
 
     success: bool = Field(description="Whether the query was successful")
+    write_request: bool = Field(
+        default=False,
+        description="Feature 019: the message asks for a change, not data; the chat-action planner answers it",
+    )
     answer: str | None = Field(
         default=None, description="Natural language answer to the question"
     )

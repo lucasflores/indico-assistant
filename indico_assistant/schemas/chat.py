@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from indico_assistant.schemas.actions import PlanView
+
 
 class ChatRequest(BaseModel):
     """Request schema for POST /api/assistant/chat.
@@ -92,6 +94,11 @@ class ChatResponse(BaseModel):
             "containing citation objects with type, url, description fields. "
             "Feature 016: identity_status contains IdentityStatus with source and disclaimer."
         )
+    )
+
+    plan: Optional[PlanView] = Field(
+        default=None,
+        description="Feature 019: the plan to confirm, when the answer proposes changes (contracts/api.md)",
     )
 
     model_config = {"from_attributes": True}

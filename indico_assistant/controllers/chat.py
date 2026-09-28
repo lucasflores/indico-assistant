@@ -126,5 +126,6 @@ class RHChatJob(RHChatBase):
             message_id=job["message_id"],
             response=job["response"],
             metadata={k: metadata.get(k) for k in RESPONSE_METADATA if metadata.get(k) is not None},
+            plan=job.get("plan"),
         )
         return jsonify({"status": "done", **response.model_dump(exclude_none=True, mode="json")}), 200

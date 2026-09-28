@@ -637,3 +637,9 @@ class TestIsPersonalQuery:
         from indico_assistant.services.nl2sql.classifier import is_personal_query
         assert is_personal_query("What are MY meetings?") is True
         assert is_personal_query("show ME my events") is True
+
+
+def test_change_requests_have_their_own_intent():
+    # Feature 019: routed to the chat-action planner instead of SQL
+    from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
+    assert '**write_request**' in CLASSIFICATION_PROMPT and 'PRIORITY 0 - write_request' in CLASSIFICATION_PROMPT

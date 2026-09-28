@@ -121,6 +121,16 @@ class TestChatJob:
         assert (data['status'], data['response'], data['session_id']) == ('done', 'Three events.', str(session_id))
         assert data['metadata'] == {'sql_generated': 'SELECT 1'}
 
+    def test_done_with_a_plan(self, request_, jobs):
+        plan = {'id': str(uuid4()), 'status': 'shown', 'expires_at': '2026-09-28T12:30:00+00:00', 'token': 't0k',
+                'summary': 'Create “Sync”', 'steps': [{'n': 1, 'description': 'Create “Sync”', 'side_effects': []}],
+                'questions': [], 'suggestions': [], 'can_confirm': True, 'error': None}
+        jobs[0]['job1'] = {'status': 'done', 'user_id': 123, 'session_id': str(uuid4()), 'message_id': str(uuid4()),
+                           'response': 'Here is the plan.', 'metadata': {}, 'plan': plan}
+        response, status = self._get(request_)
+        body = response.get_json()
+        assert status == 200 and body['plan']['token'] == 't0k' and body['plan']['steps'][0]['n'] == 1
+
     @pytest.mark.parametrize(('error', 'expected'), [
         ('TIMEOUT', 504), ('ACCESS_DENIED', 403), ('QUEUE_UNAVAILABLE', 503), ('INTERNAL_ERROR', 500),
     ])

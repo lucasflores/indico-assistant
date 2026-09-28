@@ -326,6 +326,26 @@ class TestNL2SQLPipelineClassificationFailure:
         assert "couldn't understand" in result.error.user_message.lower()
 
 
+class TestNL2SQLPipelineWriteRequest:
+    """Feature 019: a change request is handed to the chat-action planner, with no SQL at all."""
+
+    def test_write_request_stops_after_classification(
+        self,
+        pipeline: NL2SQLPipeline,
+        mock_classification: MagicMock,
+        mock_classification_response: MagicMock,
+    ) -> None:
+        mock_classification.intent = "write_request"
+        mock_classification_response.data = mock_classification
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock()
+
+        result = pipeline.process("Create a meeting tomorrow at 2pm", user_id=1)
+
+        assert result.success is True and result.write_request is True and result.generated_sql is None
+        pipeline._generator.generate.assert_not_called()
+
+
 class TestNL2SQLPipelineOutOfScope:
     """Test handling of out-of-scope queries."""
 

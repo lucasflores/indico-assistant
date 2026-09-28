@@ -416,6 +416,12 @@ class NL2SQLPipeline:
                 classification.confidence,
             )
 
+            # A change, not a question: the chat-action planner answers it (Feature 019), no SQL at all
+            if classification.intent == "write_request":
+                return PipelineResult(success=True, write_request=True,
+                                      total_time_ms=int((time.time() - start_time) * 1000),
+                                      classification_time_ms=classification_time)
+
             # Check for out-of-scope queries
             if self._classifier.is_out_of_scope(classification):
                 log_error(audit_log, f"Out of scope: {classification.intent}")

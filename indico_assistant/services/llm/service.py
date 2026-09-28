@@ -243,6 +243,7 @@ class LLMService:
         system_prompt: str | None = None,
         max_retries: int | None = None,
         timeout: float | None = None,
+        messages: list[dict[str, str]] | None = None,
     ) -> LLMResponse[T]:
         """Generate a structured LLM response.
         
@@ -252,6 +253,8 @@ class LLMService:
             system_prompt: Optional system prompt (defaults to plugin setting).
             max_retries: Override default max_retries from settings.
             timeout: Override default timeout from settings.
+            messages: Earlier conversation turns ({"role": "user"|"assistant", "content": ...}), sent between
+                the system prompt and ``prompt`` (the chat-action planner passes the chat this way).
         
         Returns:
             LLMResponse[T] containing either:
@@ -279,9 +282,12 @@ class LLMService:
             return LLMResponse.error_response(error=error, latency_ms=latency_ms, retries=0)
         
         # Build messages
+        history = [{"role": m["role"], "content": m["content"]} for m in messages or ()
+                   if m.get("role") in ("user", "assistant")]
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        messages.extend(history)
         messages.append({"role": "user", "content": prompt})
         
         # Prepare tracing context (T019)
