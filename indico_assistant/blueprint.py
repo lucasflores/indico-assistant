@@ -104,6 +104,8 @@ def _register_routes():
         RHSessionDelete,
         RHSessionDetail,
         RHSessionList,
+        RHSessionOpen,
+        RHSessionRename,
     )
 
     # Health check
@@ -136,6 +138,8 @@ def _register_routes():
         RHSessionDelete, 
         methods=["DELETE"]
     )
+    blueprint.add_url_rule("/sessions/<session_id>", "session_rename", RHSessionRename, methods=["PATCH"])  # (020)
+    blueprint.add_url_rule("/sessions/<session_id>", "session_open", RHSessionOpen, methods=["PUT"])  # (020)
     
     # Feedback endpoint (Feature 004, User Story 3)
     blueprint.add_url_rule("/feedback", "feedback", RHFeedback, methods=["POST"])

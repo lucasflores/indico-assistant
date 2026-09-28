@@ -240,7 +240,10 @@ class ChatService:
         if session_id:
             session = self._session_manager.get_session(session_id)
             if not session:
-                return self._session_manager.create_session(user_id, event_id, session_id=session_id), True
+                session = self._session_manager.create_session(user_id, event_id, session_id=session_id)
+                if not self._session_manager.validate_session_ownership(session, user_id):
+                    raise SessionAccessDeniedError("Session belongs to another user")  # (created meanwhile by another)
+                return session, True
             
             if not self._session_manager.validate_session_ownership(session, user_id):
                 raise SessionAccessDeniedError("Session belongs to another user")

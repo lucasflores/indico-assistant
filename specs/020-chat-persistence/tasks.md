@@ -305,20 +305,20 @@ and waiting plans come back. Focus is not stolen.
 
 ### Tests first
 
-- [ ] T042 [P] [US4] In `tests/integration/chat/test_sessions_endpoint.py`, `PATCH /sessions/<id>`:
+- [x] T042 [P] [US4] In `tests/integration/chat/test_session_history.py`, `PATCH /sessions/<id>`:
   - a title of 1-200 characters after trimming, otherwise `422`;
   - owner only.
 
   Deleting keeps the session's action plans (`session_id` null).
-- [ ] T043 [P] [US4] In `walk.mjs`:
+- [x] T043 [P] [US4] In `tests/browser/us4.mjs`:
   - delete the open conversation from the sidebar: the panel shows a new, empty chat;
   - a stale `threadId` in `localStorage` (a deleted session) opens a new chat without an error.
 
 ### Implementation
 
-- [ ] T044 [US4] Add `rename(session, title)` to `session_manager`, an `RHSessionRename` in
+- [x] T044 [US4] Add `rename(session, title)` to `session_manager`, an `RHSessionRename` in
   `controllers/sessions.py`, and the `PATCH` route in `blueprint.py`. Make T042 pass.
-- [ ] T045 [US4] In `IndicoDataLayer`, map `update_thread(name)` to `PATCH` and `delete_thread` to `DELETE`.
+- [x] T045 [US4] In `IndicoDataLayer`, map `update_thread(name)` to `PATCH` and `delete_thread` to `DELETE`.
   In `chat_widget.js`, treat `thread {threadId: null}` (Chainlit went to `/` after a delete) as a new chat.
   Make T043 pass.
 

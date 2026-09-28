@@ -42,7 +42,16 @@ class SessionManager:
         Returns:
             Newly created ChatSession
         """
-        return ChatSession.create(user_id=user_id, event_id=event_id, session_id=session_id)
+        if session_id is None:
+            return ChatSession.create(user_id=user_id, event_id=event_id)
+        # the panel's first question and Chainlit's naming of the thread (PUT /sessions/<id>) create it at the same
+        # moment: whichever comes second finds it made (callers still check it is the user's)
+        from sqlalchemy.dialects.postgresql import insert
+
+        db.session.execute(insert(ChatSession.__table__)
+                           .values(id=session_id, user_id=user_id, event_id=event_id)
+                           .on_conflict_do_nothing(index_elements=['id']))
+        return ChatSession.query.populate_existing().get(session_id)
 
     TITLE_CHARS = 60
 
@@ -52,7 +61,11 @@ class SessionManager:
             return session.title
         first = (ChatMessage.query.filter_by(session_id=session.id, role='user')
                  .order_by(ChatMessage.created_at.asc()).first())
-        text = ' '.join((first.content if first else '').split())
+        return self.title_from(first.content if first else '')
+
+    def title_from(self, text: str) -> str:
+        """A question as a title: its start, cut at a word."""
+        text = ' '.join((text or '').split())
         if len(text) <= self.TITLE_CHARS:
             return text
         return text[:self.TITLE_CHARS].rsplit(' ', 1)[0] + '…'
@@ -64,9 +77,11 @@ class SessionManager:
         Keyset pagination on (updated_at, id): a session used between two pages moves to the top instead of
         shifting the pages under the reader (spec 020 R12).
         """
-        # a session the user said nothing in is not a conversation to go back to
+        # a session the user said nothing in is not a conversation to go back to (one the panel opened for a
+        # first question is: it has its title before the question is stored)
         query = ChatSession.query.filter(ChatSession.user_id == user_id,
-                                         ChatSession.messages.any(ChatMessage.role == 'user'))
+                                         or_(ChatSession.messages.any(ChatMessage.role == 'user'),
+                                             ChatSession.title.isnot(None)))
         if cursor:
             updated_at, session_id = self._decode_cursor(cursor)
             query = query.filter(tuple_(ChatSession.updated_at, ChatSession.id) < tuple_(updated_at, session_id))
@@ -114,6 +129,14 @@ class SessionManager:
         message = ChatMessage.query.get(message_id)
         metadata = (message.metadata_json or {}) if message is not None else {}
         return metadata['event_id'] if 'event_id' in metadata else fallback
+
+    def rename(self, session: ChatSession, title: str) -> None:
+        """Rename a conversation, as the Past Chats sidebar does (spec 020 US4). Not a new activity: its
+        place in the sidebar stays."""
+        updated_at = session.updated_at
+        session.title = title
+        db.session.flush()
+        session.updated_at = updated_at  # (onupdate would otherwise move it to the top)
 
     def set_message_metadata(self, message_id: UUID, **keys: Any) -> None:
         """Merge ``keys`` into a message's metadata."""

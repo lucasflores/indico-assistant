@@ -50,7 +50,7 @@ class FakeIndico:
             item = {k: SESSION[k] for k in ("session_id", "title", "updated_at", "created_at", "event_id")}
             return httpx.Response(200, json={"sessions": [item], "total": 3, "limit": 1, "offset": 0,
                                              "next_cursor": "CUR2"})
-        if request.method in ("PATCH", "DELETE"):
+        if request.method in ("PATCH", "DELETE", "PUT"):
             return httpx.Response(200, json={})
         return httpx.Response(404, json={})
 
@@ -112,12 +112,15 @@ async def test_indico_already_stores_every_message(layer, indico, as_lucas):
     assert await layer.get_favorite_steps("20") == []
 
 
-async def test_a_rename_before_indico_has_the_session_is_ignored(layer, indico, as_lucas):
+async def test_naming_a_thread_indico_does_not_have_yet_creates_it(layer, indico, as_lucas):
     await layer.update_thread(T1, name="Weekly sync")
     assert indico.calls[-1][0] == "PATCH" and indico.calls[-1][3] == {"title": "Weekly sync"}
-    indico.status[("PATCH", "/api/assistant/sessions/new-thread")] = 404  # Chainlit names a thread on its first message
+    # Chainlit names a new thread on its first message, then lists Past Chats and opens it: Indico must have it
+    indico.status[("PATCH", "/api/assistant/sessions/new-thread")] = 404
     await layer.update_thread("new-thread", name="x" * 500)
-    assert len(indico.calls[-1][3]["title"]) == 200
+    assert indico.calls[-2][0] == "PATCH" and len(indico.calls[-2][3]["title"]) == 200
+    assert indico.calls[-1][:2] == ("PUT", "/api/assistant/sessions/new-thread")
+    assert indico.calls[-1][3] == {"first_message": "x" * 500}
 
 
 async def test_delete_goes_to_indico(layer, indico, as_lucas):

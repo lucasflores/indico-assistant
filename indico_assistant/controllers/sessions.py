@@ -303,3 +303,71 @@ class RHSessionDelete(RHChatBase):
                 "Failed to delete session",
                 status=500
             )
+
+
+class RHSessionRename(RHChatBase):
+    """PATCH /sessions/<id> {"title": "…"}: rename a conversation in the Past Chats sidebar (spec 020 US4)."""
+
+    TITLE_MAX = 200  # chat_sessions.title
+
+    def _check_access(self) -> None:
+        super()._check_access()
+        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
+        if not rate_result.allowed:
+            raise self._rate_limit_error(rate_result.retry_after)
+
+    def _process(self):
+        try:
+            uuid_id = UUID(request.view_args["session_id"])
+        except ValueError:
+            return self._error_response("VALIDATION_ERROR", "Invalid session_id format", status=422)
+        body = request.get_json(silent=True) or {}
+        title = body.get("title").strip() if isinstance(body.get("title"), str) else ""
+        if not title or len(title) > self.TITLE_MAX:
+            return self._validation_error(f"A title of 1 to {self.TITLE_MAX} characters is required", field="title")
+        session_manager = get_session_manager()
+        session = session_manager.get_session(uuid_id)
+        if session is None:
+            return self._error_response("SESSION_NOT_FOUND", "Session not found", status=404)
+        if not session_manager.validate_session_ownership(session, self.user.id):
+            return self._error_response("ACCESS_DENIED", "Session belongs to another user", status=403)
+        session_manager.rename(session, title)
+        session_manager.commit()
+        return jsonify(SessionListItem(
+            session_id=str(session.id), event_id=session.event_id, created_at=session.created_at.isoformat(),
+            last_message_at=(session.last_message_at or session.updated_at).isoformat(),
+            message_count=session.message_count, title=session.title, updated_at=session.updated_at.isoformat(),
+        ).model_dump(mode="json")), 200
+
+
+class RHSessionOpen(RHChatBase):
+    """PUT /sessions/<id> {"first_message": "…"}: the chat panel starts a conversation under its thread id before
+    its first question is stored, so Past Chats can list it at once (spec 020). Creates it for the caller if it is
+    missing (201), leaves the caller's own as it is (200); someone else's is refused (403)."""
+
+    def _check_access(self) -> None:
+        super()._check_access()
+        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
+        if not rate_result.allowed:
+            raise self._rate_limit_error(rate_result.retry_after)
+
+    def _process(self):
+        try:
+            uuid_id = UUID(request.view_args["session_id"])
+        except ValueError:
+            return self._error_response("VALIDATION_ERROR", "Invalid session_id format", status=422)
+        first_message = (request.get_json(silent=True) or {}).get("first_message")
+        session_manager = get_session_manager()
+        session = session_manager.get_session(uuid_id)
+        if session is not None:
+            if not session_manager.validate_session_ownership(session, self.user.id):
+                return self._error_response("ACCESS_DENIED", "Session belongs to another user", status=403)
+            return jsonify({"session_id": str(session.id), "title": session_manager.title_of(session)}), 200
+        title = session_manager.title_from(first_message if isinstance(first_message, str) else "") or None
+        session = session_manager.create_session(self.user.id, None, session_id=uuid_id)
+        if not session_manager.validate_session_ownership(session, self.user.id):
+            return self._error_response("ACCESS_DENIED", "Session belongs to another user", status=403)
+        if title and not session.title:
+            session.title = title
+        session_manager.commit()
+        return jsonify({"session_id": str(session.id), "title": title or ""}), 201

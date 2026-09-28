@@ -415,6 +415,12 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
         extra={"status_code": response.status_code}
     )
 
+    if response.status_code == 429:  # the per-user limits (10 a minute, 200 a day)
+        retry = response.headers.get("Retry-After")
+        wait = f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"
+        loading_msg.content = f"You are asking questions faster than the assistant allows. Please try again{wait}."
+        await loading_msg.send()
+        return
     if response.status_code == 401:
         logger.info("Indico auth error response: %s", response.text)
         loading_msg.content = "Authentication failed. Please sign in again."

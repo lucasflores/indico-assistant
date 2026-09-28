@@ -182,10 +182,12 @@ class IndicoDataLayer(BaseDataLayer):
         if name is None:
             return  # metadata (Chainlit's session state) and tags are not kept
         response = await self._call("PATCH", f"/sessions/{thread_id}", json={"title": name.strip()[:TITLE_CHARS]})
-        # 404: Chainlit names a new thread on its first message, before Indico has the session (its title then
-        # defaults to that message anyway)
-        if response is not None and response.status_code not in (200, 404):
-            logger.warning("Renaming %s failed: %s", thread_id, response.status_code)
+        if response is not None and response.status_code == 404:
+            # Chainlit names a new thread on its first message, then lists Past Chats and opens /thread/<id>,
+            # all before the chat API has the session: create it now (named as its first question would name it)
+            response = await self._call("PUT", f"/sessions/{thread_id}", json={"first_message": name})
+        if response is not None and response.status_code not in (200, 201):
+            logger.warning("Naming %s failed: %s", thread_id, response.status_code)
 
     async def delete_thread(self, thread_id: str):
         await self._call("DELETE", f"/sessions/{thread_id}")

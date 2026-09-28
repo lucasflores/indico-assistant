@@ -12,7 +12,7 @@ const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok, detail }); console.log(`${ok ? "ok  " : "FAIL"} ${name} ${detail}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const { browser, page } = await browserAs(1, { headless: !process.argv.includes("--headful") });
+const { browser, page } = await browserAs(Number(process.env.WALK_USER || 1), { headless: !process.argv.includes("--headful") });
 
 async function state() {
   return page.evaluate(() => document.documentElement.dataset.assistantPanel || "none");

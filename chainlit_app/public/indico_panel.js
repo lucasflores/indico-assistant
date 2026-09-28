@@ -71,6 +71,35 @@
     post({ type: "navigate", url: url.href });
   }, true);
 
+  // Deleting the conversation that is open leaves Chainlit showing it (US4 AS-3): once the delete has
+  // succeeded, start a new chat instead.
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    var result = nativeFetch(input, init);
+    try {
+      var url = typeof input === "string" ? input : input && input.url;
+      if (init && init.method === "DELETE" && /\/project\/thread$/.test(url || "") && init.body) {
+        var deleted = JSON.parse(init.body).threadId;
+        result.then(function (response) {
+          if (response.ok && location.pathname === "/thread/" + deleted) location.replace("/");
+        });
+      }
+    } catch (e) { /* not ours to judge */ }
+    return result;
+  };
+
+  // In the narrow panel the Past Chats toggle can be swallowed after a new conversation's first question
+  // (Chainlit's drawer state goes stale: seen live, the first click did nothing, the second worked). After a
+  // click, if the drawer did not open (or close), toggle once more with Chainlit's own shortcut (Ctrl+B).
+  function drawerOpen() { return !!document.querySelector("[role=dialog] a[href^='/thread/'], [role=dialog] #new-chat-button"); }
+  document.addEventListener("click", function (event) {
+    if (!(event.target && event.target.closest && event.target.closest("#sidebar-trigger-button"))) return;
+    var wasOpen = drawerOpen();
+    setTimeout(function () {
+      if (drawerOpen() === wasOpen) window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }));
+    }, 300);
+  }, true);
+
   // Esc closes the panel (FR-006d), unless a Chainlit dialog or menu is open and takes it
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Escape" || event.defaultPrevented) return;
