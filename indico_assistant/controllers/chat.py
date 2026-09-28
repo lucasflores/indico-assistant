@@ -93,6 +93,7 @@ class RHChat(RHChatBase):
         from indico_assistant.tasks.chat import answer_chat
 
         job_id = jobs.create(self.user.id, session_id)
+        get_chat_service().record_job(message_id, job_id)
         try:
             answer_chat.delay(job_id, self.user.id, session_id, chat_request.message, message_id)
         except Exception:

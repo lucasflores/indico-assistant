@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Indico Assistant</title>
+<style>html, body { margin: 0; background: transparent; }</style>
+<script>
+// Spec 020 R3: the Indico page hands this frame a fresh Indico token by postMessage (never in a URL), and
+// Chainlit's /auth/jwt turns it into its session cookie. Then the chat, on the conversation to resume.
+(function () {
+  "use strict";
+  var parent = new URLSearchParams(location.search).get("parent");
+  if (!parent || window.parent === window) return;  // only ever inside Indico's panel (frame-ancestors)
+  try { parent = new URL(parent).origin; } catch (e) { return; }
+  try { sessionStorage.setItem("indico-assistant-parent", parent); } catch (e) {}  // for indico_panel.js
+
+  function post(message) {
+    message.source = "indico-assistant";
+    window.parent.postMessage(message, parent);
+  }
+
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (event.origin !== parent || !data || data.source !== "indico-assistant" || data.type !== "login") return;
+    fetch("/auth/jwt", { method: "POST", headers: { Authorization: "Bearer " + data.token }, credentials: "include" })
+      .then(function (response) {
+        if (!response.ok) { post({ type: "login_failed", status: response.status }); return; }
+        if (data.theme === "light" || data.theme === "dark") {
+          try { localStorage.setItem("vite-ui-theme", data.theme); } catch (e) {}
+        }
+        location.replace(data.threadId ? "/thread/" + encodeURIComponent(data.threadId) : "/");
+      }, function () { post({ type: "login_failed", status: 0 }); });
+  });
+  post({ type: "hello" });
+})();
+</script>
+</head>
+<body></body>
+</html>

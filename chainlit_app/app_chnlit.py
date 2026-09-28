@@ -11,8 +11,11 @@ import os
 from datetime import datetime, timedelta, timezone
 import asyncio
 import chainlit as cl
+import chainlit.server
 import httpx
 import jwt
+
+from indico_data_layer import IndicoDataLayer, install_token_middleware
 
 CHAINLIT_AUTH_SECRET = os.environ.get("CHAINLIT_AUTH_SECRET", "")
 
@@ -53,6 +56,10 @@ def _get_auth_token() -> str | None:
         if token:
             cl.user_session.set("auth_token", token)
             return token
+        # the full app (spec 020): the session's Chainlit JWT, minted from the page's Indico token (R3)
+        session_token = getattr(getattr(getattr(cl, "context", None), "session", None), "token", None)
+        if session_token:
+            return session_token
         if CHAINLIT_AUTH_SECRET:
             payload = {
                 "identifier": getattr(user, "identifier", "unknown"),
@@ -138,6 +145,23 @@ async def _wait_for_answer(client: httpx.AsyncClient, job_id: str, auth_token: s
         if response.status_code != 202 or loop.time() > deadline:
             return response
         await asyncio.sleep(POLL_INTERVAL)
+
+
+@cl.data_layer
+def _data_layer():
+    """Conversations live in Indico: the sidebar and resuming read them from its API (spec 020 R4)."""
+    return IndicoDataLayer(_get_indico_api_url())
+
+
+install_token_middleware(chainlit.server.app, _get_indico_api_url())
+
+
+def _thread_id() -> str | None:
+    """This conversation's id, which is also its Indico session id (spec 020 R5)."""
+    try:
+        return cl.context.session.thread_id
+    except Exception:
+        return cl.user_session.get("indico_session_id")
 
 
 @cl.on_chat_start
@@ -248,7 +272,7 @@ async def _upload(client: httpx.AsyncClient, auth_token: str, element) -> str:
         response = await client.post(
             "/api/assistant/chat/uploads",
             files={"file": (element.name, data, getattr(element, "mime", None) or "application/octet-stream")},
-            data={"session_id": cl.user_session.get("indico_session_id") or ""},
+            data={"session_id": _thread_id() or ""},
             headers={"X-Assistant-Auth": auth_token},
         )
     if response.status_code != 201:
@@ -294,7 +318,7 @@ async def _ask(text: str, files=()):
             loading_msg.content = str(exc) if isinstance(exc, ValueError) else "The file could not be uploaded."
             await loading_msg.send()
             return
-    session_id = cl.user_session.get("indico_session_id")
+    session_id = _thread_id()
     if session_id:
         payload["session_id"] = session_id
     
@@ -372,6 +396,8 @@ async def _ask(text: str, files=()):
         await loading_msg.send()
         return
     data = response.json()
+    if data.get("message_id"):
+        loading_msg.id = str(data["message_id"])  # the step is the Indico message: feedback and resume agree (R11)
     new_session_id = data.get("session_id")
     if new_session_id:
         cl.user_session.set("indico_session_id", new_session_id)

@@ -51,6 +51,8 @@ class ChatSession(db.Model):
     # Feature 016: Identity resolution columns (T002)
     resolved_user_id = Column(Integer, nullable=True, index=True)
     identity_source = Column(String(20), nullable=True)
+    # Feature 020: set by rename; when null the conversation is named after its first question
+    title = Column(String(200), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -84,7 +86,8 @@ class ChatSession(db.Model):
     def create(
         cls,
         user_id: int,
-        event_id: Optional[int] = None
+        event_id: Optional[int] = None,
+        session_id: Optional[uuid.UUID] = None,
     ) -> "ChatSession":
         """Create a new chat session.
         
@@ -95,7 +98,7 @@ class ChatSession(db.Model):
         Returns:
             Newly created ChatSession instance
         """
-        session = cls(user_id=user_id, event_id=event_id)
+        session = cls(user_id=user_id, event_id=event_id, **({'id': session_id} if session_id else {}))
         db.session.add(session)
         db.session.flush()  # Get the generated UUID
         return session

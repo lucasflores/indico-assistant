@@ -60,6 +60,8 @@ class TestRHSessionList:
             mock_manager = MagicMock()
             mock_get.return_value = mock_manager
             mock_manager.list_user_sessions.return_value = mock_sessions
+            mock_manager.page_sessions.return_value = (mock_sessions, None)  # (spec 020: keyset pages)
+            mock_manager.title_of.return_value = 'a title'
             mock_manager.count_user_sessions.return_value = 3
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
@@ -85,6 +87,7 @@ class TestRHSessionList:
             mock_manager = MagicMock()
             mock_get.return_value = mock_manager
             mock_manager.list_user_sessions.return_value = []
+            mock_manager.page_sessions.return_value = ([], None)
             mock_manager.count_user_sessions.return_value = 50
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
@@ -178,6 +181,8 @@ class TestRHSessionDetail:
             mock_manager.get_session.return_value = mock_session
             mock_manager.validate_session_ownership.return_value = True
             mock_manager.get_session_messages.return_value = mock_messages
+            mock_manager.feedback_of.return_value = {}  # (spec 020)
+            mock_manager.title_of.return_value = 'a title'
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
