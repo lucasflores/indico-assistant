@@ -47,6 +47,17 @@ thread shows the thumbs already given (R11).
 
 Body `{"title": "…"}`, 1-200 characters after trimming. It responds `200` with the session item.
 
+## `PUT /sessions/<id>` (new)
+
+Body `{"first_message": "…"}`. The panel starts a conversation under its thread id before the first question
+is stored, so Past Chats can list it at once.
+
+- Creates it for the caller if it is missing, with the question's default title: `201`.
+- Leaves the caller's own as it is: `200`.
+- Someone else's: `403`.
+
+Creation is idempotent: this and `POST /chat` may race.
+
 ## `DELETE /sessions/<id>` (unchanged)
 
 It deletes the session and its messages. Its action plans stay (spec 019).

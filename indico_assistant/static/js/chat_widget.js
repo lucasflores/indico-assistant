@@ -129,6 +129,17 @@
     return data;
   }
 
+  async function conversationExists(threadId) {
+    if (!threadId) return false;
+    try {
+      const response = await fetch(`/api/assistant/sessions/${encodeURIComponent(threadId)}`,
+                                   { credentials: "same-origin", cache: "no-store" });
+      return response.ok;
+    } catch (e) {
+      return true;  // unknown: let Chainlit try
+    }
+  }
+
   function buildPanel() {
     panel = document.createElement("aside");
     panel.id = "assistant-panel";
@@ -161,7 +172,14 @@
     setMode("loading");
     buildPanel();  // the frame appears at once, at its width; the placeholder shows until `ready`
     try {
-      config = await fetchConfig();
+      // the remembered conversation may be gone (deleted in another tab, retention): then a new chat, not
+      // Chainlit's "Couldn't resume" error. Asked alongside the config, so it costs no time.
+      const [data, known] = await Promise.all([fetchConfig(), conversationExists(state.threadId)]);
+      config = data;
+      if (!known && state.threadId) {
+        state.threadId = null;
+        saveState();
+      }
     } catch (e) {
       showUnavailable();
       return;

@@ -10,7 +10,8 @@ import pytest
 import indico_assistant.controllers.chat as chat_module
 import indico_assistant.controllers.sessions as sessions_module
 from indico_assistant.controllers.chat import RHChat
-from indico_assistant.controllers.sessions import RHSessionDelete, RHSessionDetail, RHSessionList
+from indico_assistant.controllers.sessions import (RHSessionDelete, RHSessionDetail, RHSessionList, RHSessionOpen,
+                                                   RHSessionRename)
 from indico_assistant.models import ChatMessage, ChatSession
 from indico_assistant.models.feedback import FeedbackEntry
 from indico_assistant.services.chat.session_manager import get_session_manager
@@ -38,7 +39,7 @@ def call(rh_class, user, module, monkeypatch, *, args=None, json=None, view_args
     rh = rh_class.__new__(rh_class)
     rh._user = user
     response, status = rh._process()
-    return status, response.get_json()
+    return status, response.get_json() if hasattr(response, 'get_json') else None  # (204s have no body)
 
 
 def session_of(db, user, *messages, title=None, age_minutes=0):
@@ -187,3 +188,71 @@ def test_a_remembered_conversation_id_is_worthless_to_another_user(db, users, mo
     assert str(lucas_chat.id) not in [item['session_id'] for item in body['sessions']]
     assert ChatSession.query.get(lucas_chat.id) is not None
     assert ChatMessage.query.filter_by(session_id=lucas_chat.id).count() == 1
+
+
+
+# --- US4: rename and delete (T042) ------------------------------------------------------------------------
+
+@pytest.mark.parametrize(('title', 'status', 'stored'), [
+    ('  Weekly sync  ', 200, 'Weekly sync'), ('x' * 200, 200, 'x' * 200),
+    ('   ', 422, None), ('x' * 201, 422, None), (None, 422, None),
+])
+def test_a_conversation_can_be_renamed(db, users, monkeypatch, title, status, stored):
+    chat = session_of(db, users['lucas'], ('user', 'move the sync'), age_minutes=90)
+    before = chat.updated_at
+    got, body = call(RHSessionRename, users['lucas'], sessions_module, monkeypatch,
+                     json={'title': title}, view_args={'session_id': str(chat.id)})
+    db.session.expire_all()
+    chat = ChatSession.query.get(chat.id)
+    assert got == status and chat.title == stored
+    assert chat.updated_at == before  # a rename is not activity: its place in the sidebar stays
+    if status == 200:
+        assert body['title'] == stored and body['session_id'] == str(chat.id)
+
+
+def test_only_the_owner_renames(db, users, monkeypatch):
+    chat = session_of(db, users['lucas'], ('user', 'mine'))
+    got, _ = call(RHSessionRename, users['makoto'], sessions_module, monkeypatch,
+                  json={'title': 'hijacked'}, view_args={'session_id': str(chat.id)})
+    assert got == 403 and chat.title is None
+    got, _ = call(RHSessionRename, users['lucas'], sessions_module, monkeypatch,
+                  json={'title': 'x'}, view_args={'session_id': str(uuid4())})
+    assert got == 404
+
+
+def test_deleting_keeps_the_conversations_action_plans(db, users, monkeypatch):
+    from indico_assistant.models import ActionPlan
+    from indico_assistant.services.actions import executor
+    chat = session_of(db, users['lucas'], ('user', 'make a meeting'))
+    plan, _ = executor.create_plan(users['lucas'], chat.id, steps=[], summary='Make it')
+    got, _ = call(RHSessionDelete, users['lucas'], sessions_module, monkeypatch, view_args={'session_id': str(chat.id)})
+    db.session.expire_all()
+    assert got in (200, 204) and ChatSession.query.get(chat.id) is None
+    assert ActionPlan.query.get(plan.id).session_id is None  # the audit trail stays (spec 019)
+
+
+
+def test_the_panel_opens_a_conversation_before_its_first_question_is_stored(db, users, monkeypatch):
+    # Chainlit lists Past Chats and opens /thread/<id> on a first message, before the chat API stores it:
+    # the conversation exists (and is listed) from then on
+    thread_id = uuid4()
+    view = {'session_id': str(thread_id)}
+    status, body = call(RHSessionOpen, users['lucas'], sessions_module, monkeypatch, view_args=view,
+                        json={'first_message': 'Who are the speakers of the Q4 budget review and when do they talk?'})
+    assert status == 201 and body['title'] == 'Who are the speakers of the Q4 budget review and when do…'
+    _, listed = call(RHSessionList, users['lucas'], sessions_module, monkeypatch)
+    assert str(thread_id) in [item['session_id'] for item in listed['sessions']]
+    status, _ = call(RHSessionOpen, users['lucas'], sessions_module, monkeypatch, view_args=view, json={'first_message': 'x'})
+    assert status == 200 and ChatSession.query.get(thread_id).title.startswith('Who are')  # unchanged
+    assert call(RHSessionOpen, users['makoto'], sessions_module, monkeypatch, view_args=view, json={})[0] == 403
+
+
+
+def test_creating_under_an_id_twice_is_harmless(db, users):
+    # the first question and Chainlit's naming of the thread create it at the same moment (seen live: a 500)
+    thread_id = uuid4()
+    first = get_session_manager().create_session(users['lucas'].id, None, session_id=thread_id)
+    again = get_session_manager().create_session(users['lucas'].id, 351, session_id=thread_id)
+    assert first.id == again.id == thread_id and again.event_id is None  # the first one stands
+    theirs = get_session_manager().create_session(users['makoto'].id, None, session_id=thread_id)
+    assert theirs.user_id == users['lucas'].id  # never taken over (callers refuse it: 403)

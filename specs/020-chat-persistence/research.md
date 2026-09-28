@@ -374,6 +374,24 @@ exists).
 
 **Alternatives**: full-text search (not needed at this size).
 
+**Found while building (2026-09-28, US4): Chainlit's frontend in a narrow frame.**
+
+- **Its first-message steps come before our app has the session.** On a new conversation's first message,
+  Chainlit names the thread (`update_thread(name=…)`), refreshes Past Chats, and opens `/thread/<id>`, all
+  before the chat API stores anything. So the new conversation was missing from the list, and `/thread/<id>`
+  fell back to `/` as "not found".
+  - The data layer now creates the session when that name arrives: `PUT /sessions/<id>`, with the default
+    title.
+  - Creation under an id is an insert that ignores conflicts, because that `PUT` and `POST /chat` race.
+  - A session with a title is listed even before its first question is stored.
+- **The Past Chats toggle can be swallowed.** Its click handler reads stale state, so after a new
+  conversation's first question the first click did nothing. The frame script re-toggles once, with
+  Chainlit's own Ctrl+B, if the drawer didn't change.
+- **Deleting the conversation that's open** left it on screen. The frame script starts a new chat when that
+  delete succeeds.
+- **A remembered id that's gone** (deleted elsewhere, retention) made Chainlit show "Couldn't resume chat".
+  The page now checks it alongside the config fetch and drops it.
+
 ## R13. Testing
 
 - **Indico side (pytest, as today).**

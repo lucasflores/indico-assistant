@@ -37,7 +37,7 @@ class TestSessionManager:
             
             result = session_manager.create_session(user_id=123)
             
-            mock_cls.create.assert_called_once_with(user_id=123, event_id=None, session_id=None)
+            mock_cls.create.assert_called_once_with(user_id=123, event_id=None)
             assert result == mock_session
 
     def test_create_session_with_event_id(self, session_manager):
@@ -51,7 +51,7 @@ class TestSessionManager:
             
             result = session_manager.create_session(user_id=123, event_id=456)
             
-            mock_cls.create.assert_called_once_with(user_id=123, event_id=456, session_id=None)
+            mock_cls.create.assert_called_once_with(user_id=123, event_id=456)
             assert result.event_id == 456
 
     def test_get_session(self, session_manager):
