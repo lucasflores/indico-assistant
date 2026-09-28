@@ -33,6 +33,9 @@ Rules:
 - Never invent people, categories, dates or times. Leave a field null when the user did not say it; the
   assistant will ask or suggest.
 - Keep people's names exactly as the user wrote them. "me", "I" and "us" include the user.
+- The category is where the meeting goes ("in Engineering"); it is never the title. The title is only what
+  the user called the meeting; leave it null otherwise.
+- Someone "giving a talk" or "presenting" is the speaker of that slot, and only them.
 - Talks (slots, contributions) for people: one slot per person, with that person as its speaker. "Add both
   of us as contributors with 20 min slots" = a 20-minute slot with speaker "me" and one with the other person.
 - With an open plan, "revise" returns the whole updated request (every field of the request shown to you,
@@ -68,7 +71,8 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
         return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
-    turn = _apply(response.result, user, chat_session_id, open_plan, enabled, calls, settings, message)
+    draft = _only_what_the_user_confirmed(response.result, open_plan)
+    turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message)
     turn.llm_calls = calls
     return turn
 
@@ -114,6 +118,17 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
     return PlanTurn(reply, plan=PlanView.of(plan, token).model_dump(mode='json'))
 
 
+def _only_what_the_user_confirmed(draft, open_plan):
+    """A time in the past is kept only when the user picked "Keep that time" (answered_draft), never because
+    the model said so; a revision keeps an earlier such answer."""
+    kept = bool(open_plan and open_plan.draft and any(
+        (s.get('when') or {}).get('keep_past') for s in open_plan.draft.get('steps', [])))
+    for step in draft.steps:
+        if getattr(step, 'when', None) is not None:
+            step.when.keep_past = kept
+    return draft
+
+
 def answered_draft(open_plan, message):
     """The open plan's draft with ``message`` applied, if it is exactly one of the plan's choices."""
     if not open_plan.draft:
@@ -126,6 +141,11 @@ def answered_draft(open_plan, message):
                 step = draft.steps[0]
                 if question['id'] == 'category':
                     step.category = choice['label']
+                elif question['id'] == 'past':
+                    if choice['value'] == 'keep':
+                        step.when.keep_past = True
+                    else:
+                        step.when.date = choice['value']
                 elif question['id'].startswith('person:'):
                     key = question['id'].removeprefix('person:')
                     for ref in [*step.people, *(slot.speaker for slot in step.slots if slot.speaker)]:

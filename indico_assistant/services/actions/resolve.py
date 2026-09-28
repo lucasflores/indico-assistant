@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
 from dateutil import parser as date_parser
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import undefer
 
+from indico.core.config import config
 from indico.core.db import db
 from indico.modules.categories import Category
 from indico.modules.categories.models.categories import EventCreationMode
@@ -53,16 +54,72 @@ def draft_to_plan(draft, user, *, chat_session_id, open_plan=None, settings=None
 # --- people (research R8) ------------------------------------------------------------------------------
 
 
-def find_people(ref):
+@dataclass(frozen=True)
+class Guest:
+    """Someone who is not an Indico user, given by name and email: a guest speaker or invitee (FR-014)."""
+    first_name: str
+    last_name: str
+    email: str
+    id = None
+
+    @property
+    def full_name(self):
+        return f'{self.first_name} {self.last_name}'.strip()
+
+    @classmethod
+    def from_ref(cls, ref):
+        first, _, last = (ref.name or '').strip().rpartition(' ')
+        return cls(first_name=first, last_name=last, email=ref.email.strip().lower())
+
+
+def speaker_args(person):
+    return {'user_id': person.id} if person.id is not None else {
+        'first_name': person.first_name, 'last_name': person.last_name, 'email': person.email}
+
+
+def user_search_allowed(user, *, can_create_somewhere=False, event=None):
+    """Indico's own rule for who may search users (RHUserSearch / RHUserSearchToken)."""
+    return (config.ALLOW_PUBLIC_USER_SEARCH or can_create_somewhere
+            or (event is not None and event.can_manage(user)))
+
+
+def known_people(user):
+    """How often each Indico user took part in ``user``'s meetings of the last year (to rank matches)."""
+    from indico.modules.users.util import get_linked_events
+
+    counts = {}
+    for event in list(get_linked_events(user, dt=now_utc() - timedelta(days=365)))[:50]:
+        people = {link.person.user_id for link in event.person_links}
+        people |= {link.person.user_id for c in event.contributions for link in c.person_links}
+        people |= {entry.user_id for entry in event.acl_entries if entry.user_id}
+        for user_id in people - {None, user.id}:
+            counts[user_id] = counts.get(user_id, 0) + 1
+    return counts
+
+
+def _chat_mentions(user, candidates):
+    """How often each candidate's name comes up in ``user``'s own chats (never anyone else's, FR-016)."""
+    from indico_assistant.models import ChatMessage, ChatSession
+
+    mine = ChatMessage.query.join(ChatSession).filter(ChatSession.user_id == user.id)
+    return {c.id: mine.filter(func.lower(ChatMessage.content).contains(c.full_name.lower(), autoescape=True)).count()
+            for c in candidates}
+
+
+def find_people(ref, user=None, known=None):
     """Indico users matching what the user said, as Indico's own user search finds them (RHUserSearch):
-    no deleted, blocked or system users; exact matches first; at most 10."""
+    no deleted, blocked or system users, pending ones included; at most 10. People from the user's
+    recent meetings, then people from their own chats, come first; exact matches break ties."""
     if ref.email:
         users = search_users(exact=True, include_pending=True, email=ref.email.strip())
     else:
         users = search_users(include_pending=True, name=ref.name.strip())
     wanted = (ref.name or ref.email or '').strip().lower()
     users = [u for u in users if hasattr(u, 'full_name')]  # (external identities are never searched)
-    return sorted(users, key=lambda u: (wanted not in (u.full_name.lower(), u.email.lower()), u.full_name))[:MAX_CHOICES]
+    mentions = _chat_mentions(user, users) if user is not None and len(users) > 1 else {}
+    known = known or {}
+    return sorted(users, key=lambda u: (-known.get(u.id, 0), -mentions.get(u.id, 0),
+                                        wanted not in (u.full_name.lower(), u.email.lower()), u.full_name))[:MAX_CHOICES]
 
 
 def _person_label(user):
@@ -237,15 +294,21 @@ def _create_meeting(step, user, settings, topic):
 
     # who
     resolved = {}
+    known = None
 
     def person(ref):
+        nonlocal known
         key = (ref.name or ref.email or '').strip().lower()
         if key in ME:
             return user
         if key not in resolved:
-            matches = find_people(ref)
+            if known is None:
+                known = known_people(user)
+            matches = find_people(ref, user, known)
             resolved[key] = matches[0] if len(matches) == 1 else None
-            if len(matches) > 1:
+            if not matches and ref.email and ref.name:
+                resolved[key] = Guest.from_ref(ref)  # not an Indico user: a guest (FR-014)
+            elif len(matches) > 1:
                 questions.append({'id': f'person:{key}', 'kind': 'choice', 'text': f'Which {ref.name or ref.email}?',
                                   'choices': [{'value': u.email, 'label': _person_label(u), 'note': None}
                                               for u in matches]})
@@ -255,6 +318,7 @@ def _create_meeting(step, user, settings, topic):
                                           f'name and email to add them as a guest speaker, or another name.'})
         return resolved[key]
 
+    # (creating somewhere is what lets this user search people, RHUserSearchToken; checked above)
     invitees = [p for p in (person(ref) for ref in step.people) if p is not None and p != user]
     slots = [(slot, person(slot.speaker) if slot.speaker else None) for slot in step.slots]
     if slots and not any(speaker for _, speaker in slots) and len(slots) == 1 + len(invitees):
@@ -290,6 +354,11 @@ def _create_meeting(step, user, settings, topic):
     elif not step.when.duration_minutes and not slots:
         notes.append(f'It lasts {DEFAULT_DURATION} minutes; say so if it should be longer.')
     start = tz.localize(datetime.combine(day, at)) if day and at else None
+    if start and start < now_utc() and not step.when.keep_past:
+        questions.append({'id': 'past', 'kind': 'choice', 'text': f'{format_dt(start, tz)} has already passed.',
+                          'choices': [{'value': (day + timedelta(days=1)).isoformat(),
+                                       'label': f'Tomorrow at {at:%H:%M}', 'note': None},
+                                      {'value': 'keep', 'label': 'Keep that time', 'note': None}]})
 
     others = [*invitees, *(s for _, s in slots if s and s != user and s not in invitees)]
     title = step.title or _default_title(others, user)
@@ -302,21 +371,22 @@ def _create_meeting(step, user, settings, topic):
         steps.append(_step(len(steps) + 1, 'add_contribution', {
             'title': slot.title or (speaker.full_name if speaker else 'Talk'),
             'start_dt': start + timedelta(minutes=offset) if start else None, 'duration_minutes': length,
-            'speakers': [{'user_id': speaker.id}] if speaker else [],
+            'speakers': [speaker_args(speaker)] if speaker else [],
         }, refs={'event_id': '$1'}))
         offset += length
-    speaker_ids = {speaker.id for _, speaker in slots if speaker}
-    reminder_to = sorted(u.email for u in invitees if u.id not in speaker_ids)
-    if speaker_ids or reminder_to:
+    speakers = {speaker.email for _, speaker in slots if speaker}
+    reminder_to = sorted(p.email for p in invitees if p.email not in speakers)
+    if speakers or reminder_to:
         steps.append(_step(len(steps) + 1, 'add_reminder', {
-            'minutes_before': settings['actions_reminder_minutes'], 'recipients': reminder_to, 'send_to_speakers': bool(speaker_ids),
+            'minutes_before': settings['actions_reminder_minutes'], 'recipients': reminder_to,
+            'send_to_speakers': bool(speakers),
         }, refs={'event_id': '$1'}))
     if step.teams:
         if teams_plugin() is None:
             notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')
         else:
             everyone = [user, *others]
-            with_account = [u for u in everyone if tenant_email(u)]
+            with_account = [u for u in everyone if u.id is not None and tenant_email(u)]
             if without := [u.full_name for u in everyone if u not in with_account]:
                 notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '
                              f'the reminder and the event page have the link.')
@@ -324,6 +394,9 @@ def _create_meeting(step, user, settings, topic):
                 'name': title, 'coorganizer_ids': [u.id for u in with_account],
             }, refs={'event_id': '$1'}))
 
+    if start:
+        notes.extend(_clashes(user, [user, *(p for p in others if p.id is not None)], start,
+                              start + timedelta(minutes=minutes)))
     _describe(steps)
     when = f', {format_dt(start, tz)}' if start else ''
     where = f' in {category_path(category)}' if category else ''
@@ -333,6 +406,22 @@ def _create_meeting(step, user, settings, topic):
         notes.insert(0, 'It needs approval by the category\'s managers, and stays unlisted until then.')
     summary = ' '.join([f'{verb} the {kind} “{title}”{when}{where}.', *notes])
     return Resolved(steps=steps, summary=summary, questions=questions)
+
+
+def _clashes(user, people, start, end):
+    """Warnings (never refusals) for people already busy in Indico then (spec edge case "Clash")."""
+    from indico.modules.users.util import get_linked_events
+
+    warnings = []
+    for person in people:
+        for event in get_linked_events(person, dt=start):
+            if event.is_deleted or not (event.start_dt < end and start < event.end_dt):
+                continue
+            who = 'You have' if person == user else f'{person.full_name} has'
+            what = f'“{event.title}”' if event.can_access(user) else 'another event'  # never leak a title
+            warnings.append(f'Note: {who} {what} at that time.')
+            break
+    return warnings[:3]
 
 
 def _category_question(options, text):
