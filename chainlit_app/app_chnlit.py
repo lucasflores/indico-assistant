@@ -378,6 +378,9 @@ async def _ask(text: str, files=()):
     event_id = cl.user_session.get("indico_event_id")
     if event_id:
         payload["event_id"] = event_id
+    # the answer is stored under this run's id: Chainlit's thumbs vote on the run (spec 020 R11)
+    if run := cl.context.current_run:
+        payload["answer_id"] = run.id
 
     logger.info(
         "Sending request to Indico assistant API",
@@ -460,8 +463,6 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
         await loading_msg.send()
         return
     data = response.json()
-    if data.get("message_id"):
-        loading_msg.id = str(data["message_id"])  # the step is the Indico message: feedback and resume agree (R11)
     new_session_id = data.get("session_id")
     if new_session_id:
         cl.user_session.set("indico_session_id", new_session_id)

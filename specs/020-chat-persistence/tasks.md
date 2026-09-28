@@ -326,12 +326,12 @@ and waiting plans come back. Focus is not stolen.
 
 ## Phase 7: Feedback (FR-018)
 
-- [ ] T046 [P] Tests:
+- [x] T046 [P] Tests:
   - `tests/integration/chat/test_feedback_endpoint.py`: `DELETE /feedback/<id>`: `204` for the caller's own
     entry, `403` for someone else's, `404` when missing;
   - `chainlit_app/tests/test_data_layer.py`: `upsert_feedback` maps value `1`/`0` to
     `thumbs_up`/`thumbs_down` and returns Indico's id; `delete_feedback` calls `DELETE`.
-- [ ] T047 Add `RHFeedbackDelete` to `indico_assistant/controllers/feedback.py` and its route. Add
+- [x] T047 Add `RHFeedbackDelete` to `indico_assistant/controllers/feedback.py` and its route. Add
   `upsert_feedback` and `delete_feedback` to `IndicoDataLayer`. Make T046 pass.
 
 ---

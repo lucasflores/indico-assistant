@@ -97,6 +97,19 @@ class FeedbackService:
             value=value if value is not None else '',
         )
 
+    def withdraw_feedback(self, user_id: int, feedback_id: UUID) -> bool:
+        """Take back a thumbs vote, and its comment (spec 020: the panel's thumb clicked again). False when the
+        user has no such vote: someone else's is not theirs to take back."""
+        entry = FeedbackEntry.query.filter_by(id=feedback_id, user_id=user_id).first()
+        if entry is None:
+            return False
+        FeedbackEntry.query.filter(
+            FeedbackEntry.message_id == entry.message_id,
+            FeedbackEntry.user_id == user_id,
+            FeedbackEntry.feedback_type.in_(('thumbs_up', 'thumbs_down', 'comment')),
+        ).delete(synchronize_session=False)
+        return True
+
     def _validate_message_access(
         self,
         message: ChatMessage,

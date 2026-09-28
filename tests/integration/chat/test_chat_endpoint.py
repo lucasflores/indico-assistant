@@ -66,7 +66,7 @@ class TestPostChat:
         assert response.get_json() == {"job_id": "job1", "session_id": str(session_id),
                                        "created_session": True, "status": "pending"}
         service.submit_message.assert_called_once_with(user=USER, message="What events are tomorrow?",
-                                                       session_id=None, event_id=7, uploads=[])
+                                                       session_id=None, event_id=7, uploads=[], answer_id=None)
         jobs[1].assert_called_once_with(123, session_id)
         answer_task.delay.assert_called_once_with("job1", 123, session_id, "What events are tomorrow?", 'q1')
 

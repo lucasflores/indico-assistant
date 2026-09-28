@@ -21,8 +21,10 @@ Checks, each against the running stack:
 | `node sc003.mjs` | US2: "this event" / "this meeting" follow the page, 10 alternations (SC-003) |
 | `WALK_USER=6 node us4.mjs` | US4: a new conversation is listed, rename kept after a reload, delete the open one, stale id |
 | `WALK_USER=6 node hover.mjs` | Tooltips in the panel stay tooltip-sized (the Copilot-era widget.css blew them up to a blank 85vh box) |
+| `WALK_USER=6 node feedback.mjs` | Thumbs: a vote with a comment is kept after a reload, switched, taken back |
 | `node sidebar.mjs` | US3: Past Chats list, groups, paging, search, open, new chat (SC-006), two users (SC-005); seed first with `python seed_sc006.py`, then `python seed_sc006.py delete` |
 
 Run the Python helpers with the Indico env and `INDICO_CONFIG` set.
 
-Each script takes `WALK_USER=<id>` to run as another user (the chat limit is 200 questions a day per user).
+Each script takes `WALK_USER=<id>` to run as another user (the chat limit is 200 questions a day per user). The walk
+drafts a plan, so it needs a user who can create events (Makoto, user 6, cannot).

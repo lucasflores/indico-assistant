@@ -44,6 +44,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="Scope queries to a specific event (optional)"
     )
+    answer_id: UUID | None = Field(
+        default=None,
+        description="Spec 020: the id to store the answer under (the chat panel's run, which its thumbs vote on)",
+    )
 
 
 # Feature 016: Identity status schema (T005)

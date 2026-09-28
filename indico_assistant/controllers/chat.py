@@ -82,6 +82,7 @@ class RHChat(RHChatBase):
                 session_id=chat_request.session_id,
                 event_id=chat_request.event_id,
                 uploads=uploads,
+                answer_id=chat_request.answer_id,
             )
         except SessionNotFoundError:
             return self._error_response("SESSION_NOT_FOUND", "Session not found", status=404)

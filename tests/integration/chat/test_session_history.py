@@ -8,8 +8,10 @@ from uuid import uuid4
 import pytest
 
 import indico_assistant.controllers.chat as chat_module
+import indico_assistant.controllers.feedback as feedback_module
 import indico_assistant.controllers.sessions as sessions_module
 from indico_assistant.controllers.chat import RHChat
+from indico_assistant.controllers.feedback import RHFeedback, RHFeedbackDelete
 from indico_assistant.controllers.sessions import (
     RHSessionDelete,
     RHSessionDetail,
@@ -261,3 +263,40 @@ def test_creating_under_an_id_twice_is_harmless(db, users):
     assert first.id == again.id == thread_id and again.event_id is None  # the first one stands
     theirs = get_session_manager().create_session(users['makoto'].id, None, session_id=thread_id)
     assert theirs.user_id == users['lucas'].id  # never taken over (callers refuse it: 403)
+
+
+# --- Phase 7: the panel's thumbs are Indico feedback (T046) -------------------------------------------------
+
+def test_an_answer_is_stored_under_the_id_the_panel_asked_for(db, users, monkeypatch, queued):
+    # Chainlit's thumbs vote on the answer's run: the answer is stored under the run's id (T047)
+    run_id = uuid4()
+    _, body = call(RHChat, users['lucas'], chat_module, monkeypatch, json={'message': 'q', 'answer_id': str(run_id)})
+    question = ChatMessage.query.filter_by(session_id=body['session_id'], role='user').one()
+    manager = get_session_manager()
+    assert manager.answer_id_of(question.id) == run_id
+    answer = manager.add_assistant_message(ChatSession.query.get(body['session_id']), 'a',
+                                           message_id=manager.answer_id_of(question.id))
+    assert answer.id == run_id
+    assert manager.answer_id_of(question.id) is None  # an id already in use is not taken twice
+
+
+def test_a_thumb_can_be_switched_and_taken_back(db, users, monkeypatch):
+    chat = session_of(db, users['lucas'], ('user', 'q'), ('assistant', 'a'))
+    answer = ChatMessage.query.filter_by(session_id=chat.id, role='assistant').one()
+    vote = lambda kind, value=True: call(RHFeedback, users['lucas'], feedback_module, monkeypatch,  # noqa: E731
+                                         json={'message_id': str(answer.id), 'feedback_type': kind, 'value': value})
+    detail = lambda: call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch,  # noqa: E731
+                          view_args={'session_id': str(chat.id)})[1]['messages'][1].get('feedback')
+    vote('thumbs_down')
+    vote('comment', 'wrong meeting')
+    status, body = vote('thumbs_up')  # a switch replaces the vote, the comment stays
+    assert status == 201 and detail() == {'id': body['feedback_id'], 'value': 1, 'comment': 'wrong meeting'}
+
+    # someone else cannot take it back, and learns nothing about it
+    status, _ = call(RHFeedbackDelete, users['makoto'], feedback_module, monkeypatch,
+                     view_args={'feedback_id': body['feedback_id']})
+    assert status == 404 and detail() is not None
+    status, _ = call(RHFeedbackDelete, users['lucas'], feedback_module, monkeypatch,
+                     view_args={'feedback_id': body['feedback_id']})
+    assert status == 204 and detail() is None
+    assert FeedbackEntry.query.filter_by(message_id=answer.id).count() == 0  # its comment went with it

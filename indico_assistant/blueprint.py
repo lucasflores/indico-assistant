@@ -99,7 +99,7 @@ def _register_routes():
     """
     from indico_assistant.controllers.health import RHHealth
     from indico_assistant.controllers.chat import RHChat, RHChatJob
-    from indico_assistant.controllers.feedback import RHFeedback
+    from indico_assistant.controllers.feedback import RHFeedback, RHFeedbackDelete
     from indico_assistant.controllers.sessions import (
         RHSessionDelete,
         RHSessionDetail,
@@ -143,6 +143,7 @@ def _register_routes():
     
     # Feedback endpoint (Feature 004, User Story 3)
     blueprint.add_url_rule("/feedback", "feedback", RHFeedback, methods=["POST"])
+    blueprint.add_url_rule("/feedback/<feedback_id>", "feedback_delete", RHFeedbackDelete, methods=["DELETE"])  # (020)
     
     # Admin API endpoints (Feature 005, T043)
     from indico_assistant.controllers.admin import (

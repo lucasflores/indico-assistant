@@ -112,7 +112,8 @@ class ChatService:
         message: str,
         session_id: Optional[UUID] = None,
         event_id: Optional[int] = None,
-        uploads: Optional[list[dict[str, Any]]] = None
+        uploads: Optional[list[dict[str, Any]]] = None,
+        answer_id: Optional[UUID] = None
     ) -> tuple[UUID, bool, UUID]:
         """Web-request half: check access, save the user's message, commit.
 
@@ -132,6 +133,8 @@ class ChatService:
             metadata: dict[str, Any] = {"event_id": event_id}
             if uploads:
                 metadata["uploads"] = uploads
+            if answer_id:
+                metadata["answer_id"] = str(answer_id)
             user_message = self._session_manager.add_user_message(session, message, metadata)
             self._session_manager.commit()
             return session.id, created, user_message.id
@@ -189,7 +192,8 @@ class ChatService:
             response_text, metadata, plan = planned
 
         assistant_msg = self._session_manager.add_assistant_message(
-            self._session_manager.get_session(session_id), response_text, metadata
+            self._session_manager.get_session(session_id), response_text, metadata,
+            message_id=self._session_manager.answer_id_of(message_id) if message_id else None,
         )
         self._session_manager.commit()
         return ChatResult(
