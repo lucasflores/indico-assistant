@@ -56,3 +56,10 @@ def test_what_real_models_send_is_accepted():
          'slots': [{'speaker': 'Makoto', 'duration_minutes': 20}]}]})
     assert draft.steps[0].slots[0].speaker.name == 'Makoto' and draft.steps[0].people[0].name == 'Makoto'
     assert draft.reply == ''
+
+
+@pytest.mark.parametrize('email', ['null', 'None', '', 'n/a'])
+def test_an_email_that_is_not_one_is_ignored(email):
+    step = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'create_meeting', 'when': {}, 'people': [{'name': 'Makoto Tanaka', 'email': email}]}]}).steps[0]
+    assert step.people[0].email is None and step.people[0].name == 'Makoto Tanaka'

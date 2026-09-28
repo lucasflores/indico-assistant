@@ -162,6 +162,12 @@ def _only_what_the_user_asked_for(draft, user_messages):
     were in the context block, into a new meeting.) What context offers is shown as suggestions instead."""
     said = ' '.join(user_messages).lower()
     for step in draft.steps:
+        refs = [*getattr(step, 'people', ()), *(s.speaker for s in getattr(step, 'slots', ()) if s.speaker),
+                *(c.speaker for c in getattr(step, 'change_slots', ()) if c.speaker),
+                *(s.speaker for s in getattr(step, 'add_slots', ()) if s.speaker)]
+        for ref in refs:
+            if ref.email and ref.email.lower() not in said:
+                ref.email = None  # seen live: an invented address turned an Indico user into a "guest"
         if not isinstance(step, CreateMeeting):
             continue
         if not any(word in said for word in TALK_WORDS):
@@ -188,6 +194,8 @@ def _only_what_the_user_said(draft, message):
             continue
         if relative is not None:
             when.date = relative.group(0).lower()
+        elif week := re.search(r'\b(this|next) week\b', said):
+            when.date = week.group(0)  # a week, not a day the model picks
         elif isinstance(step, ChangeMeeting) and not names_a_day:
             when.date = None
     return draft
@@ -230,6 +238,9 @@ def answered_draft(open_plan, message):
                             change.which = choice['value']
                 elif question['id'] == 'category':
                     step.category = choice['label']
+                elif question['id'] == 'time' and 'T' in str(choice['value']):  # a suggested free time
+                    when = step.when if isinstance(step, CreateMeeting) else step.move_to
+                    when.date, when.time = choice['value'][:10], choice['value'][11:16]
                 elif question['id'] == 'past':
                     when = step.when if isinstance(step, CreateMeeting) else step.move_to
                     if choice['value'] == 'keep':
