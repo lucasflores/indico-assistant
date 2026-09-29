@@ -156,7 +156,8 @@ and waiting plans come back. Focus is not stolen.
 - [x] T018 [P] [US1] In `tests/integration/actions/test_plan_token.py`, for `POST /plans/<id>/token`:
   - owner only (`403`/`404` otherwise);
   - only for a `shown`, unexpired plan (`409` for confirmed, superseded or expired);
-  - after the reissue, the old token no longer confirms, and the new one confirms exactly once.
+  - after the reissue, the old token no longer confirms, and the new one confirms exactly once. (Amended after
+    review, PR #5: the token is now the same every time, and it confirms exactly once.)
 - [x] T019 [P] [US1] In `chainlit_app/tests/test_resume.py`, the resume logic (`chainlit_app/resume.py: restore`, which `on_chat_resume` draws) against a fake Indico:
   - it sets the Indico session to the thread id;
   - with an open plan, it calls the token reissue and sends a card with Confirm/Cancel actions carrying the

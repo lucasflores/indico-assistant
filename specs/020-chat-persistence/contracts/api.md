@@ -65,12 +65,10 @@ It deletes the session and its messages. Its action plans stay (spec 019).
 ## `POST /plans/<plan_id>/token` (new)
 
 Owner only. The plan must be `shown`, unexpired and not superseded, otherwise `409 PLAN_NOT_CONFIRMABLE`. It
-replaces the plan's confirm token and returns the plan as `PlanView`, with the new `token`, exactly as the chat
-job does. Earlier tokens stop working. The limit is the `read` rate bucket.
-
-## `DELETE /feedback/<feedback_id>` (new)
-
-It removes the caller's own feedback entry: `204`. Someone else's: `403`. A missing one: `404`.
+returns the plan as `PlanView`, with its `token`, exactly as the chat job does. The token is the same on every
+call: an HMAC of the plan id with Indico's `SECRET_KEY`. So buttons drawn earlier, in this tab or another, keep
+working until the plan is answered or expires. Nothing is written. The limit is the `read` rate bucket. (As
+amended after review, PR #5.)
 
 ## `POST /chat`: `answer_id` (new, optional)
 
