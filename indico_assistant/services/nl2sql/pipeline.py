@@ -54,6 +54,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# the event's start as a date in its own time zone (start_dt is UTC without a zone)
+LOCAL_EVENT_DATE = "((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone)::date"
+
+
 class NL2SQLPipeline:
     """
     Main orchestrator for the NL2SQL pipeline.
@@ -256,22 +260,18 @@ class NL2SQLPipeline:
                 sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
                 logger.debug("[DEBUG] Added GROUP BY clause")
         
-        # Fix single-day date ranges: BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD' excludes all times except midnight
-        # Replace with BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD 23:59:59' to include full day
-        if classification.time_range:
-            if classification.time_range.start == classification.time_range.end:
-                date_pattern = re.search(
-                    rf"e\.start_dt\s+BETWEEN\s+'({re.escape(classification.time_range.start)})'\s+AND\s+'({re.escape(classification.time_range.end)})'",
-                    sql,
-                    re.IGNORECASE
-                )
-                if date_pattern:
-                    old_condition = date_pattern.group(0)
-                    # Add time to end date to include full day
-                    new_condition = f"e.start_dt BETWEEN '{classification.time_range.start}' AND '{classification.time_range.end} 23:59:59'"
-                    sql = sql.replace(old_condition, new_condition)
-                    logger.debug(f"[DEBUG] Fixed single-day date range to include full day: {classification.time_range.start}")
-        
+        # A day is the event's local day, all of it (#4): the model sometimes writes the old UTC form,
+        # e.start_dt BETWEEN 'DAY' AND 'DAY' (midnight UTC only) or ... AND 'DAY 23:59:59' (a UTC day, which
+        # shifts events near local midnight). Rewritten to the template's local-date filter, for any range of
+        # plain dates, whether or not the classifier extracted them.
+        sql = re.sub(
+            r"e\.start_dt\s+BETWEEN\s+'(\d{4}-\d{2}-\d{2})(?:\s+00:00(?::00)?)?'"
+            r"\s+AND\s+'(\d{4}-\d{2}-\d{2})(?:\s+23:59(?::59)?)?'",
+            rf"{LOCAL_EVENT_DATE} BETWEEN '\1' AND '\2'",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
         return sql
 
     @contextmanager

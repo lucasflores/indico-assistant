@@ -863,3 +863,33 @@ def test_topic_keyword_is_escaped_inside_the_like_literal(pipeline):
         classification = SimpleNamespace(entities=[SimpleNamespace(type="topic", value=value)], time_range=None)
         fixed = pipeline._fix_topic_search_sql(sql, classification)
         assert f"e.title ILIKE '%{literal}%'" in fixed
+
+
+@pytest.mark.parametrize(("old", "start", "end"), [
+    ("e.start_dt BETWEEN '2026-10-02' AND '2026-10-02'", "2026-10-02", "2026-10-02"),  # midnight UTC only
+    ("e.start_dt BETWEEN '2026-10-02' AND '2026-10-02 23:59:59'", "2026-10-02", "2026-10-02"),  # a UTC day
+    ("e.start_dt BETWEEN '2026-10-02 00:00:00' AND '2026-10-04 23:59:59'", "2026-10-02", "2026-10-04"),
+    ("E.START_DT between '2026-10-02' and '2026-10-04'", "2026-10-02", "2026-10-04"),
+])
+def test_a_day_filter_is_the_events_local_day(pipeline, old, start, end):
+    """Issue #4 (Copilot review, PR #7): the model's UTC day filters become the local-date filter, whether or not
+    the classifier found the range. (US/Pacific 5 PM on Oct 1 is 00:00 UTC on Oct 2: a UTC day wrongly counts it.)"""
+    from types import SimpleNamespace
+
+    from indico_assistant.services.nl2sql.pipeline import LOCAL_EVENT_DATE
+
+    sql = f"SELECT e.id FROM events.events e WHERE e.is_deleted = false AND {old} AND e.title ILIKE '%x%'"
+    classification = SimpleNamespace(entities=[SimpleNamespace(type="topic", value="x")], time_range=None)
+    fixed = pipeline._fix_topic_search_sql(sql, classification)
+    assert f"{LOCAL_EVENT_DATE} BETWEEN '{start}' AND '{end}'" in fixed
+    assert "e.start_dt BETWEEN" not in fixed.replace("E.START_DT", "e.start_dt")
+
+
+def test_a_filter_with_real_times_is_left_alone(pipeline):
+    from types import SimpleNamespace
+
+    sql = ("SELECT e.id FROM events.events e WHERE e.start_dt BETWEEN '2026-10-02 09:00:00' AND "
+           "'2026-10-02 17:00:00' AND e.title ILIKE '%x%'")
+    classification = SimpleNamespace(entities=[SimpleNamespace(type="topic", value="x")], time_range=None)
+    assert "BETWEEN '2026-10-02 09:00:00' AND '2026-10-02 17:00:00'" in pipeline._fix_topic_search_sql(
+        sql, classification)
