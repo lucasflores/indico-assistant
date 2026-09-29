@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from indico_assistant.services.llm.errors import LLMError, ErrorType, _map_exception_to_error
 from indico_assistant.services.llm.models import LLMResponse, HealthStatus
 
-_CLIENT_SETTINGS = ("provider", "model", "base_url", "api_key")  # what the client is built from
+_CLIENT_SETTINGS = ("provider", "model", "base_url", "api_key", "ibis_mode")  # what the client is built from
 
 # Completion records of the generate() call running in this thread/task. Instructor calls hooks in the
 # calling thread, so concurrent calls on one shared client each see only their own completions.
@@ -174,6 +174,7 @@ class LLMService:
             "model": settings.get("llm_model"),
             "base_url": settings.get("llm_base_url"),
             "api_key": settings.get("llm_api_key"),
+            "ibis_mode": settings.get("llm_ibis_mode"),
             "timeout_seconds": settings.get("timeout_seconds", 30),
             "max_tokens": settings.get("max_tokens", 2048),
             "max_retries": settings.get("max_retries", 2),
@@ -196,6 +197,7 @@ class LLMService:
             model=settings["model"],
             base_url=settings["base_url"],
             api_key=settings["api_key"],
+            ibis_mode=settings["ibis_mode"],
         )
     
     def _ensure_client(self, settings: dict[str, Any] | None = None) -> tuple[Any | None, LLMError | None]:

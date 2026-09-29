@@ -24,6 +24,8 @@ DEFAULT_SETTINGS = {
     "llm_model": "llama3.2",
     "llm_base_url": "http://localhost:11434",
     "llm_api_key": None,
+    # How the ibis provider asks for structured output: tools, json_schema or md_json (prompt JSON).
+    "llm_ibis_mode": "tools",
     "timeout_seconds": 30,
     "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)
