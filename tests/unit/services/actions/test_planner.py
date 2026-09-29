@@ -118,6 +118,11 @@ def test_this_meeting_stays_this_meeting_unless_the_user_named_it():
     assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move Sync with Makoto to 4pm').steps[0].meeting == \
         'Sync with Makoto'
     assert _the_meeting_the_user_meant(draft('#354'), 'Move it to 4pm').steps[0].meeting == '#354'  # a chosen answer
+    # a meeting the user named stays theirs, even with an "it" in the message (review, PR #5)
+    assert _the_meeting_the_user_meant(draft('ATLAS Weekly Meeting'), 'Move the ATLAS weekly to Friday, it clashes'
+                                       ).steps[0].meeting == 'ATLAS Weekly Meeting'
+    assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move this meeting with Makoto to 4pm'
+                                       ).steps[0].meeting == 'this meeting'  # (the page's "Planning with Makoto")
     attach = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
         {'action': 'attach', 'target': 'my talk at Sync with Makoto', 'upload': 'this'}]})
     assert _the_meeting_the_user_meant(attach, 'attach this to my talk').steps[0].target == 'my talk at Sync with Makoto'
@@ -134,10 +139,22 @@ def test_a_revision_that_changes_nothing_is_a_question(dummy_user, chat):
 
 
 
+@pytest.mark.parametrize('decision', ['revise', 'new_request'])
+def test_a_plain_question_is_no_request_while_a_plan_waits(dummy_user, chat, shown, decision):
+    # (seen live: on another page the model answered "What is this event about?" by repeating the waiting request)
+    step = {'action': 'change_meeting', 'meeting': 'this meeting', 'move_to': {'time': '16:00'}}
+    result = turn(dummy_user, chat, llm_returning(decision=decision, steps=[step]), open_plan=shown,
+                  message='What is this event about?')
+    assert not result.handled and ActionPlan.query.get(shown.id).status == 'shown'
+
+
 @pytest.mark.parametrize(('message', 'question'), [
     ('What is this event about?', True), ('Who are the speakers?', True), ('When does it start?', True),
     ('Can you move it to 3pm?', False), ('What if we make it 30 minutes?', False), ('make it an hour', False),
     ('How about moving it earlier?', False), ('Why not renaming it?', False), ('Which setup do we use?', False),
+    # a change offered as a question (review, PR #5)
+    ('How about 4pm?', False), ('What about Friday at 10?', False), ('Why not Thursday?', False),
+    ('Tell me about the speakers', True), ('How long is it?', True),
 ])
 def test_a_plain_question_never_revises_the_waiting_plan(message, question):
     from indico_assistant.services.actions.planner import _only_a_question
@@ -145,8 +162,13 @@ def test_a_plain_question_never_revises_the_waiting_plan(message, question):
 
 
 
-@pytest.mark.parametrize(('message', 'cancelled'), [('What is this event about?', False), ('cancel that', True),
-                                                     ('never mind', True), ('Tell me about the speakers', False)])
+@pytest.mark.parametrize(('message', 'cancelled'), [
+    ('What is this event about?', False), ('cancel that', True), ('never mind', True),
+    ('Tell me about the speakers', False),
+    # the model's cancel is the user's unless the message is a plain question (review, PR #5)
+    ('Scratch that', True), ('Abort', True), ('I changed my mind', True), ("Let's not", True),
+    ('Actually, skip it', True),
+])
 def test_only_the_user_cancels_the_waiting_plan(dummy_user, chat, shown, message, cancelled):
     # (seen live: the model answered "What is this event about?" on another page with "cancel")
     result = turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message=message)

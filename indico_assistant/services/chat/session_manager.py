@@ -74,6 +74,23 @@ class SessionManager:
             return text
         return text[:self.TITLE_CHARS].rsplit(' ', 1)[0] + '…'
 
+    def listed(self, user_id: int, search: str | None = None):
+        """The user's conversations as Past Chats lists them, matching ``search``: one query for the pages and
+        their total, so they always agree (review, PR #5)."""
+        # a session the user said nothing in is not a conversation to go back to (one the panel opened for a
+        # first question is: it has its title before the question is stored)
+        query = ChatSession.query.filter(ChatSession.user_id == user_id,
+                                         or_(ChatSession.messages.any(ChatMessage.role == 'user'),
+                                             ChatSession.title.isnot(None)))
+        if search and (words := search.split()):
+            # the user's % and _ are letters, not wildcards
+            like = ['%' + w.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%' for w in words]
+            has_word = [or_(ChatSession.title.ilike(w, escape='\\'),
+                            ChatSession.messages.any(ChatMessage.content.ilike(w, escape='\\'))) for w in like]
+            # ponytail: unindexed ILIKE over one user's (retention-bounded) messages; a trigram index if it grows
+            query = query.filter(and_(*has_word))
+        return query
+
     def page_sessions(self, user_id: int, limit: int = 20, cursor: Optional[str] = None,
                       search: Optional[str] = None) -> tuple[list[ChatSession], Optional[str]]:
         """A page of the user's sessions, last active first, and the cursor of the next page (None at the end).
@@ -81,20 +98,10 @@ class SessionManager:
         Keyset pagination on (updated_at, id): a session used between two pages moves to the top instead of
         shifting the pages under the reader (spec 020 R12).
         """
-        # a session the user said nothing in is not a conversation to go back to (one the panel opened for a
-        # first question is: it has its title before the question is stored)
-        query = ChatSession.query.filter(ChatSession.user_id == user_id,
-                                         or_(ChatSession.messages.any(ChatMessage.role == 'user'),
-                                             ChatSession.title.isnot(None)))
+        query = self.listed(user_id, search)
         if cursor:
             updated_at, session_id = self._decode_cursor(cursor)
             query = query.filter(tuple_(ChatSession.updated_at, ChatSession.id) < tuple_(updated_at, session_id))
-        if search and (words := search.split()):
-            like = [f'%{word}%' for word in words]
-            has_word = [or_(ChatSession.title.ilike(w),
-                            ChatSession.messages.any(ChatMessage.content.ilike(w))) for w in like]
-            # ponytail: unindexed ILIKE over one user's (retention-bounded) messages; a trigram index if it grows
-            query = query.filter(and_(*has_word))
         rows = query.order_by(ChatSession.updated_at.desc(), ChatSession.id.desc()).limit(limit + 1).all()
         page = rows[:limit]
         next_cursor = self._encode_cursor(page[-1]) if len(rows) > limit else None

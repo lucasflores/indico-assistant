@@ -120,7 +120,7 @@
   async function conversationExists(threadId) {
     if (!threadId) return false;
     try {
-      const response = await fetch(`/api/assistant/sessions/${encodeURIComponent(threadId)}`,
+      const response = await fetch(`/api/assistant/sessions/${encodeURIComponent(threadId)}?messages=0`,
                                    { credentials: "same-origin", cache: "no-store" });
       // only a definite answer forgets it: a 429 or 5xx is a passing problem, not a gone conversation
       return !(response.status === 404 || response.status === 403 || response.status === 422);

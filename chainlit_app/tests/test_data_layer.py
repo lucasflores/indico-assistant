@@ -88,7 +88,8 @@ async def test_a_session_becomes_a_thread(layer, as_lucas):
     assert run["feedback"] == {"forId": "a2", "id": "f1", "value": 1, "comment": None}
     assert (answer["type"], answer["parentId"], answer["output"]) == ("assistant_message", "a2", "Here is the plan.")
     assert answer["id"] != "a2" and "feedback" not in answer
-    assert thread["metadata"] == {"started_on_event_id": 351, "pending_job_id": None} and thread["elements"] == []
+    assert thread["metadata"] == {"started_on_event_id": 351, "pending_job_id": None, "waiting_plan_id": None}
+    assert thread["elements"] == []
 
 
 async def test_the_list_is_a_page_with_a_cursor(layer, indico, as_lucas):
@@ -119,15 +120,19 @@ async def test_indico_already_stores_every_message(layer, indico, as_lucas):
     assert await layer.get_favorite_steps("20") == []
 
 
-async def test_naming_a_thread_indico_does_not_have_yet_creates_it(layer, indico, as_lucas):
-    await layer.update_thread(T1, name="Weekly sync")
-    assert indico.calls[-1][0] == "PATCH" and indico.calls[-1][3] == {"title": "Weekly sync"}
-    # Chainlit names a new thread on its first message, then lists Past Chats and opens it: Indico must have it
-    indico.status[("PATCH", "/api/assistant/sessions/new-thread")] = 404
-    await layer.update_thread("new-thread", name="x" * 500)
-    assert indico.calls[-2][0] == "PATCH" and len(indico.calls[-2][3]["title"]) == 200
+async def test_a_rename_is_a_rename_and_chainlits_own_naming_is_not(layer, indico, as_lucas):
+    await layer.update_thread(T1, name="x" * 500)  # the sidebar's rename
+    assert indico.calls[-1][0] == "PATCH" and len(indico.calls[-1][3]["title"]) == 200
+    # Chainlit names a new thread by its first message (with user_id), before the chat API has the session, then
+    # lists Past Chats and opens it: Indico must have it, and the title stays the question's start (review, PR #5)
+    await layer.update_thread(thread_id="new-thread", name="Who speaks?", user_id="20", tags=None)
     assert indico.calls[-1][:2] == ("PUT", "/api/assistant/sessions/new-thread")
-    assert indico.calls[-1][3] == {"first_message": "x" * 500}
+    assert indico.calls[-1][3] == {"first_message": "Who speaks?"}
+
+
+async def test_the_author_check_does_not_read_the_messages(layer, indico, as_lucas):
+    await layer.get_thread_author(T1)
+    assert indico.calls[-1][2] == {"messages": "0"}
 
 
 async def test_delete_goes_to_indico(layer, indico, as_lucas):

@@ -81,3 +81,16 @@ run (research.md, feedback). An id already in use is ignored.
 
 Takes back a thumbs vote, together with its comment: `204`. A vote that isn't the caller's gets `404`, which
 tells the caller nothing about it. `POST /feedback` counts against the read limit now, not the chat limit.
+
+## Changed after review (PR #5)
+
+- **`GET /sessions/<id>`:**
+  - `pending_job_id` is reported only while that job is still pending, not for a failed or expired one.
+  - New: `waiting_plan_id`, the plan waiting for confirmation, if any.
+  - New: `?messages=0` returns `{session_id}` only. The page's check and Chainlit's author check use it.
+- **`GET /sessions`:** cursor and offset pages, and `total`, count the same conversations and match `search`.
+  A malformed cursor gets `422`. `%` and `_` in `search` are literal.
+- **`POST /plans/<id>/token`:** returns the same token every time: an HMAC of the plan id with Indico's
+  `SECRET_KEY`. Another tab's buttons keep working, and a revision (a new plan) gets a new token.
+- **Chainlit naming a new thread by its first message** calls `PUT /sessions/<id>`, not `PATCH`, so the title
+  stays the question's start. The conversation's `event_id` is the page of its first question.

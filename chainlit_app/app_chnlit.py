@@ -14,7 +14,7 @@ import chainlit.server
 import httpx
 
 from indico_data_layer import IndicoDataLayer, install_token_middleware
-from resume import UNANSWERED, restore
+from resume import UNANSWERED, reissue
 
 # Every request needs the session cookie. Chainlit requires a login only with an auth callback or this
 # variable, and the panel signs in through /auth/jwt with neither: set here, so no deployment can forget it
@@ -137,45 +137,51 @@ async def on_chat_resume(thread):
     cl.user_session.set("announced_thread", thread["id"])  # (its URL, /thread/<id>, already says)
     indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
     if indico_api_url and auth_token:
-        pending_at_read = (thread.get("metadata") or {}).get("pending_job_id")
-        asyncio.create_task(_after_resume(thread["id"], indico_api_url, auth_token, pending_at_read))
+        metadata = thread.get("metadata") or {}
+        asyncio.create_task(_after_resume(indico_api_url, auth_token, metadata.get("pending_job_id"),
+                                          metadata.get("waiting_plan_id")))
 
 
 RESUME_SETTLE = 0.5  # ponytail: lets Chainlit send the thread's history first; an event hook would be exact
 
 
-async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str,
-                        pending_at_read: str | None = None) -> None:
+async def _after_resume(indico_api_url: str, auth_token: str, pending_job_id: str | None = None,
+                        waiting_plan_id: str | None = None) -> None:
+    """Draw what the history cannot: the waiting plan's card, and the answer of the question pending when the
+    history was read. That answer may have landed since (then the history lacks it, and its job has it whole),
+    or still be written."""
     await asyncio.sleep(RESUME_SETTLE)
+    if not (pending_job_id or waiting_plan_id):
+        return
     client = await _get_http_client(indico_api_url)
     try:
-        restored = await restore(client, auth_token, thread_id)
+        # the job looked at once first: a waiting plan is drawn before any long wait, and not twice when the
+        # landed answer carries it
+        answer = await client.get(f"/api/assistant/chat/jobs/{pending_job_id}",
+                                  headers={"X-Assistant-Auth": auth_token}) if pending_job_id else None
+        landed_plan = ((answer.json().get("plan") or {}).get("id")
+                       if answer is not None and answer.status_code == 200 else None)
+        plan = (await reissue(client, auth_token, waiting_plan_id)
+                if waiting_plan_id and waiting_plan_id != landed_plan else None)
     except httpx.RequestError:
-        logger.warning("Could not restore %s", thread_id, exc_info=True)
+        logger.warning("Could not restore the conversation", exc_info=True)
         return
-    # an answer that landed after Chainlit read the history but before this look is in neither: its job
-    # (done, kept an hour) still has it, whole. Its plan, if any, it draws itself.
-    landed = None
-    if pending_at_read and not restored.pending_job_id:
-        landed = await _wait_for_answer(client, pending_at_read, auth_token)
-    landed_plan = ((landed.json().get("plan") or {}).get("id")
-                   if landed is not None and landed.status_code == 200 else None)
-    if restored.plan and restored.plan["id"] != landed_plan:
-        card, actions = render_plan(restored.plan)
+    if plan:
+        card, actions = render_plan(plan)
         message = cl.Message(content=card, actions=actions)
         await message.send()
         cl.user_session.set("plan_message", message)
-        cl.user_session.set("plan_id", restored.plan["id"])
-    if landed is not None and landed.status_code != 404:
-        await _show_answer(landed, cl.Message(content=""), client, auth_token)
-    if restored.pending_job_id:
-        loading_msg = cl.Message(content="")
-        response = await _wait_for_answer(client, restored.pending_job_id, auth_token)
-        if response.status_code == 404:  # the job left the cache: no answer is coming (R9)
-            loading_msg.content = UNANSWERED
-            await loading_msg.send()
-            return
-        await _show_answer(response, loading_msg, client, auth_token)
+        cl.user_session.set("plan_id", plan["id"])
+    if answer is None:
+        return
+    loading_msg = cl.Message(content="")
+    if answer.status_code == 202:
+        answer = await _wait_for_answer(client, pending_job_id, auth_token)
+    if answer.status_code == 404:  # the job left the cache: no answer is coming (R9)
+        loading_msg.content = UNANSWERED
+        await loading_msg.send()
+        return
+    await _show_answer(answer, loading_msg, client, auth_token)
 
 
 @cl.set_starters
@@ -278,10 +284,6 @@ async def _ask(text: str, files=()):
             cl.user_session.set("indico_session_id", queued.get("session_id"))
             await _announce_thread()  # Indico has the conversation now: the next page may restore it
             response = await _wait_for_answer(client, queued["job_id"], auth_token)
-            if response.status_code == 202:
-                loading_msg.content = "The assistant is taking too long to answer. Please try again."
-                await loading_msg.send()
-                return
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
         loading_msg.content = "Unable to reach the assistant service. Please try again later."
@@ -299,6 +301,10 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
         extra={"status_code": response.status_code}
     )
 
+    if response.status_code == 202:  # still pending after ANSWER_TIMEOUT (every caller: review, PR #5)
+        loading_msg.content = "The assistant is taking too long to answer. Please try again."
+        await loading_msg.send()
+        return
     if response.status_code == 429:  # the per-user limits (10 a minute, 200 a day)
         retry = response.headers.get("Retry-After")
         wait = f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"

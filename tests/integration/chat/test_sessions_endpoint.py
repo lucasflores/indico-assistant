@@ -57,7 +57,7 @@ class TestSessionsEndpointIntegration:
                     mock_manager.title_of.return_value = 'a title'
                     mock_manager.summaries.side_effect = lambda rows: {
                         r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
-                    mock_manager.count_user_sessions.return_value = 3
+                    mock_manager.listed.return_value.count.return_value = 3  # (spec 020: pages and total agree)
                     
                     with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                         from indico_assistant.services.chat.rate_limiter import RateLimitResult

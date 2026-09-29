@@ -107,9 +107,11 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
                                           open_plan)
     draft = _the_meeting_the_user_meant(draft, message)
-    if open_plan is not None and draft.decision in ('revise', 'cancel') and (
-            _only_a_question(message) or _changes_nothing(draft, open_plan)
-            or (draft.decision == 'cancel' and not CANCEL_WORDS.search(message))):
+    # (seen live, PR #5: "What is this event about?" on another page also came back as a new request repeating
+    # the waiting one)
+    if open_plan is not None and (
+            (draft.decision in ('revise', 'cancel', 'new_request') and _only_a_question(message))
+            or _changes_nothing(draft, open_plan)):
         draft.decision = 'unrelated'  # answered as a question; the waiting plan stays as it is
     offered = [*draft.suggestions, *context_suggestions.automatic(context, draft, user)]
     turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message,
@@ -230,9 +232,20 @@ def _category_named(category, said, raw):
 GENERIC_MEETING = re.compile(r"\b(this|that|the) (meeting|event)\b|\bit\b", re.IGNORECASE)
 
 
+GENERIC_TITLE_WORDS = {'meeting', 'event', 'this', 'that', 'with'}
+
+
+def _names(value, said):
+    """Whether the message names the meeting ``value``: all of its telling words (4+ letters) appear in it
+    ("the ATLAS weekly" names "ATLAS Weekly Meeting"), or, for a name without any, the name itself."""
+    words = [w for w in re.findall(r'\w{4,}', value.lower()) if w not in GENERIC_TITLE_WORDS]
+    return all(w in said for w in words) if words else value.strip().lower() in said
+
+
 def _the_meeting_the_user_meant(draft, message):
-    """"This meeting" stays "this meeting" (spec 020 R8): the model tends to fill in the page's title (which
-    the prompt now names), and a title matches its namesakes on other pages. Kept only when the user named it."""
+    """"This meeting" stays "this meeting" (spec 020 R8): the model tends to fill in a title from earlier in the
+    conversation, and a title matches its namesakes on other pages. A meeting the user named stays theirs
+    ("Move the ATLAS weekly to Friday, it clashes": review, PR #5)."""
     if not GENERIC_MEETING.search(message):
         return draft
     said = message.lower()
@@ -243,23 +256,31 @@ def _the_meeting_the_user_meant(draft, message):
                 continue
             if attr == 'target' and any(word in value.lower() for word in TALK_TARGET_WORDS):
                 continue  # "my talk": a talk, resolved by its own rules
-            if value.strip().lower() not in said:
+            if not _names(value, said):
                 setattr(step, attr, 'this meeting')
     return draft
 
 
-# the model's "cancel" needs the user's words for it (seen live: "What is this event about?" cancelled a plan)
-CANCEL_WORDS = re.compile(r"\b(cancel|never ?mind|forget (it|that|about it)|scrap|drop (it|that|the plan)|stop|"
-                          r"don'?t|do not|no|nope|not anymore)\b", re.IGNORECASE)
 QUESTION = re.compile(r"\s*(what|who|whom|whose|when|where|which|why|how)\b", re.IGNORECASE)
+ASKING = re.compile(r"\s*(tell me|show me|give me|list|explain|describe)\b", re.IGNORECASE)  # a question, unasked
 CHANGE_WORDS = re.compile(r"\b(mov|chang|renam|call it|add|mak|set|put|shift|push|postpon|reschedul|extend|shorten|"
                           r"cancel|remov|delet|attach|invit|swap|replac|instead|earlier|later)", re.IGNORECASE)
 
 
+# a change offered as a question: "How about 4pm?", "What about Friday?", "Why not Thursday?" (review, PR #5)
+SUGGESTING = re.compile(r"\s*(how|what) about\b|\s*why not\b", re.IGNORECASE)
+NAMES_A_TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s*(am|pm|h)\b|\b\d{1,2}:\d{2}\b|\bnoon\b|\bmidnight\b|"
+                          r"\b\d+\s*(min|minutes?|hours?|h)\b", re.IGNORECASE)
+
+
 def _only_a_question(message):
-    """A plain question ("What is this event about?") never revises the waiting plan (seen live: on another
-    page it came back as a revision moving the plan to that page's meeting). "Can you move it to 3pm?" does."""
-    return bool(QUESTION.match(message)) and message.rstrip().endswith('?') and not CHANGE_WORDS.search(message)
+    """A plain question ("What is this event about?") never revises or cancels the waiting plan (seen live: on
+    another page it came back as a revision moving the plan to that page's meeting). "Can you move it to 3pm?"
+    does, and so does a change offered as a question ("How about 4pm?", "Why not Thursday?")."""
+    if not ((QUESTION.match(message) and message.rstrip().endswith('?')) or ASKING.match(message)):
+        return False
+    return not (CHANGE_WORDS.search(message) or SUGGESTING.match(message) or NAMES_A_TIME.search(message)
+                or _the_day(message) is not None or NAMED_DATE.search(message))
 
 
 def _changes_nothing(draft, open_plan):

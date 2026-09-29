@@ -5,9 +5,12 @@ click runs it once), and it runs all or nothing: every step inside one savepoint
 steps that call other systems (Teams) last, with their side effects undone if anything fails.
 """
 
+import base64
 import hashlib
+import hmac
 import logging
 import secrets
+import uuid
 from contextlib import contextmanager, suppress
 from datetime import datetime, UTC
 
@@ -49,13 +52,25 @@ def _hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _token_for(plan_id):
+    """A plan's confirm token: derived from its id with Indico's secret key, so every tab showing the plan holds
+    the same one, and drawing the card again (spec 020 R10) never breaks another tab's buttons (review, PR #5).
+    A revision is a new plan, with a new token; single use and expiry are the plan's status."""
+    from indico.core.config import config
+
+    key = config.SECRET_KEY if isinstance(config.SECRET_KEY, bytes) else config.SECRET_KEY.encode()
+    digest = hmac.new(key, f'assistant-plan:{plan_id}'.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip('=')
+
+
 def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(), supersedes=None,
                 undoes=None, message_id=None, llm_calls=(), draft=None):
     """Save a plan to show; returns (plan, confirm token). A chat has one plan waiting at most: the new one
     supersedes every other shown plan of the chat."""
     from indico_assistant.models import ChatSession
 
-    token = secrets.token_urlsafe(24)
+    plan_id = uuid.uuid4()
+    token = _token_for(plan_id)
     # the chat's row lock orders concurrent planners of one chat (two quick messages): the second sees the
     # first one's plan once that has committed, and supersedes it, so two plans are never both confirmable
     ChatSession.query.filter_by(id=session_id).with_for_update().first()
@@ -67,7 +82,7 @@ def create_plan(user, session_id, *, steps, summary, questions=(), suggestions=(
     if supersedes is not None and db.session.query(ActionPlan.status).filter(
             ActionPlan.id == supersedes.id).scalar() in ('confirmed', 'running', 'done', 'refused', 'failed'):
         raise AlreadyConfirmed(supersedes.id)
-    plan = ActionPlan(user_id=user.id, session_id=session_id, steps=list(steps), summary=summary,
+    plan = ActionPlan(id=plan_id, user_id=user.id, session_id=session_id, steps=list(steps), summary=summary,
                       questions=list(questions), suggestions=list(suggestions), token_hash=_hash(token),
                       supersedes_id=supersedes.id if supersedes else None, undoes_id=undoes.id if undoes else None,
                       message_id=message_id, llm_calls=to_jsonable_python(list(llm_calls)), draft=draft)
@@ -116,9 +131,10 @@ def _confirm(plan):
 
 
 def reissue_token(plan_id, user):
-    """A new confirm token for the user's plan still waiting for an answer, or None (spec 020 R10): a plan card
-    drawn again after navigating. The old token stops working; single use, expiry and supersession stay."""
-    token = secrets.token_urlsafe(24)
+    """The confirm token of the user's plan still waiting for an answer, or None (spec 020 R10): a plan card
+    drawn again after navigating. The same token every time (a plan saved before tokens were derived gets it
+    now); single use, expiry and supersession stay."""
+    token = _token_for(plan_id)
     replaced = (ActionPlan.query
                 .filter(ActionPlan.id == plan_id, ActionPlan.user_id == user.id, ActionPlan.status == 'shown',
                         ActionPlan.expires_at > _now())

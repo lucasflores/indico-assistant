@@ -14,6 +14,7 @@ from uuid import UUID
 from flask import jsonify, request
 
 from indico_assistant.controllers.base import RHChatBase
+from indico_assistant.models.session import ChatSession
 from indico_assistant.schemas.session import (
     MessageItem,
     SessionDetailResponse,
@@ -24,6 +25,7 @@ from indico_assistant.services.chat import (
     SessionAccessDeniedError,
     SessionNotFoundError,
     get_session_manager,
+    jobs,
 )
 from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 from indico_assistant.services.chat.session_manager import InvalidCursor
@@ -88,13 +90,15 @@ class RHSessionList(RHChatBase):
         search = (request.args.get("search") or "").strip() or None
         try:
             session_manager = get_session_manager()
-            if cursor or search or not offset:
+            if cursor or not offset:
                 # keyset pages, newest activity first (spec 020 R12); offset stays for old clients
                 sessions, next_cursor = session_manager.page_sessions(self.user.id, limit, cursor, search)
-            else:
-                sessions = session_manager.list_user_sessions(user_id=self.user.id, limit=limit, offset=offset)
+            else:  # (the same conversations, in the same order: review, PR #5)
+                sessions = (session_manager.listed(self.user.id, search)
+                            .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+                            .offset(offset).limit(limit).all())
                 next_cursor = None
-            total = session_manager.count_user_sessions(self.user.id)
+            total = session_manager.listed(self.user.id, search).count()
 
             summaries = session_manager.summaries(sessions)
             items = []
@@ -189,6 +193,9 @@ class RHSessionDetail(RHChatBase):
                     status=403
                 )
             
+            if request.args.get("messages") == "0":  # the panel only asks whether it is still there
+                return jsonify({"session_id": str(session.id)}), 200
+
             # Get messages
             messages = session_manager.get_session_messages(uuid_id)
             feedback = session_manager.feedback_of([m.id for m in messages], self.user.id)
@@ -204,9 +211,14 @@ class RHSessionDetail(RHChatBase):
                     metadata=msg.metadata_json,  # (msg.metadata is SQLAlchemy's table MetaData)
                     feedback=feedback.get(msg.id),
                 ))
-            # an answer still being written when the user left: its job is on the question (spec 020 R9)
+            # an answer still being written when the user left: its job is on the question (spec 020 R9). Only
+            # while it runs: a failed or expired job has no answer coming (review, PR #5: its error came back on
+            # every page)
             last = messages[-1] if messages else None
-            pending = (last.metadata_json or {}).get("job_id") if last is not None and last.role == "user" else None
+            job_id = (last.metadata_json or {}).get("job_id") if last is not None and last.role == "user" else None
+            pending = job_id if job_id and (jobs.get(job_id) or {}).get("status") == "pending" else None
+            from indico_assistant.services.actions.executor import open_plan
+            waiting = open_plan(session.id)
 
             response = SessionDetailResponse(
                 session_id=str(session.id),
@@ -215,6 +227,7 @@ class RHSessionDetail(RHChatBase):
                 updated_at=session.updated_at.isoformat(),
                 title=session_manager.title_of(session),
                 pending_job_id=pending,
+                waiting_plan_id=str(waiting.id) if waiting else None,
                 messages=message_items
             )
             

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 CURRENT_TOKEN: ContextVar[str | None] = ContextVar("indico_assistant_token", default=None)
 TITLE_CHARS = 200  # chat_sessions.title
+_RENAME = object()  # update_thread without user_id: the sidebar's rename
 API = "/api/assistant"
 
 
@@ -109,8 +110,9 @@ class IndicoDataLayer(BaseDataLayer):
         return self._thread(response.json(), _identifier(_token()), with_steps=True)
 
     async def get_thread_author(self, thread_id: str) -> str:
-        # Indico answers 200 only to the owner, so the author is whoever asked; "" makes Chainlit refuse
-        response = await self._call("GET", f"/sessions/{thread_id}")
+        # Indico answers 200 only to the owner, so the author is whoever asked; "" makes Chainlit refuse. (Without
+        # its messages: get_thread reads them next. Review, PR #5: a page load read the conversation 4 times.)
+        response = await self._call("GET", f"/sessions/{thread_id}", params={"messages": "0"})
         return _identifier(_token()) if response is not None and response.status_code == 200 else ""
 
     async def list_threads(self, pagination: Pagination, filters: ThreadFilter) -> PaginatedResponse[ThreadDict]:
@@ -145,7 +147,8 @@ class IndicoDataLayer(BaseDataLayer):
             # the job of a question still unanswered when this was read: resume shows its answer even if it lands
             # before the resume's own look (Copilot review, PR #5)
             "metadata": {"started_on_event_id": session.get("event_id"),
-                         "pending_job_id": session.get("pending_job_id")},
+                         "pending_job_id": session.get("pending_job_id"),
+                         "waiting_plan_id": session.get("waiting_plan_id")},
             "steps": IndicoDataLayer._steps(session.get("messages", []), thread_id) if with_steps else [],
             "elements": [],
         }
@@ -197,18 +200,21 @@ class IndicoDataLayer(BaseDataLayer):
 
     # --- writes Chainlit makes -------------------------------------------------------------------------
 
-    async def update_thread(self, thread_id: str, name: str | None = None, user_id: str | None = None,
+    async def update_thread(self, thread_id: str, name: str | None = None, user_id: object = _RENAME,
                             metadata: dict | None = None, tags: list[str] | None = None):
         if name is None:
             return  # metadata (Chainlit's session state) and tags are not kept
-        response = await self._call("PATCH", f"/sessions/{thread_id}", json={"title": name.strip()[:TITLE_CHARS]})
-        if response is not None and response.status_code == 404:
-            # Chainlit names a new thread on its first message, then lists Past Chats and opens /thread/<id>,
-            # all before the chat API has the session: create it now (named as its first question would name it)
+        if user_id is not _RENAME:
+            # Chainlit's own naming of a new thread by its first message (emitter.flush_thread_queues passes
+            # user_id; the sidebar's rename does not). Not a rename: the title stays the question's start. It
+            # comes before the chat API has the session, and Chainlit then lists Past Chats and opens
+            # /thread/<id>: make sure Indico has it.
             response = await self._call("PUT", f"/sessions/{thread_id}", json={"first_message": name})
+        else:
+            response = await self._call("PATCH", f"/sessions/{thread_id}", json={"title": name.strip()[:TITLE_CHARS]})
         if response is None or response.status_code not in (200, 201):
             # raised: the sidebar then says the rename failed instead of showing one a reload undoes (Chainlit's
-            # own naming on a first message catches it)
+            # own naming catches it)
             raise RuntimeError(f"Naming {thread_id} not saved: {getattr(response, 'status_code', None)}")
 
     async def delete_thread(self, thread_id: str):
