@@ -20,7 +20,7 @@ const seeded = () => chat().evaluate(() => [...document.querySelectorAll("a[href
 
 try {
   await page.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
-  await page.click("#assistant-launcher");
+  await page.click("#assistant-toggle");
   await until(() => page.evaluate(() => document.documentElement.dataset.assistantPanel === "ready"), 20000);
 
   // the list

@@ -88,7 +88,7 @@ async function followALink(visited) {
 try {
   // open the panel and ask something
   await page.goto(START, { waitUntil: "load" });
-  await page.click("#assistant-launcher");
+  await page.click("#assistant-toggle");
   check("panel opens", await waitState("ready"));
   await ask(QUESTION);
   check("first answer", await waitAnswer(QUESTION));
@@ -173,13 +173,17 @@ try {
   await input.click();
   await page.keyboard.press("Escape");
   check("FR-006d Esc closes", await waitState("closed", 3000));
+  check("focus goes back to the tab", await page.evaluate(() => document.activeElement?.id === "assistant-toggle"));
   await page.goto(START, { waitUntil: "load" });
   await sleep(1000);
   check("US1 AS-2 a closed panel stays closed", (await state()) === "closed" &&
         (await page.evaluate(() => getComputedStyle(document.documentElement).marginRight)) === "0px");
-  await page.click("#assistant-launcher");
+  await page.click("#assistant-toggle");
   await waitState("ready");
   check("reopened on the same conversation", await waitFrameText((x) => x.includes(QUESTION), 10000));
+  await page.click("#assistant-toggle");  // (the tab, now on the panel's edge, hides it too)
+  check("the tab hides it", await waitState("closed", 3000) &&
+        (await page.evaluate(() => document.getElementById("assistant-toggle").getAttribute("aria-expanded"))) === "false");
 } finally {
   await page.screenshot({ path: new URL("./walk-last.png", import.meta.url).pathname });
   await browser.close();

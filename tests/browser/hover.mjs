@@ -39,7 +39,7 @@ async function hover(selector, again = true) {
 
 try {
   await page.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
-  if (await page.$("#assistant-launcher:not([hidden])")) await page.click("#assistant-launcher");
+  if (await page.$("#assistant-toggle[aria-expanded=false]")) await page.click("#assistant-toggle");
   await until(() => page.evaluate(() => document.documentElement.dataset.assistantPanel === "ready"), 20000);
   const small = (box) => !!box && box.h < 80 && box.w < 400;
   const trigger = await hover("#sidebar-trigger-button");

@@ -32,8 +32,12 @@ _ONE_YEAR = 365 * 24 * 3600
 
 @functools.cache
 def _widget_version():
-    with open(os.path.join(_STATIC_JS, _WIDGET_JS), "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()[:12]
+    # the stylesheet is fetched with the script's ?v=, so both go in (a CSS-only change stayed cached for a year)
+    digest = hashlib.sha256()
+    for path in (os.path.join(_STATIC_JS, _WIDGET_JS), os.path.join(_STATIC_CSS, "chat_widget.css")):
+        with open(path, "rb") as f:
+            digest.update(f.read())
+    return digest.hexdigest()[:12]
 
 
 def widget_script_url():
