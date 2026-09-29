@@ -1,5 +1,6 @@
-"""POST /plans/<id>/token (spec 020 R10): a plan card shown again after navigating gets a fresh confirm token;
-the old buttons stop working, and every spec 019 guarantee stays (single use, expiry, supersession)."""
+"""POST /plans/<id>/token (spec 020 R10): a plan card shown again after navigating gets its confirm token. The
+same one every time, so a second tab's buttons keep working (review, PR #5); every spec 019 guarantee stays
+(single use, expiry, supersession)."""
 
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -41,14 +42,23 @@ def reissue(monkeypatch, dummy_user):
     return _call
 
 
-def test_the_new_token_confirms_once_and_the_old_one_never(reissue, shown, dummy_user):
-    plan, old_token = shown
-    status, body = reissue(plan.id)
-    assert status == 200 and body['id'] == str(plan.id) and body['token'] and body['token'] != old_token
+def test_the_token_is_the_same_in_every_tab_and_confirms_once(reissue, shown, dummy_user):
+    plan, first_tab = shown
+    status, body = reissue(plan.id)  # another page, or another tab
+    assert status == 200 and body['id'] == str(plan.id) and body['token'] == first_tab
+    assert reissue(plan.id)[1]['token'] == first_tab
     assert body['steps'] == [{'n': 1, 'description': 'Create “Sync”', 'side_effects': []}]
-    assert executor.confirm(plan.id, dummy_user, old_token) == 'invalid_token'
-    assert executor.confirm(plan.id, dummy_user, body['token']) == 'confirmed'
+    assert executor.confirm(plan.id, dummy_user, 'guessed') == 'invalid_token'
+    assert executor.confirm(plan.id, dummy_user, first_tab) == 'confirmed'
     assert executor.confirm(plan.id, dummy_user, body['token']) == 'not_confirmable'
+
+
+def test_a_plan_saved_with_a_random_token_gets_the_derived_one(reissue, shown, dummy_user):
+    # (plans waiting when this is deployed: the first card drawn again converts them)
+    plan, _ = shown
+    plan.token_hash = executor._hash('random-from-before')
+    token = reissue(plan.id)[1]['token']
+    assert executor.confirm(plan.id, dummy_user, token) == 'confirmed'
 
 
 def test_only_the_owner(reissue, shown, create_user):

@@ -165,17 +165,75 @@ def test_a_body_that_is_not_an_object_is_no_server_error(db, users, monkeypatch,
     assert status in (200, 422)
 
 
-def test_an_unanswered_question_reports_its_job(db, users, monkeypatch):
+@pytest.mark.parametrize(('job', 'reported'), [({'status': 'pending'}, True), ({'status': 'failed'}, False),
+                                                ({'status': 'done'}, False), (None, False)])
+def test_an_unanswered_question_reports_its_job_only_while_it_runs(db, users, monkeypatch, job, reported):
+    # (review, PR #5: a failed or expired job's error came back on every page)
     chat = session_of(db, users['lucas'], ('user', 'first'), ('assistant', 'answer'))
     view = {'session_id': str(chat.id)}
+    monkeypatch.setattr(sessions_module.jobs, 'get', lambda job_id: job)
     status, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args=view)
     assert status == 200 and body.get('pending_job_id') is None
     db.session.add(ChatMessage(session_id=chat.id, role='user', content='second',
                                metadata_json={'job_id': 'job-2', 'event_id': 351}))
     db.session.flush()
     _, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args=view)
-    assert body['pending_job_id'] == 'job-2' and body['title'] == 'first'
+    assert (body.get('pending_job_id') == 'job-2') is reported and body['title'] == 'first'
     assert body['messages'][-1]['metadata']['event_id'] == 351
+
+
+def test_the_detail_names_the_waiting_plan_and_can_skip_the_messages(db, users, monkeypatch):
+    from indico_assistant.services.actions import executor
+    chat = session_of(db, users['lucas'], ('user', 'move it'))
+    view = {'session_id': str(chat.id)}
+    _, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args=view)
+    assert body.get('waiting_plan_id') is None
+    plan, _ = executor.create_plan(users['lucas'], chat.id, summary='Move it', steps=[])
+    _, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args=view)
+    assert body['waiting_plan_id'] == str(plan.id)
+    status, light = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args=view,
+                         args={'messages': '0'})
+    assert status == 200 and light == {'session_id': str(chat.id)}
+    status, _ = call(RHSessionDetail, users['makoto'], sessions_module, monkeypatch, view_args=view,
+                     args={'messages': '0'})
+    assert status == 403  # (still the owner's only)
+
+
+def test_search_takes_percent_and_underscore_literally(db, users, monkeypatch):
+    session_of(db, users['lucas'], ('user', 'Budget up 100% this year'))
+    session_of(db, users['lucas'], ('user', 'Budget up 1000 this year'))
+    session_of(db, users['lucas'], ('user', 'file_name please'))
+    session_of(db, users['lucas'], ('user', 'filename please'))
+    found = lambda text: titles(call(RHSessionList, users['lucas'], sessions_module, monkeypatch,  # noqa: E731
+                                     args={'search': text})[1])
+    assert found('100%') == ['Budget up 100% this year']
+    assert found('file_name') == ['file_name please']
+    assert found('%') == ['Budget up 100% this year']
+
+
+def test_pages_and_total_count_the_same_conversations(db, users, monkeypatch):
+    for n in range(4):
+        session_of(db, users['lucas'], ('user', f'budget {n}'), age_minutes=n)
+    session_of(db, users['lucas'], ('user', 'agenda'), age_minutes=10)
+    session_of(db, users['lucas'])  # nothing said in it: not listed, not counted
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'search': 'budget'})
+    assert body['total'] == 4
+    _, first = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'limit': '3'})
+    _, second = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'limit': '3', 'offset': '3'})
+    assert first['total'] == second['total'] == 5
+    assert titles(first) + titles(second) == ['budget 0', 'budget 1', 'budget 2', 'budget 3', 'agenda']
+
+
+def test_a_conversation_opened_before_its_first_question_starts_on_that_questions_page(db, users, monkeypatch, queued):
+    # (review, PR #5: the panel opens it with PUT, and POST /chat then found it without an event)
+    thread = uuid4()
+    call(RHSessionOpen, users['lucas'], sessions_module, monkeypatch, json={'first_message': 'hi'},
+         view_args={'session_id': str(thread)})
+    monkeypatch.setattr('indico_assistant.services.chat.service.ChatService._validate_event_access',
+                        lambda self, user, event_id: None)
+    call(RHChat, users['lucas'], chat_module, monkeypatch, json={'message': 'hi', 'session_id': str(thread),
+                                                                'event_id': 351})
+    assert ChatSession.query.get(thread).event_id == 351
 
 
 def test_each_answer_carries_only_the_callers_feedback(db, users, monkeypatch):

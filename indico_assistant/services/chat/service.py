@@ -252,7 +252,10 @@ class ChatService:
             if not self._session_manager.validate_session_ownership(session, user_id):
                 raise SessionAccessDeniedError("Session belongs to another user")
             # (a conversation spans pages: each message carries its own event, spec 020 R8)
-
+            if session.event_id is None and event_id is not None and not session.messages.count():
+                # opened by the panel before its first question (PUT /sessions/<id>): it started on this page
+                # (review, PR #5: panel conversations had no event). Access is checked by the caller.
+                session.event_id = event_id
             return session, False
         
         # Create new session

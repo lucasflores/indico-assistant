@@ -64,7 +64,7 @@ class TestRHSessionList:
             mock_manager.title_of.return_value = 'a title'
             mock_manager.summaries.side_effect = lambda rows: {
                 r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
-            mock_manager.count_user_sessions.return_value = 3
+            mock_manager.listed.return_value.count.return_value = 3  # (spec 020: pages and total agree)
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
@@ -90,7 +90,7 @@ class TestRHSessionList:
             mock_get.return_value = mock_manager
             mock_manager.list_user_sessions.return_value = []
             mock_manager.page_sessions.return_value = ([], None)
-            mock_manager.count_user_sessions.return_value = 50
+            mock_manager.listed.return_value.count.return_value = 50  # (spec 020: pages and total agree)
             
             with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
@@ -100,11 +100,10 @@ class TestRHSessionList:
                 
                 controller._process()
                 
-                mock_manager.list_user_sessions.assert_called_once_with(
-                    user_id=123,
-                    limit=5,
-                    offset=10
-                )
+                mock_manager.listed.assert_called_with(123, None)  # the same conversations as the first page
+                ordered = mock_manager.listed.return_value.order_by.return_value
+                ordered.offset.assert_called_once_with(10)
+                ordered.offset.return_value.limit.assert_called_once_with(5)
 
     def test_list_sessions_validates_limit_bounds(self, controller, mock_request):
         """Test limit must be within bounds."""

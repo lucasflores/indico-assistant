@@ -97,7 +97,10 @@ class SessionDetailResponse(BaseModel):
     title: str = Field(default='', description="Renamed title, or the start of the first question (spec 020)")
     updated_at: datetime | None = Field(default=None, description="Last activity")
     pending_job_id: str | None = Field(
-        default=None, description="The job of the last message, when it is an unanswered question (spec 020)"
+        default=None, description="The job of the last message while it is still being answered (spec 020)"
+    )
+    waiting_plan_id: str | None = Field(
+        default=None, description="The plan waiting for confirmation in this conversation, if any (spec 020)"
     )
     messages: list[MessageItem] = Field(
         default_factory=list,

@@ -327,7 +327,7 @@ The caller's conversations, most recently active first, one page at a time. The 
 
 #### GET /api/assistant/sessions/{session_id}
 
-A conversation's messages, with each answer's feedback from the caller. It also returns `pending_job_id` when a question is still being answered.
+A conversation's messages, with each answer's feedback from the caller. It also returns `pending_job_id` while a question is still being answered, and `waiting_plan_id` when a plan waits for confirmation. With `?messages=0`, it only confirms the conversation exists and is the caller's.
 
 #### PATCH /api/assistant/sessions/{session_id}
 
