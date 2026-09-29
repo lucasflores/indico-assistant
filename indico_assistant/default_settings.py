@@ -18,14 +18,24 @@ WRITE_ACTIONS = (
     "delete_created",
 )
 
+# How the ibis provider can ask for structured output, and what the settings form calls each. Kept
+# here, free of dependencies, so the form needs no LLM import; factory.IBIS_MODES maps the same keys.
+IBIS_MODE_CHOICES = (
+    ("tools", "Tool call"),
+    ("json_schema", "Response format with the schema (not strict)"),
+    ("md_json", "JSON asked for in the prompt"),
+)
+
 DEFAULT_SETTINGS = {
     "enabled": True,
     "llm_provider": "ollama",
     "llm_model": "llama3.2",
     "llm_base_url": "http://localhost:11434",
     "llm_api_key": None,
-    # How the ibis provider asks for structured output: tools, json_schema or md_json (prompt JSON).
-    "llm_ibis_mode": "tools",
+    # How the ibis provider asks for structured output (IBIS_MODE_CHOICES). md_json, the prompt-JSON
+    # form, is what every install used before this setting existed; the default moves to tools only
+    # once the acceptance sweep's evidence is in, so an upgrade changes nothing by itself.
+    "llm_ibis_mode": "md_json",
     "timeout_seconds": 30,
     "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)

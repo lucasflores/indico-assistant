@@ -10,8 +10,7 @@ from wtforms.validators import DataRequired, InputRequired, NumberRange, Optiona
 from indico.web.forms.base import IndicoForm
 from indico.web.forms.fields import IndicoSelectMultipleCheckboxField
 
-from indico_assistant.default_settings import WRITE_ACTIONS
-from indico_assistant.services.llm.factory import IBIS_MODES
+from indico_assistant.default_settings import IBIS_MODE_CHOICES, WRITE_ACTIONS
 
 
 class SettingsForm(IndicoForm):
@@ -57,11 +56,7 @@ class SettingsForm(IndicoForm):
 
     llm_ibis_mode = SelectField(
         "ibis structured output",
-        choices=[(mode, label) for mode, label in (
-            ("tools", "Tool call (recommended)"),
-            ("json_schema", "Response format with the schema"),
-            ("md_json", "JSON asked for in the prompt"),
-        ) if mode in IBIS_MODES],
+        choices=list(IBIS_MODE_CHOICES),
         validators=[DataRequired()],
         description="With the ibis provider: how answers are asked to follow a schema. Other providers ignore it.",
     )

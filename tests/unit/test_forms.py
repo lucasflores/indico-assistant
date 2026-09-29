@@ -154,3 +154,5 @@ def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
     field = SettingsForm.llm_ibis_mode
     assert [value for value, _ in field.kwargs["choices"]] == list(IBIS_MODES)
     assert any(isinstance(v, DataRequired) for v in field.kwargs["validators"])
+
+

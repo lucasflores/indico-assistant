@@ -12,6 +12,7 @@ from typing import Any
 import instructor
 from openai import OpenAI
 
+from indico_assistant.default_settings import DEFAULT_SETTINGS
 from indico_assistant.services.llm.errors import LLMError, ErrorType
 
 
@@ -35,9 +36,12 @@ def _normalize_openai_base_url(base_url: str | None, default: str) -> str:
     return normalized
 
 
-#: How the ibis client asks for structured output, by the ``llm_ibis_mode`` setting.
+#: How the ibis client asks for structured output, by the ``llm_ibis_mode`` setting; the keys are
+#: default_settings.IBIS_MODE_CHOICES'. json_schema is NOT strict: instructor 1.15.1 sends no
+#: ``strict`` in JSON_SCHEMA, and refuses its strict OpenRouter mode for an OpenAI client, so the
+#: schema guides the model rather than binding it. Every mode is validated by instructor either way.
 IBIS_MODES = {
-    "tools": instructor.Mode.TOOLS,              # a function call carrying the schema (the default)
+    "tools": instructor.Mode.TOOLS,              # a function call carrying the schema
     "json_schema": instructor.Mode.JSON_SCHEMA,  # response_format with the schema, answered as content
     "md_json": instructor.Mode.MD_JSON,          # JSON asked for in the prompt and parsed from the text
 }
@@ -57,7 +61,7 @@ def create_instructor_client(
         model: Model name to use.
         base_url: Optional custom base URL for the provider.
         api_key: Optional API key for authentication.
-        ibis_mode: For the ibis provider, a key of ``IBIS_MODES``; None is "tools".
+        ibis_mode: For the ibis provider, a key of ``IBIS_MODES``; None is the settings default.
     
     Returns:
         Configured Instructor client.
@@ -226,9 +230,10 @@ def _create_ibis_client(
 
     ``mode`` picks how structured output is asked for (``IBIS_MODES``). ibis
     carries ``tools``/``tool_choice`` and ``response_format`` since
-    2026-09-29 (ibis-api #17), routing only to models that can serve them, so
-    the default is "tools"; "md_json" is the prompt-JSON form this client used
-    while ibis refused them, kept to compare the two. SDK retries are off
+    2026-09-29 (ibis-api #17), routing only to models that can serve them.
+    "md_json", the prompt-JSON form this client used while ibis refused them,
+    stays the default until the acceptance sweep shows the others are no
+    worse. SDK retries are off
     because a retried POST is a second routing decision and a second bill;
     instructor's validation retries still apply and each attempt is recorded
     by LLMService.
@@ -238,9 +243,10 @@ def _create_ibis_client(
     """
     if not api_key:
         raise ValueError("ibis provider requires an API key (sk-ibis-...)")
-    chosen = IBIS_MODES.get((mode or "tools").lower())
+    chosen = IBIS_MODES.get((mode or DEFAULT_SETTINGS["llm_ibis_mode"]).lower())
     if chosen is None:
-        raise ValueError(f"llm_ibis_mode must be one of {', '.join(IBIS_MODES)}; got {mode!r}")
+        raise ValueError(f"invalid configuration: llm_ibis_mode must be one of {', '.join(IBIS_MODES)}; "
+                         f"got {mode!r}")
 
     openai_client = OpenAI(
         base_url=_normalize_openai_base_url(base_url, "https://labs.aithoth.com/ibis-api"),
