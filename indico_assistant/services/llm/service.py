@@ -174,7 +174,8 @@ class LLMService:
             "model": settings.get("llm_model"),
             "base_url": settings.get("llm_base_url"),
             "api_key": settings.get("llm_api_key"),
-            "ibis_mode": settings.get("llm_ibis_mode"),
+            # Only the ibis client reads it, so only an ibis client is rebuilt when it changes.
+            "ibis_mode": settings.get("llm_ibis_mode") if settings.get("llm_provider") == "ibis" else None,
             "timeout_seconds": settings.get("timeout_seconds", 30),
             "max_tokens": settings.get("max_tokens", 2048),
             "max_retries": settings.get("max_retries", 2),
@@ -453,7 +454,11 @@ class LLMService:
                 model=settings["model"],
                 response_model=HealthCheckResponse,
                 timeout=settings["timeout_seconds"],  # a routed call can take longer than a fixed 5 s
-                max_tokens=16,  # never an uncapped completion for a probe
+                # Never an uncapped completion for a probe, but room for one: a reasoning model spends
+                # tokens before it answers, and at 16 a healthy gateway read as unavailable (measured
+                # 2026-09-29 on gpt-oss-120b and GPT-5-mini in both modes, and ibis/Balanced in tools).
+                # 256 still missed once on GPT-5-mini, whose reasoning length varies call to call.
+                max_tokens=512,
             )
             
             latency_ms = int((time.time() - start_time) * 1000)

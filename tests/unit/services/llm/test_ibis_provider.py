@@ -218,7 +218,8 @@ def test_health_check_is_bounded(monkeypatch):
 
     _fake_ibis(monkeypatch, handler)
     LLMService(_Plugin()).health_check()
-    assert bodies[0]["max_tokens"] == 16
+    # Bounded, with room for a reasoning model to answer: at 16 a healthy gateway read as down
+    assert bodies[0]["max_tokens"] == 512
 
 
 def test_collectors_nest_and_the_outer_one_survives_errors(monkeypatch):
@@ -253,7 +254,7 @@ def _tool_reply(arguments: str) -> dict:
 
 
 def test_tools_mode_sends_the_schema_as_a_tool_and_reads_the_call(monkeypatch):
-    """ibis carries tools since ibis-api #17, so tools is what the ibis provider asks with by default."""
+    """ibis carries tools since ibis-api #17."""
     requests = []
 
     def handler(request):
@@ -261,9 +262,8 @@ def test_tools_mode_sends_the_schema_as_a_tool_and_reads_the_call(monkeypatch):
         return httpx.Response(200, json=_tool_reply('{"city": "Lisbon"}'))
 
     _fake_ibis(monkeypatch, handler)
-    for mode in ("tools", None):                                   # None: the default
-        response = LLMService(_plugin(mode)).generate("Capital of Portugal?", Answer)
-        assert response.success and response.result.city == "Lisbon"
+    response = LLMService(_plugin("tools")).generate("Capital of Portugal?", Answer)
+    assert response.success and response.result.city == "Lisbon"
     for body in requests:
         assert body["tools"][0]["function"]["name"] == "Answer"
         assert body["tool_choice"] == {"type": "function", "function": {"name": "Answer"}}
@@ -282,11 +282,38 @@ def test_json_schema_mode_sends_a_response_format_and_reads_the_content(monkeypa
     assert response.success and response.result.city == "Lisbon"
     (body,) = requests
     assert body["response_format"]["type"] == "json_schema" and "tools" not in body
+    # Not strict: instructor 1.15.1 sends none, so the schema guides rather than binds (review, PR #6)
+    assert "strict" not in body["response_format"]["json_schema"]
 
 
-def test_an_unknown_mode_is_refused_naming_the_choices():
-    with pytest.raises(ValueError, match="tools, json_schema, md_json"):
+def test_an_unset_mode_is_the_settings_default_prompt_json(monkeypatch):
+    """An install that never chose a mode keeps the prompt-JSON form it has always used."""
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_ibis_reply('```json\n{"city": "Lisbon"}\n```', "0.00020"))
+
+    _fake_ibis(monkeypatch, handler)
+    assert LLMService(_plugin(None)).generate("Capital of Portugal?", Answer).result.city == "Lisbon"
+    (body,) = requests
+    assert not {"tools", "tool_choice", "response_format"} & body.keys()
+
+
+def test_an_unknown_mode_is_refused_as_a_configuration_error():
+    from indico_assistant.services.llm.errors import ErrorType, _map_exception_to_error
+
+    with pytest.raises(ValueError, match="tools, json_schema, md_json") as refused:
         factory.create_instructor_client("ibis", "ibis/Balanced", api_key="sk-ibis-x", ibis_mode="xml")
+    assert _map_exception_to_error(refused.value).error_type == ErrorType.NOT_CONFIGURED
+
+
+def test_only_an_ibis_client_reads_the_mode():
+    """Another provider's client is not rebuilt when the ibis mode changes (review, PR #6)."""
+    other = _Plugin()
+    other.settings = {**_Plugin.settings, "llm_provider": "openai", "llm_ibis_mode": "tools"}
+    assert LLMService(other)._get_settings()["ibis_mode"] is None
+    assert LLMService(_plugin("tools"))._get_settings()["ibis_mode"] == "tools"
 
 
 def test_changing_the_mode_rebuilds_the_client(monkeypatch):

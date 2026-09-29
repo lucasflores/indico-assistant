@@ -94,6 +94,7 @@ def config_command(show_secrets):
         ("llm_provider", "LLM Provider"),
         ("llm_model", "LLM Model"),
         ("llm_base_url", "Base URL"),
+        ("llm_ibis_mode", "ibis mode"),
         ("timeout_seconds", "Timeout (s)"),
         ("max_tokens", "Max Tokens"),
     ]
