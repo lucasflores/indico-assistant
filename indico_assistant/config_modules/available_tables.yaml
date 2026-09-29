@@ -39,7 +39,7 @@ attachments.files:
       nullable: false
     created_dt:
       type: TIMESTAMP
-      description: The timestamp when the file was uploaded.
+      description: The timestamp when the file was uploaded, in UTC (stored without a time zone).
       nullable: false
   relationships:
     - attachments.attachments.id -> attachments.files.attachment_id
@@ -122,15 +122,15 @@ events.events:
       nullable: true
     created_dt:
       type: TIMESTAMP
-      description: Date and time when the event was created.
+      description: Date and time when the event was created, in UTC (stored without a time zone; see the timezone column).
       nullable: false
     start_dt:
       type: TIMESTAMP
-      description: Date and time when the event starts.
+      description: Date and time when the event starts, in UTC (stored without a time zone; see the timezone column).
       nullable: false
     end_dt:
       type: TIMESTAMP
-      description: Date and time when the event ends.
+      description: Date and time when the event ends, in UTC (stored without a time zone; see the timezone column).
       nullable: false
     timezone:
       type: VARCHAR
@@ -280,7 +280,7 @@ events.persons:
       nullable: true
     invited_dt:
       type: TIMESTAMP
-      description: The timestamp indicating when the person was invited to the event.
+      description: The timestamp indicating when the person was invited to the event, in UTC (stored without a time zone).
       nullable: true
     is_untrusted:
       type: BOOLEAN
