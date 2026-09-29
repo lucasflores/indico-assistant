@@ -15,16 +15,12 @@ from typing import TYPE_CHECKING
 from flask import jsonify, request
 from marshmallow import ValidationError
 
-from indico.core.db import db
 from indico.modules.events.models.events import Event
 
 from indico_assistant.controllers.base import RHAssistantBase
 from indico_assistant.schemas.search import (
     search_request_schema,
-    search_response_schema,
-    search_status_schema,
     sync_request_schema,
-    sync_response_schema,
 )
 from indico_assistant.services.vector_search import (
     check_pgvector_available,

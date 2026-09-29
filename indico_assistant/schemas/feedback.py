@@ -33,6 +33,10 @@ class FeedbackRequest(BaseModel):
         ...,
         description="Feedback value (bool for thumbs, int 1-5 for rating, str for comment)"
     )
+    comment: str | None = Field(
+        default=None, max_length=4000,
+        description="Spec 020: a comment sent with a thumb, stored with it in one transaction (both or neither)"
+    )
 
     @field_validator('value')
     @classmethod

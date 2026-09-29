@@ -92,3 +92,13 @@ async def test_a_job_gone_from_the_cache_says_so_once(drawn):
 async def test_nothing_waiting_reads_nothing(drawn):
     await app_chnlit._after_resume("http://indico.test", "tok")
     assert drawn["indico"][1] == [] and drawn["cards"] == drawn["answers"] == []
+
+
+async def test_a_dropped_request_while_waiting_is_said(drawn, monkeypatch):
+    # (review, PR #5: it raised inside the background task, and the user saw nothing)
+    async def dropped(client, job_id, token):
+        raise httpx.ConnectError("gone")
+    drawn["indico"] = indico(job=(202, {"status": "pending"}))
+    monkeypatch.setattr(app_chnlit, "_wait_for_answer", dropped)
+    await app_chnlit._after_resume("http://indico.test", "tok", pending_job_id="job-1")
+    assert drawn["texts"] == [app_chnlit.UNREACHABLE]

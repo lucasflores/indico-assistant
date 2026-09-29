@@ -59,7 +59,7 @@ class TestSessionsEndpointIntegration:
                         r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
                     mock_manager.listed.return_value.count.return_value = 3  # (spec 020: pages and total agree)
                     
-                    with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+                    with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                         from indico_assistant.services.chat.rate_limiter import RateLimitResult
                         mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                             allowed=True, remaining=199, retry_after=None
@@ -124,7 +124,7 @@ class TestSessionsEndpointIntegration:
             mock_manager.summaries.side_effect = lambda rows: {
                 r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -167,7 +167,7 @@ class TestSessionsEndpointIntegration:
             mock_manager.validate_session_ownership.return_value = True
             mock_manager.delete_session.return_value = True
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -199,7 +199,7 @@ class TestSessionsEndpointIntegration:
             mock_manager.get_session.return_value = mock_session
             mock_manager.validate_session_ownership.return_value = False
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -229,16 +229,21 @@ class TestSessionsEndpointIntegration:
             s.message_count = 2
             mock_sessions.append(s)
         
-        with patch('indico_assistant.controllers.sessions.request') as mock_request:
+        # (new_callable: patching Flask's request proxy otherwise makes an AsyncMock, whose get() is a coroutine)
+        with patch('indico_assistant.controllers.sessions.request', new_callable=MagicMock) as mock_request:
             mock_request.args.get.side_effect = lambda k, d=None: {"limit": "5", "offset": "5"}.get(k, d)
             
             with patch('indico_assistant.controllers.sessions.get_session_manager') as mock_get:
                 mock_manager = MagicMock()
                 mock_get.return_value = mock_manager
-                mock_manager.list_user_sessions.return_value = mock_sessions
-                mock_manager.count_user_sessions.return_value = 25  # Total across all pages
+                # the offset page and the total come from the same filtered query (review, PR #5)
+                listed = mock_manager.listed.return_value
+                listed.order_by.return_value.offset.return_value.limit.return_value.all.return_value = mock_sessions
+                listed.count.return_value = 25  # Total across all pages
+                mock_manager.summaries.side_effect = lambda rows: {
+                    r.id: (r.message_count, r.updated_at, 'a title') for r in rows}
                 
-                with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+                with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                     from indico_assistant.services.chat.rate_limiter import RateLimitResult
                     mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                         allowed=True, remaining=199, retry_after=None

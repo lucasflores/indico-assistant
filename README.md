@@ -351,7 +351,7 @@ Feedback on one of the caller's answers. A thumb is one vote, so switching betwe
 {"message_id": "4be4e637-…", "feedback_type": "thumbs_down", "value": true}
 ```
 
-`feedback_type` is `thumbs_up`, `thumbs_down`, `rating` (with `value` from 1 to 5) or `comment` (with `value` a text).
+`feedback_type` is `thumbs_up`, `thumbs_down`, `rating` (with `value` from 1 to 5) or `comment` (with `value` a text). A thumb may carry a `comment`, stored with it: both are kept, or neither.
 
 #### DELETE /api/assistant/feedback/{feedback_id}
 

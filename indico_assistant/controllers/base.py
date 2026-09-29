@@ -13,9 +13,10 @@ import os
 import logging
 from flask import current_app, jsonify, request, session
 from indico.web.rh import RH
-from werkzeug.exceptions import Forbidden, NotFound, TooManyRequests, Unauthorized
+from werkzeug.exceptions import Forbidden, TooManyRequests, Unauthorized
 
 from indico_assistant.schemas.errors import ErrorCode, create_error_response
+from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 from indico_assistant.services.jwt_service import validate_chainlit_token
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,16 @@ class RHChatBase(RHAssistantBase):
     
     Subclasses should override _process() to implement endpoint logic.
     """
+
+    #: the per-user limits the endpoint counts against: 'chat' (anything that spends LLM money) or 'read'
+    RATE_LIMIT: str | None = None
+
+    def _check_access(self):
+        super()._check_access()
+        if self.RATE_LIMIT:
+            rate_result = get_rate_limiter().check_rate(self.user.id, self.RATE_LIMIT)
+            if not rate_result.allowed:
+                raise self._rate_limit_error(rate_result.retry_after)
 
     def _get_current_user_id(self) -> int:
         """Get the current authenticated user's ID.

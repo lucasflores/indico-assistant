@@ -12,7 +12,6 @@ import pytest
 from werkzeug.exceptions import TooManyRequests
 
 import indico_assistant.controllers.chat as chat_module
-from indico_assistant.controllers.base import RHChatBase
 from indico_assistant.controllers.chat import RHChat, RHChatJob
 from indico_assistant.services.chat import EventAccessDeniedError, SessionAccessDeniedError, SessionNotFoundError
 
@@ -141,7 +140,7 @@ class TestChatJob:
         assert status == expected and response.get_json()['error'] == error
 
     def test_polling_counts_against_the_read_limit(self):
-        with patch.object(RHChatBase, '_check_access'), patch.object(chat_module, 'get_rate_limiter') as limiter:
+        with patch('indico_assistant.controllers.base.RHAssistantBase._check_access'), patch('indico_assistant.controllers.base.get_rate_limiter') as limiter:
             limiter.return_value.check_rate.return_value = MagicMock(allowed=False, retry_after=5)
             with pytest.raises(TooManyRequests):
                 _controller(RHChatJob)._check_access()

@@ -42,7 +42,7 @@ def call(rh_class, user, module, monkeypatch, *, args=None, json=None, view_args
     request.get_json.return_value = json
     request.view_args = view_args or {}
     monkeypatch.setattr(module, 'request', request)
-    monkeypatch.setattr(module, 'get_rate_limiter', MagicMock())
+    monkeypatch.setattr('indico_assistant.controllers.base.get_rate_limiter', MagicMock())
     rh = rh_class.__new__(rh_class)
     rh._user = user
     response, status = rh._process()
@@ -391,3 +391,25 @@ def test_a_thumb_can_be_switched_and_taken_back(db, users, monkeypatch):
                      view_args={'feedback_id': body['feedback_id']})
     assert status == 204 and detail() is None
     assert FeedbackEntry.query.filter_by(message_id=answer.id).count() == 0  # its comment went with it
+
+
+def test_a_vote_and_its_comment_are_kept_together(db, users, monkeypatch):
+    # (review, PR #5: sent apart, a failed comment's rollback deleted the user's earlier comment too)
+    chat = session_of(db, users['lucas'], ('user', 'q'), ('assistant', 'a'))
+    answer = ChatMessage.query.filter_by(session_id=chat.id, role='assistant').one()
+    status, _ = call(RHFeedback, users['lucas'], feedback_module, monkeypatch,
+                     json={'message_id': str(answer.id), 'feedback_type': 'thumbs_down', 'value': True,
+                           'comment': ' wrong meeting '})
+    kinds = {e.feedback_type: e.value for e in FeedbackEntry.query.filter_by(message_id=answer.id)}
+    assert status == 201 and kinds == {'thumbs_down': 'true', 'comment': 'wrong meeting'}
+
+
+def test_a_conversation_whose_first_question_was_refused_drops_out(db, users, monkeypatch):
+    # (review, PR #5: the panel opens it with a title before the question; a refused question left it listed)
+    fresh = session_of(db, users['lucas'], title='Who speaks?')
+    stale = session_of(db, users['lucas'], title='Refused question')
+    stale.created_at = stale.created_at - timedelta(minutes=10)
+    db.session.flush()
+    _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch)
+    listed = [s['session_id'] for s in body['sessions']]
+    assert str(fresh.id) in listed and str(stale.id) not in listed

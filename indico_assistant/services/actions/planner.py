@@ -106,7 +106,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), message, open_plan)
     draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
                                           open_plan)
-    draft = _the_meeting_the_user_meant(draft, message)
+    draft = _the_meeting_the_user_meant(draft, message, _page_title(page_event_id))
     # (seen live, PR #5: "What is this event about?" on another page also came back as a new request repeating
     # the waiting one)
     if open_plan is not None and (
@@ -235,14 +235,33 @@ GENERIC_MEETING = re.compile(r"\b(this|that|the) (meeting|event)\b|\bit\b", re.I
 GENERIC_TITLE_WORDS = {'meeting', 'event', 'this', 'that', 'with'}
 
 
-def _names(value, said):
-    """Whether the message names the meeting ``value``: all of its telling words (4+ letters) appear in it
-    ("the ATLAS weekly" names "ATLAS Weekly Meeting"), or, for a name without any, the name itself."""
-    words = [w for w in re.findall(r'\w{4,}', value.lower()) if w not in GENERIC_TITLE_WORDS]
-    return all(w in said for w in words) if words else value.strip().lower() in said
+def _page_title(page_event_id):
+    """The title of the meeting whose page the message came from, if any."""
+    if not isinstance(page_event_id, int):
+        return ''
+    from indico.modules.events import Event
+    event = Event.get(page_event_id, is_deleted=False)
+    return event.title if event else ''
 
 
-def _the_meeting_the_user_meant(draft, message):
+def _telling_words(text):
+    return {w for w in re.findall(r'\w{4,}', text.lower()) if w not in GENERIC_TITLE_WORDS}
+
+
+def _names(value, said, page_title=''):
+    """Whether the message names the meeting ``value`` rather than the page's: it has one of the value's telling
+    words (4+ letters), and not only words the page's meeting shares ("this meeting with Makoto" on the page of
+    Planning with Makoto describes that page, not Sync with Makoto from earlier). A name without such words
+    must be in the message as it is. (Review, PR #5: requiring every word dropped "ATLAS Weekly Software
+    Meeting" for "the ATLAS weekly".)"""
+    words = _telling_words(value)
+    if not words:
+        return value.strip().lower() in said
+    typed = {w for w in words if re.search(rf'\b{re.escape(w)}', said)}
+    return bool(typed) and not typed <= _telling_words(page_title)
+
+
+def _the_meeting_the_user_meant(draft, message, page_title=''):
     """"This meeting" stays "this meeting" (spec 020 R8): the model tends to fill in a title from earlier in the
     conversation, and a title matches its namesakes on other pages. A meeting the user named stays theirs
     ("Move the ATLAS weekly to Friday, it clashes": review, PR #5)."""
@@ -256,8 +275,11 @@ def _the_meeting_the_user_meant(draft, message):
                 continue
             if attr == 'target' and any(word in value.lower() for word in TALK_TARGET_WORDS):
                 continue  # "my talk": a talk, resolved by its own rules
-            if not _names(value, said):
+            if not _names(value, said, page_title):
                 setattr(step, attr, 'this meeting')
+                # the model's own words name the meeting it had in mind: the plan card says which it is (seen
+                # in SC-003, PR #5: "Planning with Makoto will be moved" above a card moving Sync with Makoto)
+                draft.reply = ''
     return draft
 
 

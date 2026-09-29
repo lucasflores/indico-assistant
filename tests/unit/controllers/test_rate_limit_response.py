@@ -13,10 +13,30 @@ def test_chat_over_limit_raises_429():
     rh = RHChat.__new__(RHChat)
     rh._user = MagicMock(id=5)
     with patch('indico_assistant.controllers.base.RHAssistantBase._check_access'), \
-            patch('indico_assistant.controllers.chat.get_rate_limiter') as limiter:
+            patch('indico_assistant.controllers.base.get_rate_limiter') as limiter:
         limiter.return_value.check_rate.return_value = RateLimitResult(allowed=False, remaining=0, retry_after=42)
         with pytest.raises(TooManyRequests) as exc:
             rh._check_access()
     assert exc.value.response.status_code == 429
     assert exc.value.response.headers['Retry-After'] == '42'
     assert exc.value.response.get_json()['error'] == 'RATE_LIMITED'
+
+
+@pytest.mark.parametrize(('handler', 'bucket'), [
+    ('chat.RHChat', 'chat'), ('chat.RHChatJob', 'read'), ('actions.RHPlanConfirm', 'read'),
+    ('actions.RHChatUpload', 'read'), ('feedback.RHFeedback', 'read'), ('feedback.RHFeedbackDelete', 'read'),
+    ('sessions.RHSessionList', 'read'), ('sessions.RHSessionDetail', 'read'), ('sessions.RHSessionDelete', 'chat'),
+    ('sessions.RHSessionRename', 'read'), ('sessions.RHSessionOpen', 'read'),
+])
+def test_every_chat_endpoint_counts_against_a_limit(handler, bucket):
+    # (one check in RHChatBase for all of them: review, PR #5)
+    import importlib
+    module, name = handler.split('.')
+    rh_class = getattr(importlib.import_module(f'indico_assistant.controllers.{module}'), name)
+    rh = rh_class.__new__(rh_class)
+    rh._user = MagicMock(id=5)
+    with patch('indico_assistant.controllers.base.RHAssistantBase._check_access'), \
+            patch('indico_assistant.controllers.base.get_rate_limiter') as limiter:
+        limiter.return_value.check_rate.return_value = RateLimitResult(allowed=True, remaining=1, retry_after=0)
+        rh._check_access()
+    limiter.return_value.check_rate.assert_called_once_with(5, bucket)

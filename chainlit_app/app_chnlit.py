@@ -136,13 +136,17 @@ async def on_chat_resume(thread):
     cl.user_session.set("indico_event_id", event_id)  # the page this sign-in came from (R3, R8)
     cl.user_session.set("announced_thread", thread["id"])  # (its URL, /thread/<id>, already says)
     indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
-    if indico_api_url and auth_token:
-        metadata = thread.get("metadata") or {}
-        asyncio.create_task(_after_resume(indico_api_url, auth_token, metadata.get("pending_job_id"),
-                                          metadata.get("waiting_plan_id")))
+    metadata = thread.get("metadata") or {}
+    if indico_api_url and auth_token and (metadata.get("pending_job_id") or metadata.get("waiting_plan_id")):
+        task = asyncio.create_task(_after_resume(indico_api_url, auth_token, metadata.get("pending_job_id"),
+                                                 metadata.get("waiting_plan_id")))
+        _resumes.add(task)  # (asyncio keeps tasks only weakly: one collected mid-wait would never answer)
+        task.add_done_callback(_resumes.discard)
 
 
 RESUME_SETTLE = 0.5  # ponytail: lets Chainlit send the thread's history first; an event hook would be exact
+_resumes: set[asyncio.Task] = set()
+UNREACHABLE = "Unable to reach the assistant service. Please try again later."
 
 
 async def _after_resume(indico_api_url: str, auth_token: str, pending_job_id: str | None = None,
@@ -150,9 +154,9 @@ async def _after_resume(indico_api_url: str, auth_token: str, pending_job_id: st
     """Draw what the history cannot: the waiting plan's card, and the answer of the question pending when the
     history was read. That answer may have landed since (then the history lacks it, and its job has it whole),
     or still be written."""
-    await asyncio.sleep(RESUME_SETTLE)
     if not (pending_job_id or waiting_plan_id):
         return
+    await asyncio.sleep(RESUME_SETTLE)
     client = await _get_http_client(indico_api_url)
     try:
         # the job looked at once first: a waiting plan is drawn before any long wait, and not twice when the
@@ -175,13 +179,18 @@ async def _after_resume(indico_api_url: str, auth_token: str, pending_job_id: st
     if answer is None:
         return
     loading_msg = cl.Message(content="")
-    if answer.status_code == 202:
-        answer = await _wait_for_answer(client, pending_job_id, auth_token)
-    if answer.status_code == 404:  # the job left the cache: no answer is coming (R9)
-        loading_msg.content = UNANSWERED
+    try:  # (up to ANSWER_TIMEOUT of polling: a dropped request is said, as _ask says it)
+        if answer.status_code == 202:
+            answer = await _wait_for_answer(client, pending_job_id, auth_token)
+        if answer.status_code == 404:  # the job left the cache: no answer is coming (R9)
+            loading_msg.content = UNANSWERED
+            await loading_msg.send()
+            return
+        await _show_answer(answer, loading_msg, client, auth_token)
+    except httpx.RequestError:
+        logger.warning("Could not reach Indico while waiting for a resumed answer", exc_info=True)
+        loading_msg.content = UNREACHABLE
         await loading_msg.send()
-        return
-    await _show_answer(answer, loading_msg, client, auth_token)
 
 
 @cl.set_starters
@@ -286,7 +295,7 @@ async def _ask(text: str, files=()):
             response = await _wait_for_answer(client, queued["job_id"], auth_token)
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
-        loading_msg.content = "Unable to reach the assistant service. Please try again later."
+        loading_msg.content = UNREACHABLE
         await loading_msg.send()
         return
 
@@ -465,7 +474,7 @@ async def _plan_call(path: str, body: dict | None = None) -> httpx.Response | No
             response = await _wait_for_answer(client, response.json()["job_id"], auth_token)
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
-        await cl.Message(content="Unable to reach the assistant service. Please try again later.").send()
+        await cl.Message(content=UNREACHABLE).send()
         return None
     return response
 

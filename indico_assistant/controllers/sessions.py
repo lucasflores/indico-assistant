@@ -22,12 +22,9 @@ from indico_assistant.schemas.session import (
     SessionListResponse,
 )
 from indico_assistant.services.chat import (
-    SessionAccessDeniedError,
-    SessionNotFoundError,
     get_session_manager,
     jobs,
 )
-from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 from indico_assistant.services.chat.session_manager import InvalidCursor
 
 logger = logging.getLogger(__name__)
@@ -39,16 +36,7 @@ class RHSessionList(RHChatBase):
     Lists all chat sessions for the authenticated user with pagination.
     """
 
-    def _check_access(self) -> None:
-        """Verify user authentication and rate limits."""
-        super()._check_access()
-        
-        # Check rate limit for read requests
-        rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "read")
-        
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"
 
     def _process(self):
         """List user's chat sessions.
@@ -98,7 +86,9 @@ class RHSessionList(RHChatBase):
                             .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
                             .offset(offset).limit(limit).all())
                 next_cursor = None
-            total = session_manager.listed(self.user.id, search).count()
+            # counted for the first page and offset pages only: a search is an unindexed ILIKE, and Past Chats
+            # pages by cursor without reading it (review, PR #5)
+            total = None if cursor else session_manager.listed(self.user.id, search).count()
 
             summaries = session_manager.summaries(sessions)
             items = []
@@ -141,16 +131,7 @@ class RHSessionDetail(RHChatBase):
     Retrieves a specific session with its message history.
     """
 
-    def _check_access(self) -> None:
-        """Verify user authentication and rate limits."""
-        super()._check_access()
-        
-        # Check rate limit for read requests
-        rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "read")
-        
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"
 
     def _process(self, session_id: str | None = None):
         # Indico does not pass URL args to _process; this never worked through the real route
@@ -248,16 +229,7 @@ class RHSessionDelete(RHChatBase):
     Deletes a chat session and all its messages.
     """
 
-    def _check_access(self) -> None:
-        """Verify user authentication and rate limits."""
-        super()._check_access()
-        
-        # Check rate limit for chat requests (delete is a write operation)
-        rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "chat")
-        
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "chat"
 
     def _process(self, session_id: str | None = None):
         # Indico does not pass URL args to _process; this never worked through the real route
@@ -326,13 +298,9 @@ class RHSessionDelete(RHChatBase):
 class RHSessionRename(RHChatBase):
     """PATCH /sessions/<id> {"title": "…"}: rename a conversation in the Past Chats sidebar (spec 020 US4)."""
 
-    TITLE_MAX = 200  # chat_sessions.title
+    RATE_LIMIT = "read"
 
-    def _check_access(self) -> None:
-        super()._check_access()
-        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    TITLE_MAX = 200  # chat_sessions.title
 
     def _process(self):
         try:
@@ -364,11 +332,7 @@ class RHSessionOpen(RHChatBase):
     its first question is stored, so Past Chats can list it at once (spec 020). Creates it for the caller if it is
     missing (201), leaves the caller's own as it is (200); someone else's is refused (403)."""
 
-    def _check_access(self) -> None:
-        super()._check_access()
-        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"
 
     def _process(self):
         try:

@@ -68,7 +68,7 @@ class TestFeedbackEndpointIntegration:
             mock_feedback.created_at = datetime.now(timezone.utc)
             mock_service.submit_feedback.return_value = mock_feedback
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -103,7 +103,7 @@ class TestFeedbackEndpointIntegration:
             mock_feedback.created_at = datetime.now(timezone.utc)
             mock_service.submit_feedback.return_value = mock_feedback
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -137,7 +137,7 @@ class TestFeedbackEndpointIntegration:
             mock_feedback.created_at = datetime.now(timezone.utc)
             mock_service.submit_feedback.return_value = mock_feedback
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -170,7 +170,7 @@ class TestFeedbackEndpointIntegration:
             mock_feedback.created_at = datetime.now(timezone.utc)
             mock_service.submit_feedback.return_value = mock_feedback
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -203,7 +203,7 @@ class TestFeedbackEndpointIntegration:
             mock_feedback.created_at = datetime.now(timezone.utc)
             mock_service.submit_feedback.return_value = mock_feedback
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -233,7 +233,7 @@ class TestFeedbackEndpointIntegration:
                 f"Message {message_id} not found"
             )
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -264,7 +264,7 @@ class TestFeedbackEndpointIntegration:
                 "Cannot provide feedback on others' messages"
             )
             
-            with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -283,7 +283,7 @@ class TestFeedbackEndpointIntegration:
             "value": True
         }
         
-        with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=59, retry_after=None
@@ -302,7 +302,7 @@ class TestFeedbackEndpointIntegration:
             "value": True
         }
         
-        with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=59, retry_after=None
@@ -320,7 +320,7 @@ class TestFeedbackEndpointIntegration:
             "value": True
         }
         
-        with patch('indico_assistant.controllers.feedback.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=59, retry_after=None

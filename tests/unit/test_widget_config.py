@@ -98,7 +98,8 @@ class TestWidgetLoading:
 
         with patch("indico_assistant.plugin.get_csp_nonce", return_value="N0NCE"):
             html = self._script(MagicMock(id=7))
-        assert f'<script src="{widget_script_url()}" data-user="7" defer></script>' in html
+        assert (f'<script src="{widget_script_url()}" data-user="7" data-min-width="320" data-default-width="440" '
+                f'data-narrow="768" defer></script>') in html  # (the widths the inline snippet reserves)
         assert "?v=" in widget_script_url()
 
     def test_the_panels_space_is_kept_before_the_page_paints(self):

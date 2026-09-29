@@ -34,7 +34,6 @@ class RHHealth(RH):
         Returns:
             JSON response with health status information.
         """
-        from indico_assistant.plugin import AssistantPlugin
         from indico.core.plugins import plugin_engine
 
         # Get the plugin instance

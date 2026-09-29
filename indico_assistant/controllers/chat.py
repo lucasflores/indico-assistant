@@ -23,9 +23,6 @@ from indico_assistant.services.chat import (
     get_chat_service,
     jobs,
 )
-from indico_assistant.services.chat.rate_limiter import (
-    get_rate_limiter,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +32,7 @@ RESPONSE_METADATA = ("sql_generated", "confidence", "data_sources", "suggested_f
 class RHChat(RHChatBase):
     """POST /chat: save the message and queue its answer (Celery); poll RHChatJob for the reply."""
 
-    def _check_access(self) -> None:
-        super()._check_access()  # login required
-        rate_result = get_rate_limiter().check_rate(self.user.id, "chat")
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "chat"  # a question spends LLM money
 
     def _process(self):
         """Process the chat request.
@@ -114,11 +107,7 @@ class RHChat(RHChatBase):
 class RHChatJob(RHChatBase):
     """GET /chat/jobs/<job_id>: the queued answer, once a worker has produced it."""
 
-    def _check_access(self) -> None:
-        super()._check_access()
-        rate_result = get_rate_limiter().check_rate(self.user.id, "read")  # clients poll this
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"  # clients poll this
 
     def _process(self):
         job = jobs.get(request.view_args["job_id"])

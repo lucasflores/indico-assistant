@@ -53,11 +53,19 @@ def test_the_token_is_the_same_in_every_tab_and_confirms_once(reissue, shown, du
     assert executor.confirm(plan.id, dummy_user, body['token']) == 'not_confirmable'
 
 
-def test_a_plan_saved_with_a_random_token_gets_the_derived_one(reissue, shown, dummy_user):
-    # (plans waiting when this is deployed: the first card drawn again converts them)
+def test_a_plan_saved_with_a_random_token_keeps_it(reissue, shown, dummy_user):
+    # (plans waiting when this is deployed: the old buttons keep working until the plan expires; the card drawn
+    # again carries the derived token, which works too. Nothing is written: review, PR #5)
+    plan, _ = shown
+    plan.token_hash = executor._hash('random-from-before')
+    assert executor.confirm(plan.id, dummy_user, 'random-from-before') == 'confirmed'
+
+
+def test_the_derived_token_confirms_a_plan_saved_before(reissue, shown, dummy_user):
     plan, _ = shown
     plan.token_hash = executor._hash('random-from-before')
     token = reissue(plan.id)[1]['token']
+    assert plan.token_hash == executor._hash('random-from-before')  # (not rewritten)
     assert executor.confirm(plan.id, dummy_user, token) == 'confirmed'
 
 
