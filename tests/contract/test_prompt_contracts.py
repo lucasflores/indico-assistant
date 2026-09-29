@@ -26,6 +26,12 @@ def test_date_formatting_in_prompt() -> None:
     """Prompt includes timezone-aware date formatting guidance."""
     assert "to_char" in SQL_GENERATION_PROMPT
     assert "AT TIME ZONE" in SQL_GENERATION_PROMPT
+    # (issue #4: start_dt is UTC without a zone; converting it straight to the event's zone read it as local)
+    assert "(e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone" in SQL_GENERATION_PROMPT
+    assert "to_char(e.start_dt AT TIME ZONE e.timezone" not in SQL_GENERATION_PROMPT
+    # a day is the event's local day, all of it ("on October 2" became BETWEEN '2026-10-02' AND '2026-10-02')
+    assert "AT TIME ZONE e.timezone)::date BETWEEN '{{START_DATE}}' AND '{{END_DATE}}'" in SQL_GENERATION_PROMPT
+    assert "e.start_dt BETWEEN '{{START_DATE}}'" not in SQL_GENERATION_PROMPT
 
 
 @pytest.mark.contract

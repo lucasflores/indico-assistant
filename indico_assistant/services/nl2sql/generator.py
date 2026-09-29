@@ -82,8 +82,12 @@ For event-related queries, ALWAYS include:
 
 Use this pattern for date formatting:
 ```sql
-to_char(e.start_dt AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt
+to_char((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt
 ```
+
+Every `*_dt` column (start_dt, end_dt, created_dt, …) stores **UTC without a time zone**. To show one in the event's
+time zone, convert it from UTC first: `(column AT TIME ZONE 'UTC') AT TIME ZONE e.timezone`. Never
+`column AT TIME ZONE e.timezone` alone: that reads the UTC value as if it were already local time.
 
 Include extra columns beyond the minimum that may add context (description, venue_name, room_name, etc.).
 
@@ -119,7 +123,7 @@ Use this pattern for questions about events/meetings:
 SELECT
     e.id AS event_id,
     e.title AS event_title,
-    to_char(e.start_dt AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
+    to_char((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
     e.timezone AS event_timezone,
     e.description,
     e.venue_name,
@@ -148,7 +152,7 @@ Use this pattern with STRING_AGG for aggregating multiple contributors:
 SELECT
     e.id AS event_id,
     e.title AS event_title,
-    to_char(e.start_dt AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
+    to_char((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
     e.timezone AS event_timezone,
     STRING_AGG(
         CONCAT(
@@ -218,7 +222,7 @@ SELECT
     e.id AS event_id,
     e.title AS event_title,
     e.start_dt AS event_start_dt_raw,
-    to_char(e.start_dt AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
+    to_char((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone, 'Month DD YYYY, HH12:MI AM') AS event_start_dt,
     e.timezone AS event_timezone,
     e.description AS event_description,
     MAX(n.html) AS event_notes,
@@ -236,7 +240,7 @@ FROM events.events e
 LEFT JOIN events.notes n ON e.id = n.event_id AND n.is_deleted = false
 LEFT JOIN events.contributions c ON e.id = c.event_id AND c.is_deleted = false
 WHERE e.is_deleted = false
-    AND e.start_dt BETWEEN '{{START_DATE}}' AND '{{END_DATE}}'
+    AND ((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone)::date BETWEEN '{{START_DATE}}' AND '{{END_DATE}}'
     AND (
         e.title ILIKE '%{{KEYWORD}}%'
         OR e.description ILIKE '%{{KEYWORD}}%'
@@ -302,7 +306,9 @@ Generate a single SQL query that:
 4. Uses only the tables and columns from the schema above
 5. Includes required output columns for event queries
 6. Uses JOINs (not subqueries) when combining tables
-7. If a Time Range is provided, use it exactly in a BETWEEN filter
+7. If a Time Range is provided, use it exactly in a BETWEEN filter on the event's LOCAL date:
+   `((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone)::date BETWEEN 'START' AND 'END'` (both days included;
+   never `e.start_dt BETWEEN 'DAY' AND 'DAY'`, which only matches midnight UTC)
 8. Is safe and efficient"""
 
 ### CLASSIFICATION
