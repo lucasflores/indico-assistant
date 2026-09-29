@@ -88,7 +88,7 @@ async def test_a_session_becomes_a_thread(layer, as_lucas):
     assert run["feedback"] == {"forId": "a2", "id": "f1", "value": 1, "comment": None}
     assert (answer["type"], answer["parentId"], answer["output"]) == ("assistant_message", "a2", "Here is the plan.")
     assert answer["id"] != "a2" and "feedback" not in answer
-    assert thread["metadata"] == {"started_on_event_id": 351} and thread["elements"] == []
+    assert thread["metadata"] == {"started_on_event_id": 351, "pending_job_id": None} and thread["elements"] == []
 
 
 async def test_the_list_is_a_page_with_a_cursor(layer, indico, as_lucas):
@@ -185,6 +185,33 @@ async def test_a_thumb_is_a_vote_in_indico(layer, indico, as_lucas):
     await layer.upsert_feedback(Feedback(forId="a2", value=1))  # no comment: one call
     assert indico.calls[-1][3]["feedback_type"] == "thumbs_up" and indico.calls[-2][3]["feedback_type"] == "comment"
     assert await layer.delete_feedback("f9") is True and indico.calls[-1][:2] == ("DELETE", "/api/assistant/feedback/f9")
+
+
+async def test_a_comment_indico_did_not_keep_takes_the_vote_back(layer, indico, as_lucas):
+    from chainlit.types import Feedback
+    real = indico.handler
+
+    def comment_fails(request):
+        if request.content and b'"comment"' in request.content:
+            indico.calls.append((request.method, request.url.path, {}, json.loads(request.content)))
+            return httpx.Response(500, json={})
+        return real(request)
+    layer._client._transport = httpx.MockTransport(comment_fails)
+    with pytest.raises(RuntimeError):
+        await layer.upsert_feedback(Feedback(forId="a2", value=0, comment="wrong meeting"))
+    assert indico.calls[-1][:2] == ("DELETE", "/api/assistant/feedback/f9")  # all or nothing
+
+
+async def test_a_rename_or_delete_indico_did_not_keep_is_an_error(layer, indico, as_lucas):
+    indico.status[("PATCH", f"/api/assistant/sessions/{T1}")] = 500
+    with pytest.raises(RuntimeError):
+        await layer.update_thread(T1, name="Weekly sync")
+    indico.status[("DELETE", f"/api/assistant/sessions/{T1}")] = 500
+    with pytest.raises(RuntimeError):
+        await layer.delete_thread(T1)
+    CURRENT_TOKEN.set(None)  # Indico unreachable or no token: not a silent success either
+    with pytest.raises(RuntimeError):
+        await layer.update_thread(T1, name="Weekly sync")
 
 
 async def test_a_vote_indico_did_not_keep_is_an_error(layer, indico, as_lucas):

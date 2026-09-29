@@ -137,13 +137,15 @@ async def on_chat_resume(thread):
     cl.user_session.set("announced_thread", thread["id"])  # (its URL, /thread/<id>, already says)
     indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
     if indico_api_url and auth_token:
-        asyncio.create_task(_after_resume(thread["id"], indico_api_url, auth_token))
+        pending_at_read = (thread.get("metadata") or {}).get("pending_job_id")
+        asyncio.create_task(_after_resume(thread["id"], indico_api_url, auth_token, pending_at_read))
 
 
 RESUME_SETTLE = 0.5  # ponytail: lets Chainlit send the thread's history first; an event hook would be exact
 
 
-async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str) -> None:
+async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str,
+                        pending_at_read: str | None = None) -> None:
     await asyncio.sleep(RESUME_SETTLE)
     client = await _get_http_client(indico_api_url)
     try:
@@ -151,12 +153,21 @@ async def _after_resume(thread_id: str, indico_api_url: str, auth_token: str) ->
     except httpx.RequestError:
         logger.warning("Could not restore %s", thread_id, exc_info=True)
         return
-    if restored.plan:
+    # an answer that landed after Chainlit read the history but before this look is in neither: its job
+    # (done, kept an hour) still has it, whole. Its plan, if any, it draws itself.
+    landed = None
+    if pending_at_read and not restored.pending_job_id:
+        landed = await _wait_for_answer(client, pending_at_read, auth_token)
+    landed_plan = ((landed.json().get("plan") or {}).get("id")
+                   if landed is not None and landed.status_code == 200 else None)
+    if restored.plan and restored.plan["id"] != landed_plan:
         card, actions = render_plan(restored.plan)
         message = cl.Message(content=card, actions=actions)
         await message.send()
         cl.user_session.set("plan_message", message)
         cl.user_session.set("plan_id", restored.plan["id"])
+    if landed is not None and landed.status_code != 404:
+        await _show_answer(landed, cl.Message(content=""), client, auth_token)
     if restored.pending_job_id:
         loading_msg = cl.Message(content="")
         response = await _wait_for_answer(client, restored.pending_job_id, auth_token)

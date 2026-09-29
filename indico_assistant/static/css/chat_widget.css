@@ -52,7 +52,7 @@
   z-index: 1;
   touch-action: none;
 }
-#assistant-panel-handle:hover { background: rgba(0, 153, 204, 0.35); }
+#assistant-panel-handle:hover, #assistant-panel-handle:focus-visible { background: rgba(0, 153, 204, 0.35); outline: none; }
 
 #assistant-panel-bar {
   display: flex;

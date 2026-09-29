@@ -132,6 +132,39 @@ def test_pages_are_walked_with_a_cursor_newest_first(db, users, monkeypatch):
     assert 'updated_at' in first['sessions'][0]
 
 
+def test_a_page_counts_and_names_its_rows_in_a_fixed_number_of_queries(db, users, monkeypatch):
+    from sqlalchemy import event
+
+    session_of(db, users['lucas'], ('user', 'First question here'), ('assistant', 'a'), ('user', 'later'))
+    session_of(db, users['lucas'], ('user', 'q'), title='Renamed')
+    for n in range(8):
+        session_of(db, users['lucas'], ('user', f'filler {n}'), age_minutes=10 + n)
+    statements = []
+    listen = lambda *args: statements.append(args[2])  # noqa: E731
+    event.listen(db.engine, 'before_cursor_execute', listen)
+    try:
+        _, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'limit': '10'})
+    finally:
+        event.remove(db.engine, 'before_cursor_execute', listen)
+    rows = {s['title']: s for s in body['sessions']}
+    assert rows['First question here']['message_count'] == 3 and rows['Renamed']['message_count'] == 1
+    assert len(statements) <= 5  # the page, the total, counts, first questions: not ~3 per row (PR #5 review)
+
+
+@pytest.mark.parametrize('cursor', ['not-base64!', 'bm90IGEgY3Vyc29y', 'eHx5'])
+def test_a_bad_cursor_is_refused_not_a_server_error(db, users, monkeypatch, cursor):
+    status, body = call(RHSessionList, users['lucas'], sessions_module, monkeypatch, args={'cursor': cursor})
+    assert status == 422 and body['error'] == 'VALIDATION_ERROR'
+
+
+@pytest.mark.parametrize('rh', [RHSessionRename, RHSessionOpen])
+def test_a_body_that_is_not_an_object_is_no_server_error(db, users, monkeypatch, rh):
+    chat = session_of(db, users['lucas'], ('user', 'q'))
+    status, _ = call(rh, users['lucas'], sessions_module, monkeypatch, json=['x'],
+                     view_args={'session_id': str(chat.id)})
+    assert status in (200, 422)
+
+
 def test_an_unanswered_question_reports_its_job(db, users, monkeypatch):
     chat = session_of(db, users['lucas'], ('user', 'first'), ('assistant', 'answer'))
     view = {'session_id': str(chat.id)}
