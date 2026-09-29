@@ -47,7 +47,8 @@ html #assistant-panel.assistant-closing { animation: assistant-out 0.2s ease-in 
 @keyframes assistant-out { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) {
   html.assistant-sliding, html.assistant-sliding #assistant-toggle { transition: none; }
-  html.assistant-sliding #assistant-panel, #assistant-panel.assistant-closing { animation: none; }
+  html.assistant-sliding #assistant-panel { animation: none; }
+  html #assistant-panel.assistant-closing { display: none; }  /* (as specific as the slide out above: gone at once) */
 }
 
 #assistant-panel {
