@@ -793,6 +793,22 @@ class TestConversationHistoryIntegration:
         prompt = call_args[1]["prompt"]
         assert "CONVERSATION HISTORY:" not in prompt
 
+    def test_prompt_carries_today_the_user_and_the_event(
+        self,
+        generator: SQLGenerator,
+        mock_classification: MagicMock,
+        mock_llm_service: MagicMock,
+    ) -> None:
+        """The context lines are built per question: the event's only when there is one (moved from the contract
+        tests, which looked for them in the template)."""
+        generator.generate("Current question", mock_classification, user_id=7, event_id=42)
+        prompt = mock_llm_service.generate.call_args[1]["prompt"]
+        assert "TODAY'S DATE: " in prompt and "CURRENT USER ID: 7" in prompt and "CURRENT EVENT ID: 42" in prompt
+        assert "EVENT CONTEXT" in prompt
+
+        generator.generate("Current question", mock_classification, user_id=7)
+        assert "CURRENT EVENT ID" not in mock_llm_service.generate.call_args[1]["prompt"]
+
     def test_history_positioned_after_schema_before_question(
         self,
         generator: SQLGenerator,
@@ -814,7 +830,7 @@ class TestConversationHistoryIntegration:
         # Find positions
         schema_pos = prompt.find("TABLES:")
         history_pos = prompt.find("CONVERSATION HISTORY:")
-        question_pos = prompt.find("USER QUESTION:")
+        question_pos = prompt.find("## USER QUESTION")
 
         assert schema_pos < history_pos < question_pos, (
             "History should be positioned after schema and before question"

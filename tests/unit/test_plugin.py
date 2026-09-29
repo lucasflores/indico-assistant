@@ -39,7 +39,7 @@ class TestAssistantPluginInit:
         assert DEFAULT_SETTINGS["llm_model"] == "llama3.2"
         assert DEFAULT_SETTINGS["llm_base_url"] == "http://localhost:11434"
         assert DEFAULT_SETTINGS["timeout_seconds"] == 30
-        assert DEFAULT_SETTINGS["max_tokens"] == 2048
+        assert DEFAULT_SETTINGS["max_tokens"] == 4096
 
 
 class TestAssistantPluginLLMClient:

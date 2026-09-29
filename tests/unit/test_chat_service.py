@@ -33,10 +33,11 @@ def test_process_with_nl2sql_uses_pipeline_factory():
         False if k == "vector_search_enabled" else default
     )
 
-    with patch("indico_assistant.services.chat.service.AssistantPlugin") as mock_plugin_cls:
+    # (both are imported inside the call, so they are patched where they live)
+    with patch("indico_assistant.plugin.AssistantPlugin") as mock_plugin_cls:
         mock_plugin_cls.instance = mock_plugin
         with patch(
-            "indico_assistant.services.chat.service.create_nl2sql_pipeline_from_plugin"
+            "indico_assistant.services.nl2sql.create_nl2sql_pipeline_from_plugin"
         ) as mock_factory:
             mock_factory.return_value = pipeline
 
@@ -51,7 +52,9 @@ def test_process_with_nl2sql_uses_pipeline_factory():
             pipeline.process.assert_called_once_with(
                 question="Hello",
                 user_id=123,
+                user=None,
                 event_ids=None,
+                conversation_history=[],
             )
 
             assert response_text == "Pipeline response"

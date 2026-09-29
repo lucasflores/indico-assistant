@@ -109,7 +109,7 @@ class TestHuggingFaceProvider:
         )
         
         call_kwargs = mock_openai.call_args.kwargs
-        assert call_kwargs["base_url"] == "https://custom-hf.example.com/v1/"
+        assert call_kwargs["base_url"] == "https://custom-hf.example.com/v1"  # (normalized, like every provider)
 
 
 class TestOpenAIProvider:

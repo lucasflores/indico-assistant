@@ -125,17 +125,10 @@ def test_prompt_includes_current_user_filtering() -> None:
 
 
 @pytest.mark.contract
-def test_prompt_includes_today_and_user_context() -> None:
-    """Prompt includes current date and user context markers."""
-    assert "TODAY'S DATE" in SQL_GENERATION_PROMPT
-    assert "CURRENT USER ID" in SQL_GENERATION_PROMPT
-
-
-@pytest.mark.contract
-def test_prompt_includes_event_context() -> None:
-    """Prompt includes current event context markers."""
+def test_prompt_has_a_context_section() -> None:
+    """Today, the user and the event are filled in per question (test_generator checks the lines)."""
+    assert "{context_section}" in SQL_GENERATION_PROMPT
     assert "EVENT CONTEXT" in SQL_GENERATION_PROMPT
-    assert "CURRENT EVENT ID" in SQL_GENERATION_PROMPT
 
 
 @pytest.mark.contract
