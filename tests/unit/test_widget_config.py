@@ -102,6 +102,21 @@ class TestWidgetLoading:
                 f'data-narrow="768" defer></script>') in html  # (the widths the inline snippet reserves)
         assert "?v=" in widget_script_url()
 
+    def test_the_version_changes_with_the_stylesheet_too(self, tmp_path, monkeypatch):
+        # the stylesheet is fetched with the script's ?v=: a CSS-only change must give a new one (review, PR #10)
+        from indico_assistant import blueprint
+
+        def version(css):
+            (tmp_path / "chat_widget.css").write_text(css)
+            blueprint._widget_version.cache_clear()
+            return blueprint._widget_version()
+
+        monkeypatch.setattr(blueprint, "_STATIC_CSS", str(tmp_path))
+        try:
+            assert version("a { color: red }") != version("a { color: blue }")
+        finally:
+            blueprint._widget_version.cache_clear()  # (the next caller hashes the real files)
+
     def test_the_panels_space_is_kept_before_the_page_paints(self):
         # spec 020 FR-006a: an open panel's width is reserved by a tiny inline script, allowed by the CSP nonce
         with patch("indico_assistant.plugin.get_csp_nonce", return_value="N0NCE"):
