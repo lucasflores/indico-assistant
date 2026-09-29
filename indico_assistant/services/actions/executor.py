@@ -104,7 +104,9 @@ def confirm(plan_id, user, token):
     plan = ActionPlan.query.filter_by(id=plan_id, user_id=user.id).first()
     if plan is None:
         return 'not_found'
-    if not secrets.compare_digest(plan.token_hash, _hash(token or '')):
+    # derived from the plan's id; a plan saved before derived tokens still has its random one, until it expires
+    if not (secrets.compare_digest(_token_for(plan.id), token or '')
+            or secrets.compare_digest(plan.token_hash, _hash(token or ''))):
         return 'invalid_token'
     return _confirm(plan)
 
@@ -132,15 +134,12 @@ def _confirm(plan):
 
 def reissue_token(plan_id, user):
     """The confirm token of the user's plan still waiting for an answer, or None (spec 020 R10): a plan card
-    drawn again after navigating. The same token every time (a plan saved before tokens were derived gets it
-    now); single use, expiry and supersession stay."""
-    token = _token_for(plan_id)
-    replaced = (ActionPlan.query
-                .filter(ActionPlan.id == plan_id, ActionPlan.user_id == user.id, ActionPlan.status == 'shown',
-                        ActionPlan.expires_at > _now())
-                .update({'token_hash': _hash(token)}, synchronize_session=False))
-    db.session.expire_all()
-    return token if replaced else None
+    drawn again after navigating. The same token every time, and nothing is written (review, PR #5); single use,
+    expiry and supersession stay the plan's status."""
+    waiting = db.session.query(ActionPlan.query.filter(
+        ActionPlan.id == plan_id, ActionPlan.user_id == user.id, ActionPlan.status == 'shown',
+        ActionPlan.expires_at > _now()).exists()).scalar()
+    return _token_for(plan_id) if waiting else None
 
 
 def cancel(plan_id, user):

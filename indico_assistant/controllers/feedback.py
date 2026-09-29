@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 from indico_assistant.controllers.base import RHChatBase
 from indico_assistant.schemas.feedback import FeedbackRequest, FeedbackResponse
-from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 from indico_assistant.services.feedback import (
     MessageAccessDeniedError,
     MessageNotFoundError,
@@ -33,16 +32,7 @@ class RHFeedback(RHChatBase):
     Supports thumbs up/down, ratings, and comments.
     """
 
-    def _check_access(self) -> None:
-        """Verify user authentication and rate limits."""
-        super()._check_access()
-        
-        # a vote spends no LLM money: not counted as a question (spec 020)
-        rate_limiter = get_rate_limiter()
-        rate_result = rate_limiter.check_rate(self.user.id, "read")
-        
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"  # a vote spends no LLM money (spec 020)
 
     def _process(self):
         """Process the feedback submission.
@@ -90,7 +80,8 @@ class RHFeedback(RHChatBase):
                 message_id=message_id,
                 feedback_type=feedback_request.feedback_type,
                 rating=rating,
-                comment=comment
+                comment=comment,
+                thumb_comment=feedback_request.comment,
             )
             feedback_service.commit()
             
@@ -129,11 +120,7 @@ class RHFeedbackDelete(RHChatBase):
     """DELETE /feedback/<id>: take back a thumbs vote and its comment (spec 020 T046). 204; 404 when the user has
     no such vote, someone else's included."""
 
-    def _check_access(self) -> None:
-        super()._check_access()
-        rate_result = get_rate_limiter().check_rate(self.user.id, "read")
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
+    RATE_LIMIT = "read"
 
     def _process(self):
         try:

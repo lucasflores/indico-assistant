@@ -184,27 +184,13 @@ async def test_only_indico_may_frame_the_app_and_the_cookie_is_the_token(monkeyp
 async def test_a_thumb_is_a_vote_in_indico(layer, indico, as_lucas):
     from chainlit.types import Feedback
     assert await layer.upsert_feedback(Feedback(forId="a2", value=0, comment="  wrong meeting ")) == "f9"
-    vote, comment = [call[3] for call in indico.calls[-2:]]
-    assert vote == {"message_id": "a2", "feedback_type": "thumbs_down", "value": True}
-    assert comment == {"message_id": "a2", "feedback_type": "comment", "value": "wrong meeting"}
-    await layer.upsert_feedback(Feedback(forId="a2", value=1))  # no comment: one call
-    assert indico.calls[-1][3]["feedback_type"] == "thumbs_up" and indico.calls[-2][3]["feedback_type"] == "comment"
+    # the vote and its comment in one request: Indico keeps both or neither (review, PR #5)
+    assert indico.calls[-1][3] == {"message_id": "a2", "feedback_type": "thumbs_down", "value": True,
+                                   "comment": "wrong meeting"}
+    calls = len(indico.calls)
+    await layer.upsert_feedback(Feedback(forId="a2", value=1))
+    assert len(indico.calls) == calls + 1 and "comment" not in indico.calls[-1][3]
     assert await layer.delete_feedback("f9") is True and indico.calls[-1][:2] == ("DELETE", "/api/assistant/feedback/f9")
-
-
-async def test_a_comment_indico_did_not_keep_takes_the_vote_back(layer, indico, as_lucas):
-    from chainlit.types import Feedback
-    real = indico.handler
-
-    def comment_fails(request):
-        if request.content and b'"comment"' in request.content:
-            indico.calls.append((request.method, request.url.path, {}, json.loads(request.content)))
-            return httpx.Response(500, json={})
-        return real(request)
-    layer._client._transport = httpx.MockTransport(comment_fails)
-    with pytest.raises(RuntimeError):
-        await layer.upsert_feedback(Feedback(forId="a2", value=0, comment="wrong meeting"))
-    assert indico.calls[-1][:2] == ("DELETE", "/api/assistant/feedback/f9")  # all or nothing
 
 
 async def test_a_rename_or_delete_indico_did_not_keep_is_an_error(layer, indico, as_lucas):

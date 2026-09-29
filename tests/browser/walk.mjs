@@ -63,7 +63,7 @@ async function timings() {
     const nav = performance.getEntriesByType("navigation")[0];
     return { load: nav.loadEventEnd, ready: window.__assistantReadyAt ?? null,
              initialMargin: window.__assistantInitialMargin ?? null,
-             margin: getComputedStyle(document.documentElement).marginRight,
+             margin: document.documentElement.style.marginRight,
              focusInPanel: !!document.activeElement?.closest?.("#assistant-panel") };
   });
 }

@@ -94,3 +94,16 @@ tells the caller nothing about it. `POST /feedback` counts against the read limi
   `SECRET_KEY`. Another tab's buttons keep working, and a revision (a new plan) gets a new token.
 - **Chainlit naming a new thread by its first message** calls `PUT /sessions/<id>`, not `PATCH`, so the title
   stays the question's start. The conversation's `event_id` is the page of its first question.
+
+## Changed after review round 3 (PR #5)
+
+- **`POST /feedback`:** a thumb may carry `comment`, stored in the same transaction.
+- **`GET /sessions`:** `total` is counted without a cursor only; it's `null` on cursor pages. A conversation
+  with no question is listed only while it's new: titled by the panel, and created in the last 5 minutes.
+- **Tokens:** Indico's tokens carry `metadata.valid_until`, and Indico refuses a token past it or without it.
+  Chainlit's `/auth/jwt` re-mints copies with a fresh `exp` but copies the metadata unchanged, so no copy
+  outlives what Indico granted.
+- **`POST /plans/<id>/token`:** read-only, and `confirm` checks the derived token directly.
+- **Rate limits:** every chat endpoint names its bucket (`RATE_LIMIT`), and `RHChatBase` applies it.
+- **The panel:** the open conversation is kept per tab (`sessionStorage`). `localStorage` keeps open/closed, the
+  width, and where a new tab starts.

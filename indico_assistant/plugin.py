@@ -63,11 +63,15 @@ class AssistantPlugin(IndicoPlugin):
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
+    # the panel's widths, here once: the snippet reserves an open panel's width before the page paints, and
+    # chat_widget.js gets them from its script tag (review, PR #5: copies would let the two disagree)
+    PANEL_WIDTHS = {"min": 320, "default": 440, "narrow": 768}
     _PANEL_SNIPPET = (
         "try{{var s=JSON.parse(localStorage.getItem('indico-assistant:{uid}')||'{{}}');"
-        "if(s.open&&innerWidth>=768)document.documentElement.style.marginRight="
-        "Math.round(Math.max(320,Math.min(s.width||440,innerWidth/2)))+'px'}}catch(e){{}}"
-        "window.__assistantInitialMargin=getComputedStyle(document.documentElement).marginRight;"
+        "if(s.open&&innerWidth>={narrow})document.documentElement.style.marginRight="
+        "Math.round(Math.max({min},Math.min(s.width||{default},innerWidth/2)))+'px'}}catch(e){{}}"
+        # (for tests/browser/walk.mjs: the margin before the panel's script ran; a plain read, no style recalc)
+        "window.__assistantInitialMargin=document.documentElement.style.marginRight;"
     )
 
     def _render_widget_script(self, **kwargs):
@@ -77,8 +81,10 @@ class AssistantPlugin(IndicoPlugin):
         if session.user is None or not self.settings.get("chat_widget_enabled"):
             return None  # anonymous visitors (and a disabled widget) cost nothing
         uid = int(session.user.id)
-        return (f'<script nonce="{get_csp_nonce()}">{self._PANEL_SNIPPET.format(uid=uid)}</script>'
-                f'<script src="{widget_script_url()}" data-user="{uid}" defer></script>')
+        widths = self.PANEL_WIDTHS
+        return (f'<script nonce="{get_csp_nonce()}">{self._PANEL_SNIPPET.format(uid=uid, **widths)}</script>'
+                f'<script src="{widget_script_url()}" data-user="{uid}" data-min-width="{widths["min"]}" '
+                f'data-default-width="{widths["default"]}" data-narrow="{widths["narrow"]}" defer></script>')
 
     @property
     def llm_client(self):

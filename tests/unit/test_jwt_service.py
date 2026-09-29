@@ -173,3 +173,27 @@ class TestValidateChainlitToken:
         payload = validate_chainlit_token("", "test-secret")
 
         assert payload is None
+
+
+class TestRenewal:
+    """Chainlit's /auth/jwt re-mints any token signed with the secret with a fresh exp (review, PR #5)."""
+
+    def _user(self):
+        user = MagicMock()
+        user.id, user.full_name, user.email = 7, "Lucas Flores", "lucas@aithoth.com"
+        return user
+
+    def test_a_re_minted_copy_keeps_the_lifetime_indico_granted(self):
+        token = create_chainlit_token(self._user(), "s3cret", expiry_hours=24)
+        claims = jwt.decode(token, "s3cret", algorithms=["HS256"])
+        # what Chainlit's create_jwt does: the same claims, a fresh exp
+        remint = lambda c: jwt.encode({**c, "exp": datetime.now(timezone.utc) + timedelta(days=1)},  # noqa: E731
+                                      "s3cret", algorithm="HS256")
+        assert validate_chainlit_token(remint(claims), "s3cret") is not None
+        claims["metadata"]["valid_until"] = int((datetime.now(timezone.utc) - timedelta(seconds=1)).timestamp())
+        assert validate_chainlit_token(remint(claims), "s3cret") is None  # past what Indico granted
+
+    def test_a_token_indico_did_not_issue_is_refused(self):
+        foreign = jwt.encode({"identifier": "7", "metadata": {},
+                              "exp": datetime.now(timezone.utc) + timedelta(hours=1)}, "s3cret", algorithm="HS256")
+        assert validate_chainlit_token(foreign, "s3cret") is None

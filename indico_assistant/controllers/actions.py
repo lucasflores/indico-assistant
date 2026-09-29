@@ -21,19 +21,14 @@ from indico_assistant.models import ActionPlan
 from indico_assistant.schemas.actions import ConfirmRequest, PlanView
 from indico_assistant.services.actions import enabled_actions, executor
 from indico_assistant.services.chat import jobs
-from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 
 
 logger = logging.getLogger(__name__)
 
 
 class RHPlanBase(RHChatBase):
-    def _check_access(self) -> None:
-        super()._check_access()
-        rate_result = get_rate_limiter().check_rate(self.user.id, "read")  # carrying out a plan is not a new question
-        if not rate_result.allowed:
-            raise self._rate_limit_error(rate_result.retry_after)
 
+    RATE_LIMIT = "read"  # carrying out a plan is not a new question
     def _plan(self):
         try:
             plan_id = UUID(request.view_args["plan_id"])
@@ -99,7 +94,6 @@ class RHPlanToken(RHPlanBase):
             return self._error_response("PLAN_NOT_CONFIRMABLE", "This plan is no longer waiting for an answer",
                                         details={"status": ActionPlan.query.get(plan.id).effective_status},
                                         status=409)
-        db.session.commit()
         return jsonify(PlanView.of(ActionPlan.query.get(plan.id), token).model_dump(mode="json")), 200
 
 

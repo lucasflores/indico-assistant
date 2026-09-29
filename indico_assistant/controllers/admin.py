@@ -31,7 +31,6 @@ from indico_assistant.schemas.admin import (
     LangfuseStatus,
     PaginationInfo,
     PeriodInfo,
-    SyncStatus as SyncStatusSchema,
     UsageStatsData,
     UsageStatsResponse,
 )

@@ -4,7 +4,8 @@
  * Injected (deferred, cacheable) only for logged-in users with the assistant enabled. The assistant is
  * Chainlit's full app in a panel docked to the right of every page, with its Past Chats sidebar. It comes
  * back open, on the same conversation, after every navigation:
- * - the per-user, per-browser state (open, width, current conversation) is kept in localStorage;
+ * - the per-user state is kept in the browser: open and width in localStorage, the open conversation per tab
+ *   (sessionStorage), so two tabs keep their own; a new tab starts on the last one used;
  * - an inline <head> snippet (plugin.py) reserves an open panel's width before the page paints;
  * - the frame signs in with a fresh token for this page (it carries the page's event) sent by
  *   postMessage, never in a URL, and reports back: ready, the open conversation, Indico links, Esc.
@@ -17,10 +18,12 @@
   const USER = SCRIPT && SCRIPT.dataset.user;
   if (!USER) return;
   const STATE_KEY = `indico-assistant:${USER}`;
+  const TAB_KEY = `indico-assistant-thread:${USER}`;  // this tab's conversation (review, PR #5)
   const CONFIG_URL = "/api/assistant/widget/config";
-  const DEFAULT_WIDTH = 440;
-  const MIN_WIDTH = 320;
-  const NARROW = 768;  // below this the panel covers the page instead of pushing it
+  // the panel's widths, from plugin.py (PANEL_WIDTHS), which reserves the same width before the page paints
+  const DEFAULT_WIDTH = Number(SCRIPT.dataset.defaultWidth) || 440;
+  const MIN_WIDTH = Number(SCRIPT.dataset.minWidth) || 320;
+  const NARROW = Number(SCRIPT.dataset.narrow) || 768;  // below this the panel covers the page instead of pushing it
   const root = document.documentElement;
 
   let state = loadState();
@@ -30,16 +33,20 @@
   let frameHello = false;
 
   function loadState() {
+    let loaded = { open: false, width: DEFAULT_WIDTH, threadId: null };
     try {
-      return Object.assign({ open: false, width: DEFAULT_WIDTH, threadId: null },
-                           JSON.parse(localStorage.getItem(STATE_KEY) || "{}"));
-    } catch (e) {
-      return { open: false, width: DEFAULT_WIDTH, threadId: null };
-    }
+      loaded = Object.assign(loaded, JSON.parse(localStorage.getItem(STATE_KEY) || "{}"));
+      const tab = sessionStorage.getItem(TAB_KEY);  // set once this tab has had a conversation, even a new chat
+      if (tab !== null) loaded.threadId = tab || null;
+    } catch (e) { /* private mode: nothing kept */ }
+    return loaded;
   }
 
   function saveState() {
-    try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch (e) { /* private mode: not kept */ }
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));  // (its threadId: where a new tab starts)
+      sessionStorage.setItem(TAB_KEY, state.threadId || "");
+    } catch (e) { /* private mode: not kept */ }
   }
 
   function setMode(mode) {

@@ -66,7 +66,7 @@ class TestRHSessionList:
                 r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
             mock_manager.listed.return_value.count.return_value = 3  # (spec 020: pages and total agree)
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -92,7 +92,7 @@ class TestRHSessionList:
             mock_manager.page_sessions.return_value = ([], None)
             mock_manager.listed.return_value.count.return_value = 50  # (spec 020: pages and total agree)
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -109,7 +109,7 @@ class TestRHSessionList:
         """Test limit must be within bounds."""
         mock_request.args.get.side_effect = lambda k, d=None: {"limit": "500", "offset": "0"}.get(k, d)
         
-        with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=199, retry_after=None
@@ -125,7 +125,7 @@ class TestRHSessionList:
         """Test offset must be non-negative."""
         mock_request.args.get.side_effect = lambda k, d=None: {"limit": "20", "offset": "-5"}.get(k, d)
         
-        with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=199, retry_after=None
@@ -187,7 +187,7 @@ class TestRHSessionDetail:
             mock_manager.summaries.side_effect = lambda rows: {
                 r.id: (r.message_count, r.last_message_at, 'a title') for r in rows}
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -209,7 +209,7 @@ class TestRHSessionDetail:
             mock_get.return_value = mock_manager
             mock_manager.get_session.return_value = None
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -233,7 +233,7 @@ class TestRHSessionDetail:
             mock_manager.get_session.return_value = mock_session
             mock_manager.validate_session_ownership.return_value = False
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=199, retry_after=None
@@ -245,7 +245,7 @@ class TestRHSessionDetail:
 
     def test_get_session_invalid_uuid(self, controller):
         """Test 422 for invalid UUID format."""
-        with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+        with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
             from indico_assistant.services.chat.rate_limiter import RateLimitResult
             mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                 allowed=True, remaining=199, retry_after=None
@@ -290,7 +290,7 @@ class TestRHSessionDelete:
             mock_manager.validate_session_ownership.return_value = True
             mock_manager.delete_session.return_value = True
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -310,7 +310,7 @@ class TestRHSessionDelete:
             mock_get.return_value = mock_manager
             mock_manager.get_session.return_value = None
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None
@@ -334,7 +334,7 @@ class TestRHSessionDelete:
             mock_manager.get_session.return_value = mock_session
             mock_manager.validate_session_ownership.return_value = False
             
-            with patch('indico_assistant.controllers.sessions.get_rate_limiter') as mock_limiter:
+            with patch('indico_assistant.controllers.base.get_rate_limiter') as mock_limiter:
                 from indico_assistant.services.chat.rate_limiter import RateLimitResult
                 mock_limiter.return_value.check_rate.return_value = RateLimitResult(
                     allowed=True, remaining=59, retry_after=None

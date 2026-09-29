@@ -42,9 +42,14 @@ def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24, eve
     if not secret:
         raise ValueError("JWT secret cannot be empty")
 
+    expires = datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
     metadata = {
         "name": user.full_name or user.email,
         "email": user.email,
+        # Chainlit's /auth/jwt re-mints any token signed with the shared secret, its own included, with a fresh
+        # exp, and copies the metadata as it is: this caps every re-minted copy at what Indico granted (review,
+        # PR #5: a token could otherwise be renewed forever)
+        "valid_until": int(expires.timestamp()),
     }
     if event_id is not None:
         metadata["event_id"] = event_id
@@ -53,7 +58,7 @@ def create_chainlit_token(user: "User", secret: str, expiry_hours: int = 24, eve
         "identifier": str(user.id),
         "display_name": metadata["name"],  # Chainlit's avatar and menu (else the id)
         "metadata": metadata,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
+        "exp": expires,
         "iat": datetime.now(timezone.utc),
     }
 
@@ -78,8 +83,13 @@ def validate_chainlit_token(token: str, secret: str) -> dict | None:
         ...     user_id = payload["identifier"]
     """
     try:
-        return jwt.decode(token, secret, algorithms=["HS256"])
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
         return None
+    # the lifetime Indico granted, which no re-minted copy extends (a token without it was not issued here)
+    valid_until = (payload.get("metadata") or {}).get("valid_until")
+    if not isinstance(valid_until, int) or valid_until <= datetime.now(timezone.utc).timestamp():
+        return None
+    return payload

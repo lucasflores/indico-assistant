@@ -118,11 +118,21 @@ def test_this_meeting_stays_this_meeting_unless_the_user_named_it():
     assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move Sync with Makoto to 4pm').steps[0].meeting == \
         'Sync with Makoto'
     assert _the_meeting_the_user_meant(draft('#354'), 'Move it to 4pm').steps[0].meeting == '#354'  # a chosen answer
-    # a meeting the user named stays theirs, even with an "it" in the message (review, PR #5)
-    assert _the_meeting_the_user_meant(draft('ATLAS Weekly Meeting'), 'Move the ATLAS weekly to Friday, it clashes'
-                                       ).steps[0].meeting == 'ATLAS Weekly Meeting'
-    assert _the_meeting_the_user_meant(draft('Sync with Makoto'), 'Move this meeting with Makoto to 4pm'
-                                       ).steps[0].meeting == 'this meeting'  # (the page's "Planning with Makoto")
+    # a meeting the user named stays theirs, even with an "it" in the message, and even if the model returns the
+    # full title (review, PR #5, rounds 2 and 3)
+    kept = lambda title, message, page='Sync with Makoto': _the_meeting_the_user_meant(  # noqa: E731
+        draft(title), message, page).steps[0].meeting
+    assert kept('ATLAS Weekly Software Meeting', 'Move the ATLAS weekly to Friday, it clashes') == \
+        'ATLAS Weekly Software Meeting'
+    assert kept('Budget Review 2026', 'Cancel the budget review, it is not needed') == 'Budget Review 2026'
+    assert kept('CMS Weekly Call', 'Move the CMS call to 3pm, it overlaps') == 'CMS Weekly Call'
+    # ... but words the page's meeting shares describe the page: Sync with Makoto (from earlier) is not meant
+    assert kept('Sync with Makoto', 'Move this meeting with Makoto to 4pm', page='Planning with Makoto') == \
+        'this meeting'
+    assert kept('Sync with Makoto', 'Move it to 4pm', page='Planning with Makoto') == 'this meeting'
+    worded = draft('Sync with Makoto')
+    worded.reply = 'Sync with Makoto will be moved to 4pm.'
+    assert _the_meeting_the_user_meant(worded, 'Move it to 4pm', 'Planning with Makoto').reply == ''  # (not shown)
     attach = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
         {'action': 'attach', 'target': 'my talk at Sync with Makoto', 'upload': 'this'}]})
     assert _the_meeting_the_user_meant(attach, 'attach this to my talk').steps[0].target == 'my talk at Sync with Makoto'

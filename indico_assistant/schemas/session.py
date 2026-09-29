@@ -49,7 +49,7 @@ class SessionListResponse(BaseModel):
         default_factory=list,
         description="List of chat sessions"
     )
-    total: int = Field(..., ge=0, description="Total session count")
+    total: int | None = Field(default=None, ge=0, description="Total session count (without a cursor only)")
     limit: int = Field(..., ge=1, le=100, description="Requested limit")
     offset: int = Field(..., ge=0, description="Requested offset")
     next_cursor: str | None = Field(default=None, description="Cursor of the next page; null on the last (spec 020)")

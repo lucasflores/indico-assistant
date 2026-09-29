@@ -47,7 +47,8 @@ class FeedbackService:
         message_id: UUID,
         feedback_type: str,
         rating: Optional[int] = None,
-        comment: Optional[str] = None
+        comment: Optional[str] = None,
+        thumb_comment: Optional[str] = None
     ) -> FeedbackEntry:
         """Submit or update feedback for a message.
         
@@ -90,12 +91,17 @@ class FeedbackService:
                 FeedbackEntry.feedback_type != feedback_type,
             ).delete(synchronize_session=False)
         value = {'rating': rating, 'comment': comment}.get(feedback_type, True)
-        return FeedbackEntry.create_or_update(
+        entry = FeedbackEntry.create_or_update(
             message_id=message_id,
             user_id=user_id,
             feedback_type=feedback_type,
             value=value if value is not None else '',
         )
+        if feedback_type in thumbs and thumb_comment and thumb_comment.strip():
+            # the vote's comment, in the same transaction: a failure keeps neither (review, PR #5)
+            FeedbackEntry.create_or_update(message_id=message_id, user_id=user_id, feedback_type='comment',
+                                           value=thumb_comment.strip())
+        return entry
 
     def withdraw_feedback(self, user_id: int, feedback_id: UUID) -> bool:
         """Take back a thumbs vote, and its comment (spec 020: the panel's thumb clicked again). False when the

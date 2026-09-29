@@ -110,10 +110,9 @@ def test_cancel(call, plan_and_token, queued):
 def test_endpoints_count_against_the_read_limit(dummy_user):
     from werkzeug.exceptions import TooManyRequests
 
-    from indico_assistant.controllers.base import RHChatBase
     rh = RHPlanConfirm.__new__(RHPlanConfirm)
     rh._user = dummy_user
-    with patch.object(RHChatBase, '_check_access'), patch.object(actions_module, 'get_rate_limiter') as limiter:
+    with patch('indico_assistant.controllers.base.RHAssistantBase._check_access'), patch('indico_assistant.controllers.base.get_rate_limiter') as limiter:
         limiter.return_value.check_rate.return_value = MagicMock(allowed=False, retry_after=3)
         with pytest.raises(TooManyRequests):
             rh._check_access()

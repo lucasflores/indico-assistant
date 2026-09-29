@@ -7,16 +7,20 @@ Task: T014
 from __future__ import annotations
 
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, tuple_
 
 from indico.core.db import db
+from indico.util.date_time import now_utc
 
 from indico_assistant.models.message import ChatMessage
 from indico_assistant.models.session import ChatSession
+
+
+OPENING = timedelta(minutes=5)  # how long a conversation opened by the panel is listed before its first question
 
 
 class InvalidCursor(ValueError):
@@ -77,11 +81,13 @@ class SessionManager:
     def listed(self, user_id: int, search: str | None = None):
         """The user's conversations as Past Chats lists them, matching ``search``: one query for the pages and
         their total, so they always agree (review, PR #5)."""
-        # a session the user said nothing in is not a conversation to go back to (one the panel opened for a
-        # first question is: it has its title before the question is stored)
+        # a session the user said nothing in is not a conversation to go back to. One the panel opened for a
+        # first question is, for the moments before the question is stored; if that question was refused (the
+        # limits, an event it cannot see), it drops out (review, PR #5)
         query = ChatSession.query.filter(ChatSession.user_id == user_id,
                                          or_(ChatSession.messages.any(ChatMessage.role == 'user'),
-                                             ChatSession.title.isnot(None)))
+                                             and_(ChatSession.title.isnot(None),
+                                                  ChatSession.created_at > now_utc() - OPENING)))
         if search and (words := search.split()):
             # the user's % and _ are letters, not wildcards
             like = ['%' + w.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%' for w in words]

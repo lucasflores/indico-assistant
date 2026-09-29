@@ -223,23 +223,17 @@ class IndicoDataLayer(BaseDataLayer):
             raise RuntimeError(f"Deleting {thread_id} failed: {getattr(response, 'status_code', None)}")
 
     async def upsert_feedback(self, feedback: Feedback) -> str:
-        # the thumb is the vote (its id is what Chainlit deletes later); a comment is stored beside it
+        # the thumb is the vote (its id is what Chainlit deletes later); its comment goes with it in the same
+        # request, so Indico keeps both or neither (review, PR #5)
         body = {"message_id": feedback.forId, "feedback_type": "thumbs_up" if feedback.value else "thumbs_down",
                 "value": True}
+        if feedback.comment and feedback.comment.strip():
+            body["comment"] = feedback.comment.strip()
         response = await self._call("POST", "/feedback", json=body)
         if response is None or response.status_code != 201:
             # raised, so Chainlit tells the user it failed instead of showing a vote that was not kept
             raise RuntimeError(f"Feedback on {feedback.forId} not saved: {getattr(response, 'status_code', None)}")
-        feedback_id = response.json()["feedback_id"]
-        if feedback.comment and feedback.comment.strip():
-            comment = await self._call("POST", "/feedback", json={"message_id": feedback.forId,
-                                                                   "feedback_type": "comment",
-                                                                   "value": feedback.comment.strip()})
-            if comment is None or comment.status_code != 201:
-                # all or nothing: a vote without the comment the user wrote is taken back, and the failure shown
-                await self._call("DELETE", f"/feedback/{feedback_id}")
-                raise RuntimeError(f"Comment on {feedback.forId} not saved: {getattr(comment, 'status_code', None)}")
-        return feedback_id
+        return response.json()["feedback_id"]
 
     async def delete_feedback(self, feedback_id: str) -> bool:
         response = await self._call("DELETE", f"/feedback/{feedback_id}")
