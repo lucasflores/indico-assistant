@@ -11,6 +11,7 @@ from indico.web.forms.base import IndicoForm
 from indico.web.forms.fields import IndicoSelectMultipleCheckboxField
 
 from indico_assistant.default_settings import WRITE_ACTIONS
+from indico_assistant.services.llm.factory import IBIS_MODES
 
 
 class SettingsForm(IndicoForm):
@@ -52,6 +53,17 @@ class SettingsForm(IndicoForm):
         "API Key",
         validators=[Optional()],
         description="API key for cloud providers (stored securely, not displayed)",
+    )
+
+    llm_ibis_mode = SelectField(
+        "ibis structured output",
+        choices=[(mode, label) for mode, label in (
+            ("tools", "Tool call (recommended)"),
+            ("json_schema", "Response format with the schema"),
+            ("md_json", "JSON asked for in the prompt"),
+        ) if mode in IBIS_MODES],
+        validators=[DataRequired()],
+        description="With the ibis provider: how answers are asked to follow a schema. Other providers ignore it.",
     )
 
     timeout_seconds = IntegerField(

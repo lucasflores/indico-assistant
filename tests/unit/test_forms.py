@@ -141,3 +141,16 @@ def test_chat_actions_are_off_until_an_admin_enables_them():
     assert choices == list(WRITE_ACTIONS)
     for name in ('actions_enabled', 'actions_reminder_minutes', 'actions_outlook_freebusy', 'retention_plan_days'):
         assert hasattr(SettingsForm, name)
+
+
+def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
+    """One list of modes, the factory's: the form can neither offer one the client
+    refuses nor miss one it takes."""
+    from wtforms.validators import DataRequired
+
+    from indico_assistant.forms import SettingsForm
+    from indico_assistant.services.llm.factory import IBIS_MODES
+
+    field = SettingsForm.llm_ibis_mode
+    assert [value for value, _ in field.kwargs["choices"]] == list(IBIS_MODES)
+    assert any(isinstance(v, DataRequired) for v in field.kwargs["validators"])
