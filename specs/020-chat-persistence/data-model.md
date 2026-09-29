@@ -38,14 +38,16 @@ No schema change: `metadata_json` gains keys.
 Thumbs from the panel land here (`thumbs_up` / `thumbs_down`, or `comment`), keyed by the message id. The new
 `DELETE /feedback/<id>` removes the caller's own entry.
 
-## ActionPlan, unchanged apart from the token reissue
+## ActionPlan, unchanged
 
-`token_hash` can be replaced by `POST /plans/<id>/token` while the plan is `shown` and unexpired (R10). There
-are no new columns.
+There are no new columns, and `POST /plans/<id>/token` leaves the row as it is (R10). The confirm token is
+derived from the plan id (an HMAC with `SECRET_KEY`), and `confirm` checks it directly. `token_hash` still
+matches the random tokens of plans saved before this change, until those expire. (As amended after review,
+PR #5.)
 
 ## Browser state (not in the database)
 
-`localStorage["indico-assistant:<user id>"]` on the Indico origin:
+`localStorage["indico-assistant:<user id>"]` on the Indico origin, shared by the user's tabs:
 
 ```json
 {"open": true, "width": 440, "threadId": "3f2c…"}
@@ -53,8 +55,11 @@ are no new columns.
 
 - `open`: whether the panel reopens on the next page (FR-002).
 - `width`: the panel width in px, clamped to 320 px…50% of the viewport (FR-006d).
-- `threadId`: the conversation to resume (FR-001). Null or missing means a new chat. A stale id (deleted,
-  expired, someone else's) resumes nothing, and Chainlit falls back to a new chat.
+- `threadId`: the last conversation used, which is where a brand-new tab starts.
+
+`sessionStorage["indico-assistant-thread:<user id>"]`, per tab: the conversation this tab resumes (FR-001).
+It's an empty string for a new chat. Two tabs keep their own conversation (review, PR #5). A stale id
+(deleted, expired, someone else's) resumes nothing, and the panel starts a new chat.
 
 Chainlit's own auth cookie (`access_token`, on the Chainlit origin) holds the session JWT (R3).
 

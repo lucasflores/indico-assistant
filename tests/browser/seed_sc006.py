@@ -10,11 +10,13 @@ with app.app_context():
     from indico.core.db import db
     from indico.util.date_time import now_utc
     from indico_assistant.models import ChatMessage, ChatSession
+    # only what this seeds: user 1's conversations with the seed titles (Copilot review, PR #5)
+    seeded = ChatSession.query.filter(ChatSession.user_id == 1, ChatSession.title.like('SC006 seed %'))
     if sys.argv[1:] == ['count']:
-        print(ChatSession.query.filter(ChatSession.title.like('SC006 seed %')).count())
+        print(seeded.count())
         sys.exit()
     if sys.argv[1:] == ['delete']:
-        rows = ChatSession.query.filter(ChatSession.title.like('SC006 seed %'))
+        rows = seeded
         print('deleting', rows.count())
         for chat in rows:
             db.session.delete(chat)

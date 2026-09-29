@@ -316,7 +316,11 @@ the waiting, and the job id restores it.
 
 ## R10. Plan cards after a restore
 
-**Decision**:
+> **Amended after review (PR #5).** The token is no longer rotated. It's derived from the plan id (an HMAC with
+> `SECRET_KEY`), so every card of a plan, in any tab, holds the same working token, and the reissue writes
+> nothing. The two-tab failure described below was the reason for the change. See contracts/api.md.
+
+**Decision** (as first built):
 
 - **Reissue the token.** `POST /plans/<id>/token` (owner only, plan `shown` and not expired) sets a new
   `token_hash` and returns the new token. The old buttons stop working, which is what a new card should

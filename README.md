@@ -66,9 +66,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
   See the [Deployment Guide](docs/DEPLOYMENT.md).
   - JWT Authentication: Secure token-based auth per user
-  - Theme Synchronization: Auto-detects Indico theme and applies matching styles
-  - Session Persistence: Conversations persist across page reloads
-  - Feedback Mechanism: Thumbs up/down with optional comments
+  - Light like Indico: Chainlit's own switch turns the panel dark, and the choice is kept across pages
   - Graceful Degradation: Loading/error states, hidden when not ready
 
 ### Configuration & Management
