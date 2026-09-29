@@ -26,6 +26,7 @@ from indico_assistant.services.chat import (
     get_session_manager,
 )
 from indico_assistant.services.chat.rate_limiter import get_rate_limiter
+from indico_assistant.services.chat.session_manager import InvalidCursor
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +96,17 @@ class RHSessionList(RHChatBase):
                 next_cursor = None
             total = session_manager.count_user_sessions(self.user.id)
 
+            summaries = session_manager.summaries(sessions)
             items = []
             for session in sessions:
+                message_count, last_message_at, title = summaries[session.id]
                 items.append(SessionListItem(
                     session_id=str(session.id),
                     event_id=session.event_id,
                     created_at=session.created_at.isoformat(),
-                    last_message_at=session.last_message_at.isoformat() if session.last_message_at else session.updated_at.isoformat(),
-                    message_count=session.message_count,
-                    title=session_manager.title_of(session),
+                    last_message_at=(last_message_at or session.updated_at).isoformat(),
+                    message_count=message_count,
+                    title=title,
                     updated_at=session.updated_at.isoformat(),
                 ))
 
@@ -116,7 +119,9 @@ class RHSessionList(RHChatBase):
             )
 
             return jsonify(response.model_dump(mode='json')), 200
-            
+
+        except InvalidCursor:
+            return self._error_response("VALIDATION_ERROR", "Invalid cursor", status=422)
         except Exception as e:
             logger.exception("Error listing sessions")
             return self._error_response(
@@ -321,7 +326,8 @@ class RHSessionRename(RHChatBase):
             uuid_id = UUID(request.view_args["session_id"])
         except ValueError:
             return self._error_response("VALIDATION_ERROR", "Invalid session_id format", status=422)
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}  # (a JSON array or string would fail .get)
         title = body.get("title").strip() if isinstance(body.get("title"), str) else ""
         if not title or len(title) > self.TITLE_MAX:
             return self._validation_error(f"A title of 1 to {self.TITLE_MAX} characters is required", field="title")
@@ -356,7 +362,8 @@ class RHSessionOpen(RHChatBase):
             uuid_id = UUID(request.view_args["session_id"])
         except ValueError:
             return self._error_response("VALIDATION_ERROR", "Invalid session_id format", status=422)
-        first_message = (request.get_json(silent=True) or {}).get("first_message")
+        body = request.get_json(silent=True)
+        first_message = body.get("first_message") if isinstance(body, dict) else None
         session_manager = get_session_manager()
         session = session_manager.get_session(uuid_id)
         if session is not None:

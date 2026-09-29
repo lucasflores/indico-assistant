@@ -60,6 +60,9 @@
     const width = clampWidth(state.width);
     panel.style.width = `${width}px`;
     root.style.marginRight = `${width}px`;
+    const handle = panel.querySelector("#assistant-panel-handle");  // (its value, for screen readers)
+    handle.setAttribute("aria-valuenow", width);
+    handle.setAttribute("aria-valuemax", Math.round(window.innerWidth / 2));
   }
 
 
@@ -119,7 +122,8 @@
     try {
       const response = await fetch(`/api/assistant/sessions/${encodeURIComponent(threadId)}`,
                                    { credentials: "same-origin", cache: "no-store" });
-      return response.ok;
+      // only a definite answer forgets it: a 429 or 5xx is a passing problem, not a gone conversation
+      return !(response.status === 404 || response.status === 403 || response.status === 422);
     } catch (e) {
       return true;  // unknown: let Chainlit try
     }
@@ -130,7 +134,8 @@
     panel.id = "assistant-panel";
     panel.setAttribute("aria-label", "Indico Assistant");
     panel.innerHTML = `
-      <div id="assistant-panel-handle" role="separator" aria-orientation="vertical" aria-label="Resize the assistant"></div>
+      <div id="assistant-panel-handle" role="separator" aria-orientation="vertical" aria-label="Resize the assistant"
+           tabindex="0" aria-valuemin="${MIN_WIDTH}"></div>
       <div id="assistant-panel-bar">
         <span>Indico Assistant</span>
         <button id="assistant-panel-close" type="button" aria-label="Close the assistant" title="Close (Esc)">×</button>
@@ -221,6 +226,18 @@
   }
 
   function bindResize(handle) {
+    // the keyboard too: arrows move the edge by 20 px (Shift: 100), Home/End go to the narrowest/widest
+    handle.addEventListener("keydown", (event) => {
+      if (window.innerWidth < NARROW) return;
+      const step = event.shiftKey ? 100 : 20;
+      const width = { ArrowLeft: state.width + step, ArrowRight: state.width - step,
+                      Home: MIN_WIDTH, End: window.innerWidth / 2 }[event.key];
+      if (width === undefined) return;
+      event.preventDefault();
+      state.width = clampWidth(width);
+      applyWidth();
+      saveState();
+    });
     handle.addEventListener("pointerdown", (event) => {
       if (window.innerWidth < NARROW) return;
       event.preventDefault();

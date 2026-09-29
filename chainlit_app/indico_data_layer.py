@@ -142,7 +142,10 @@ class IndicoDataLayer(BaseDataLayer):
             "userId": owner,
             "userIdentifier": owner,
             "tags": [],
-            "metadata": {"started_on_event_id": session.get("event_id")},
+            # the job of a question still unanswered when this was read: resume shows its answer even if it lands
+            # before the resume's own look (Copilot review, PR #5)
+            "metadata": {"started_on_event_id": session.get("event_id"),
+                         "pending_job_id": session.get("pending_job_id")},
             "steps": IndicoDataLayer._steps(session.get("messages", []), thread_id) if with_steps else [],
             "elements": [],
         }
@@ -203,11 +206,15 @@ class IndicoDataLayer(BaseDataLayer):
             # Chainlit names a new thread on its first message, then lists Past Chats and opens /thread/<id>,
             # all before the chat API has the session: create it now (named as its first question would name it)
             response = await self._call("PUT", f"/sessions/{thread_id}", json={"first_message": name})
-        if response is not None and response.status_code not in (200, 201):
-            logger.warning("Naming %s failed: %s", thread_id, response.status_code)
+        if response is None or response.status_code not in (200, 201):
+            # raised: the sidebar then says the rename failed instead of showing one a reload undoes (Chainlit's
+            # own naming on a first message catches it)
+            raise RuntimeError(f"Naming {thread_id} not saved: {getattr(response, 'status_code', None)}")
 
     async def delete_thread(self, thread_id: str):
-        await self._call("DELETE", f"/sessions/{thread_id}")
+        response = await self._call("DELETE", f"/sessions/{thread_id}")
+        if response is None or response.status_code >= 300:
+            raise RuntimeError(f"Deleting {thread_id} failed: {getattr(response, 'status_code', None)}")
 
     async def upsert_feedback(self, feedback: Feedback) -> str:
         # the thumb is the vote (its id is what Chainlit deletes later); a comment is stored beside it
@@ -217,10 +224,16 @@ class IndicoDataLayer(BaseDataLayer):
         if response is None or response.status_code != 201:
             # raised, so Chainlit tells the user it failed instead of showing a vote that was not kept
             raise RuntimeError(f"Feedback on {feedback.forId} not saved: {getattr(response, 'status_code', None)}")
+        feedback_id = response.json()["feedback_id"]
         if feedback.comment and feedback.comment.strip():
-            await self._call("POST", "/feedback", json={"message_id": feedback.forId, "feedback_type": "comment",
-                                                         "value": feedback.comment.strip()})
-        return response.json()["feedback_id"]
+            comment = await self._call("POST", "/feedback", json={"message_id": feedback.forId,
+                                                                   "feedback_type": "comment",
+                                                                   "value": feedback.comment.strip()})
+            if comment is None or comment.status_code != 201:
+                # all or nothing: a vote without the comment the user wrote is taken back, and the failure shown
+                await self._call("DELETE", f"/feedback/{feedback_id}")
+                raise RuntimeError(f"Comment on {feedback.forId} not saved: {getattr(comment, 'status_code', None)}")
+        return feedback_id
 
     async def delete_feedback(self, feedback_id: str) -> bool:
         response = await self._call("DELETE", f"/feedback/{feedback_id}")

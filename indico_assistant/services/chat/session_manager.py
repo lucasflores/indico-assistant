@@ -11,12 +11,16 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, or_, tuple_
+from sqlalchemy import and_, func, or_, tuple_
 
 from indico.core.db import db
 
 from indico_assistant.models.message import ChatMessage
 from indico_assistant.models.session import ChatSession
+
+
+class InvalidCursor(ValueError):
+    """A Past Chats page cursor this did not encode."""
 
 
 class SessionManager:
@@ -102,8 +106,30 @@ class SessionManager:
 
     @staticmethod
     def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
-        updated_at, session_id = base64.urlsafe_b64decode(cursor.encode()).decode().split('|')
-        return datetime.fromisoformat(updated_at), UUID(session_id)
+        """Raises InvalidCursor for anything this did not encode (the cursor comes from the client)."""
+        try:
+            updated_at, session_id = base64.urlsafe_b64decode(cursor.encode()).decode().split('|')
+            return datetime.fromisoformat(updated_at), UUID(session_id)
+        except (ValueError, UnicodeError) as exc:  # (binascii.Error is a ValueError)
+            raise InvalidCursor(cursor) from exc
+
+    def summaries(self, sessions: list[ChatSession]) -> dict[UUID, tuple[int, datetime | None, str]]:
+        """Per session of a page: message count, last message time and Past Chats title, in two queries
+        (one per row each made a sidebar page cost ~3 queries a row)."""
+        ids = [s.id for s in sessions]
+        if not ids:
+            return {}
+        counts = {sid: (n, last) for sid, n, last in
+                  db.session.query(ChatMessage.session_id, func.count(), func.max(ChatMessage.created_at))
+                  .filter(ChatMessage.session_id.in_(ids)).group_by(ChatMessage.session_id)}
+        untitled = [s.id for s in sessions if not s.title]
+        firsts = dict(db.session.query(ChatMessage.session_id, ChatMessage.content)
+                      .filter(ChatMessage.session_id.in_(untitled), ChatMessage.role == 'user')
+                      .distinct(ChatMessage.session_id)
+                      .order_by(ChatMessage.session_id, ChatMessage.created_at.asc())) if untitled else {}
+        return {s.id: (counts.get(s.id, (0, None))[0], counts.get(s.id, (0, None))[1] or s.created_at,
+                       s.title or self.title_from(firsts.get(s.id, '')))
+                for s in sessions}
 
     def feedback_of(self, message_ids: list[UUID], user_id: int) -> dict[UUID, dict[str, Any]]:
         """The user's own latest thumbs (and comment) per message, as the panel shows them (spec 020 R11)."""
