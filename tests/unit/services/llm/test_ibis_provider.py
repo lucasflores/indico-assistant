@@ -24,6 +24,7 @@ class _Plugin:
         llm_model="ibis/Balanced",
         llm_base_url="http://ibis.test",
         llm_api_key="sk-ibis-abcdefghijkl.secret",
+        llm_ibis_mode="md_json",  # these tests are about the records; the modes are tested below
         timeout_seconds=5,
         max_tokens=256,
         max_retries=2,
@@ -61,7 +62,7 @@ def test_ibis_generate_records_every_billed_attempt(monkeypatch):
     assert response.retries == 1 and len(response.calls) == 2  # retries agree with the records
 
     assert response.success and response.result.city == "Lisbon"
-    # ibis refuses these fields with a 400; MD_JSON must never send them
+    # MD_JSON asks in the prompt, so it sends none of the structured-output fields
     for path, body in requests:
         assert path == "/v1/chat/completions"
         assert body["model"] == "ibis/Balanced"
@@ -232,3 +233,68 @@ def test_collectors_nest_and_the_outer_one_survives_errors(monkeypatch):
                 llm.generate("Capital of Portugal?", Answer)
                 raise RuntimeError("pipeline failed after the call")
     assert len(inner) == 1 and len(outer) == 1
+
+
+# --- the structured-output modes (llm_ibis_mode) ---------------------------------------------
+
+def _plugin(mode):
+    plugin = _Plugin()
+    plugin.settings = {**_Plugin.settings, "llm_ibis_mode": mode}
+    return plugin
+
+
+def _tool_reply(arguments: str) -> dict:
+    reply = _ibis_reply("", "0.00030")
+    reply["choices"][0] = {"index": 0, "finish_reason": "tool_calls", "message": {
+        "role": "assistant", "content": None,
+        "tool_calls": [{"id": "call_1", "type": "function",
+                        "function": {"name": "Answer", "arguments": arguments}}]}}
+    return reply
+
+
+def test_tools_mode_sends_the_schema_as_a_tool_and_reads_the_call(monkeypatch):
+    """ibis carries tools since ibis-api #17, so tools is what the ibis provider asks with by default."""
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_tool_reply('{"city": "Lisbon"}'))
+
+    _fake_ibis(monkeypatch, handler)
+    for mode in ("tools", None):                                   # None: the default
+        response = LLMService(_plugin(mode)).generate("Capital of Portugal?", Answer)
+        assert response.success and response.result.city == "Lisbon"
+    for body in requests:
+        assert body["tools"][0]["function"]["name"] == "Answer"
+        assert body["tool_choice"] == {"type": "function", "function": {"name": "Answer"}}
+        assert "response_format" not in body
+
+
+def test_json_schema_mode_sends_a_response_format_and_reads_the_content(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_ibis_reply('{"city": "Lisbon"}', "0.00020"))
+
+    _fake_ibis(monkeypatch, handler)
+    response = LLMService(_plugin("json_schema")).generate("Capital of Portugal?", Answer)
+    assert response.success and response.result.city == "Lisbon"
+    (body,) = requests
+    assert body["response_format"]["type"] == "json_schema" and "tools" not in body
+
+
+def test_an_unknown_mode_is_refused_naming_the_choices():
+    with pytest.raises(ValueError, match="tools, json_schema, md_json"):
+        factory.create_instructor_client("ibis", "ibis/Balanced", api_key="sk-ibis-x", ibis_mode="xml")
+
+
+def test_changing_the_mode_rebuilds_the_client(monkeypatch):
+    _fake_ibis(monkeypatch, lambda request: httpx.Response(200, json=_tool_reply('{"city": "Lisbon"}')))
+    plugin = _plugin("tools")
+    llm = LLMService(plugin)
+    llm.generate("q", Answer)
+    first = llm._client
+    plugin.settings = {**plugin.settings, "llm_ibis_mode": "md_json"}
+    llm._ensure_client()
+    assert llm._client is not first
