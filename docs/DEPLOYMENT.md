@@ -49,8 +49,8 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
 
 ## Health check
 - `curl https://assistant.example.org/auth/config` shows `"requireLogin":true`.
-- Logged in to Indico, open any event page. The launcher (bottom right) opens the panel, and the panel comes back
-  open on the next page.
+- Logged in to Indico, open any event page. The Assistant tab (on the right edge) opens the panel, and the panel
+  comes back open on the next page.
 
 ## Validation
 - Browser checks (local stack, installed Chrome): see `tests/browser/README.md`. `walk.mjs` covers navigation

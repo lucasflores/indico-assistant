@@ -30,7 +30,7 @@ const A_TEXT = `Tabs check A ${Date.now()}`, B_TEXT = `Tabs check B ${Date.now()
 
 try {
   await a.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
-  if (await a.$("#assistant-launcher:not([hidden])")) await a.click("#assistant-launcher");
+  if (await a.$("#assistant-toggle[aria-expanded=false]")) await a.click("#assistant-toggle");
   await ready(a);
   await ask(a, A_TEXT);
 

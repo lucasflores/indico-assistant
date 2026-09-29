@@ -39,7 +39,7 @@ The widget uses Indico branding via the following files in `public/`:
 |------|---------|
 | `logo_light.png` | Header logo (light mode) |
 | `logo_dark.png` | Header logo (dark mode) |
-| `favicon.png` | Browser favicon + widget launcher button |
+| `favicon.png` | Browser favicon |
 | `avatars/assistant.png` | Avatar shown next to assistant messages |
 
 To customize:

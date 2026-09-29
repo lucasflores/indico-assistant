@@ -9,7 +9,7 @@
  * - an inline <head> snippet (plugin.py) reserves an open panel's width before the page paints;
  * - the frame signs in with a fresh token for this page (it carries the page's event) sent by
  *   postMessage, never in a URL, and reports back: ready, the open conversation, Indico links, Esc.
- * Page views with the panel closed cost nothing but this file and a launcher button.
+ * Page views with the panel closed cost nothing but this file and the button that opens it.
  */
 (function () {
   "use strict";
@@ -67,6 +67,7 @@
     const width = clampWidth(state.width);
     panel.style.width = `${width}px`;
     root.style.marginRight = `${width}px`;
+    root.style.setProperty("--assistant-width", `${width}px`);  // (where the edge tab sits while open)
     const handle = panel.querySelector("#assistant-panel-handle");  // (its value, for screen readers)
     handle.setAttribute("aria-valuenow", width);
     handle.setAttribute("aria-valuemax", Math.round(window.innerWidth / 2));
@@ -145,7 +146,7 @@
            tabindex="0" aria-valuemin="${MIN_WIDTH}"></div>
       <div id="assistant-panel-bar">
         <span>Indico Assistant</span>
-        <button id="assistant-panel-close" type="button" aria-label="Close the assistant" title="Close (Esc)">×</button>
+        <button id="assistant-panel-close" type="button" aria-label="Hide the assistant" title="Hide (Esc)">»</button>
       </div>
       <div id="assistant-panel-placeholder" role="status">Loading the assistant…</div>`;
     frame = document.createElement("iframe");
@@ -162,12 +163,13 @@
 
   async function openPanel() {
     if (panel) return;
+    document.querySelectorAll("#assistant-panel.assistant-closing").forEach((e) => e.remove());  // (reopened mid-slide)
     injectStylesheet();
-    hideLauncher();
     state.open = true;
     saveState();
     setMode("loading");
     buildPanel();  // the frame appears at once, at its width; the placeholder shows until `ready`
+    syncToggle();
     try {
       // the remembered conversation may be gone (deleted in another tab, retention): then a new chat, not
       // Chainlit's "Couldn't resume" error. Asked alongside the config, so it costs no time.
@@ -187,14 +189,30 @@
   }
 
   function closePanel() {
-    if (panel) panel.remove();
+    const closing = panel;
+    const hadFocus = closing && closing.contains(document.activeElement);
     panel = null;
     frame = null;
+    slide();
+    if (closing) {
+      closing.classList.add("assistant-closing");
+      setTimeout(() => closing.remove(), SLIDE_MS);
+    }
     root.style.marginRight = "";
+    root.style.removeProperty("--assistant-width");
     state.open = false;
     saveState();
     setMode("closed");
-    showLauncher();
+    syncToggle();
+    if (hadFocus) toggleButton().focus();  // (focus goes back to what opens it)
+  }
+
+  // a click slides the panel in and out; a panel restored on page load is simply there (FR-003)
+  const SLIDE_MS = 200;
+  function slide() {
+    root.classList.add("assistant-sliding");
+    clearTimeout(slide.timer);
+    slide.timer = setTimeout(() => root.classList.remove("assistant-sliding"), SLIDE_MS + 50);
   }
 
   function onMessage(event) {
@@ -267,29 +285,29 @@
     });
   }
 
-  function launcher() {
-    let button = document.getElementById("assistant-launcher");
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.id = "assistant-launcher";
-      button.title = "Indico Assistant";
-      button.setAttribute("aria-label", "Open the Indico Assistant");
-      button.textContent = "\u{1F4AC}";
-      button.addEventListener("click", openPanel);
-      document.body.appendChild(button);
-    }
+  // the one control that opens and closes the panel: a tab on the page's right edge, which moves with the panel
+  // (it replaced a bottom-right bubble, which covered Indico's own buttons and did not read as a side panel)
+  function toggleButton() {
+    let button = document.getElementById("assistant-toggle");
+    if (button) return button;
+    button = document.createElement("button");
+    button.type = "button";
+    button.id = "assistant-toggle";
+    button.setAttribute("aria-controls", "assistant-panel");
+    button.innerHTML = '<span class="icon-bubble-quote" aria-hidden="true"></span><span>Assistant</span>'
+      + '<span class="assistant-chevron" aria-hidden="true"></span>';  // (Indico's icon font)
+    document.body.appendChild(button);
+    button.addEventListener("click", () => {
+      slide();
+      if (panel) closePanel(); else openPanel();
+    });
     return button;
   }
 
-  function showLauncher() {
-    injectStylesheet();
-    launcher().hidden = false;
-  }
-
-  function hideLauncher() {
-    const button = document.getElementById("assistant-launcher");
-    if (button) button.hidden = true;
+  function syncToggle() {
+    const button = toggleButton();
+    button.setAttribute("aria-expanded", String(!!panel));
+    button.title = panel ? "Hide the assistant" : "Open the Indico Assistant";
   }
 
   function start() {
@@ -299,7 +317,8 @@
       openPanel();  // reopens on this page without a click; focus stays on the page (FR-003)
     } else {
       setMode("closed");
-      showLauncher();
+      injectStylesheet();
+      syncToggle();
     }
   }
 

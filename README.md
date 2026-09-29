@@ -57,7 +57,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ### User Interface
 
-- **Chat panel**: a launcher on every page for logged-in users (one cached script). It opens Chainlit's full app in a panel docked to the right, in Indico's look.
+- **Chat panel**: an Assistant tab on the right edge of every page for logged-in users (one cached script). It opens Chainlit's full app in a panel docked to the right, in Indico's look.
   - **It follows the user around Indico:** the panel comes back open, on the same conversation, on every page they go to.
   - **"This event" is the page's event:** each question refers to the page it's asked from.
   - **Past Chats:** a sidebar to search, reopen, rename and delete conversations.

@@ -48,7 +48,7 @@ async function ask(text) {
 const scores = { question: 0, action: 0 };
 try {
   await page.goto(`${INDICO}/event/${A.id}/`, { waitUntil: "load" });
-  await page.click("#assistant-launcher");
+  await page.click("#assistant-toggle");
   await ready();
   for (let n = 0; n < TRIES; n++) {
     const here = n % 2 === 0 ? A : B;

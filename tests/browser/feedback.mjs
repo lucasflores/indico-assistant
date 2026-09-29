@@ -33,7 +33,7 @@ async function vote(cls, comment) {  // a thumb opens Chainlit's feedback dialog
 
 try {
   await page.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
-  if (await page.$("#assistant-launcher:not([hidden])")) await page.click("#assistant-launcher");
+  if (await page.$("#assistant-toggle[aria-expanded=false]")) await page.click("#assistant-toggle");
   await ready();
   const input = await chat().waitForSelector("#chat-input");
   await sleep(1500);

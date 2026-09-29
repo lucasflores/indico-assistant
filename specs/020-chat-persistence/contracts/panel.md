@@ -45,18 +45,22 @@ The inline `<head>` snippet reads only `open` and `width`, to reserve the margin
 - **Open.** Right-docked, full height, `width` px, default 440, clamped to 320…50% of the viewport. The page
   gets `margin-right: width`. Below 768 px wide, the panel covers the page instead, with no margin.
 - **Resize.** Dragging the left edge resizes it; the width is saved on release.
-- **Close.** The panel's own close button, Esc in the page while the panel has focus, or `close` from the
-  frame. The margin is removed and `open: false` is stored.
+- **Close.** The tab, the panel's own hide button (»), Esc in the page while the panel has focus, or `close`
+  from the frame. The margin is removed and `open: false` is stored. If the panel had focus, it goes to the tab.
 - **Reopen on load.** The frame loads without taking focus (FR-003). No `focus()` is called; the user tabs or
   clicks in.
-- **Launcher.** The existing lazy launcher button opens the panel when it is closed. While the panel is open,
-  the button is hidden.
+- **Tab.** One tab on the page's right edge, halfway down, opens and closes the panel (`aria-expanded`). While
+  the panel is open, the tab sits on the panel's edge. A click slides the panel in and out; a panel restored on
+  load does not slide. Below 768 px the open panel covers the tab, and » hides it.
+  (Changed after spec 020, thread B: a bottom-right bubble covered Indico's own buttons, such as an event's share
+  button, and did not read as a side panel. A button in Indico's session bar was tried too: that bar scrolls
+  away, and on event pages it runs out of room while the panel is open.)
 
 ## Test hooks (the browser walk, T021)
 
 | Hook | Meaning |
 |---|---|
-| `#assistant-launcher` | the launcher button (hidden while the panel is open) |
+| `#assistant-toggle[aria-expanded]` | the tab that opens and closes the panel |
 | `#assistant-panel`, `#assistant-panel-frame`, `#assistant-panel-handle`, `#assistant-panel-close` | the panel, its iframe, the drag handle, the close button |
 | `<html data-assistant-panel="closed\|loading\|ready\|unavailable">` | the panel's state |
 | `window.__assistantReadyAt` | `performance.now()` when the frame reported `ready` (SC-002) |

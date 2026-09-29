@@ -44,7 +44,7 @@ const lastDialogButton = (label) => inFrame((label) => {  // (the delete confirm
 
 try {
   await page.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
-  await page.click("#assistant-launcher");
+  await page.click("#assistant-toggle");
   await ready();
   const input = await chat().waitForSelector("#chat-input");
   await sleep(1500);
