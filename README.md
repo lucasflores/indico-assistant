@@ -170,12 +170,12 @@ pip install git+https://github.com/lucasflores/indico-assistant.git
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Enable Assistant | Master switch for the plugin | True |
-| LLM Provider | Select your LLM provider (Ollama, HuggingFace, OpenAI-compatible) | ollama |
-| LLM Model | Model name/identifier | llama3.2 |
-| LLM Base URL | API endpoint URL | http://localhost:11434 |
-| API Key | Authentication key (for cloud providers) | None |
+| LLM Provider | Select your LLM provider (ibis, Ollama, HuggingFace, OpenAI-compatible) | ibis |
+| LLM Model | Model name/identifier; with ibis, `ibis/<dial>` (Frugal, Economy, Balanced, High, Max) | ibis/Balanced |
+| LLM Base URL | API endpoint URL | https://labs.aithoth.com/ibis-api |
+| API Key | Authentication key: an `sk-ibis-` key for ibis (required) | None |
 | Timeout | Request timeout in seconds | 30 |
-| Max Tokens | Maximum response tokens | 2048 |
+| Max Tokens | Maximum response tokens | 4096 |
 
 ### Chat Widget Settings
 

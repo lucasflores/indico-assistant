@@ -27,10 +27,10 @@ class SettingsForm(IndicoForm):
     llm_provider = SelectField(
         "LLM Provider",
         choices=[
+            ("ibis", "ibis router (model: ibis/<dial> or a pool model id)"),
             ("ollama", "Ollama (Local)"),
             ("huggingface", "HuggingFace Router"),
             ("openai", "OpenAI-compatible API"),
-            ("ibis", "ibis router (model: ibis/<dial> or a pool model id)"),
         ],
         validators=[DataRequired()],
         description="Select the LLM provider to use for AI queries",
@@ -39,13 +39,13 @@ class SettingsForm(IndicoForm):
     llm_model = StringField(
         "LLM Model",
         validators=[DataRequired()],
-        description="Model name/identifier (e.g., llama3.2, gpt-4)",
+        description="Model name/identifier (e.g., ibis/Balanced; llama3.2 for Ollama)",
     )
 
     llm_base_url = StringField(
         "LLM Base URL",
         validators=[Optional(), URL(message="Please enter a valid URL")],
-        description="Base URL for the LLM API (e.g., http://localhost:11434 for Ollama)",
+        description="Base URL for the LLM API (e.g., https://labs.aithoth.com/ibis-api; http://localhost:11434 for Ollama)",
     )
 
     llm_api_key = PasswordField(
