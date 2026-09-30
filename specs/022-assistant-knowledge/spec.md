@@ -153,8 +153,11 @@ With the guide index present, no question needs the internet beyond the instance
 ### Functional Requirements
 
 **Routing** (each message, in this order; revised 2026-09-30)
-- **FR-001**: **The shortcut.** When a plan is waiting and the message is a plain yes, or one of the plan's own choices
-  or suggestions (a button, or typed), the planner MUST take it with no routing decision and no model call.
+- **FR-001**: **The shortcut.** When the last answer offered a change and the message is a plain yes, the planner MUST
+  be asked for the offered change, as a new request; an offer is newer than any waiting plan. Otherwise, when a plan
+  is waiting and the message is a plain yes, or one of the plan's own choices or suggestions (a button, or typed), the
+  planner MUST take it. Neither needs a routing decision. Any other reply to an offer goes to Jev with a note of the
+  offer (FR-006).
 - **FR-002**: **One Jev decision.** Otherwise, when a Jev key is set, one call to Jev MUST answer two `choice`
   questions about the latest message: its route (knowledge, change, data, chat, out_of_scope) and, for data, its kind
   (the classifier's 11 data intents). The highest-probability route wins.
@@ -170,7 +173,7 @@ With the guide index present, no question needs the internet beyond the instance
   Without Jev's reading of the conversation, the last answer's offer sends the next message to the planner first.
 - **FR-005**: The chat MUST never fail because of Jev. An unknown intent is dropped (the classifier then picks it).
 - **FR-006**: Jev MUST be sent the latest message plus the last two exchanges, in the format ibis's web gate uses
-  (each earlier reply cut to 400 characters), and a note when a plan is waiting.
+  (each earlier reply cut to 400 characters), and a note when a plan is waiting or the last answer offered a change.
 - **FR-007**: The route criteria and intents MUST be the ones the router probe measured (thread E study), with the
   chat route as decided on 2026-09-30, and a "can you …?" naming a concrete change routed as a change, as the
   classifier routes it. A general "can you create meetings?" stays knowledge.

@@ -8,7 +8,8 @@ from indico.modules.categories.models.categories import EventCreationMode
 from indico_assistant.default_settings import DEFAULT_SETTINGS, WRITE_ACTIONS
 from indico_assistant.services.actions import ACTIONS
 from indico_assistant.services.actions.context import acting_as
-from indico_assistant.services.actions.resolve import creatable_categories
+from indico_assistant.services.actions.base import category_path
+from indico_assistant.services.actions.resolve import MAX_CHOICES, creatable_categories
 from indico_assistant.services.knowledge.capabilities import NEVER, capability_list
 from indico_assistant.services.knowledge.pages import page_list
 
@@ -49,11 +50,32 @@ def test_the_categories_are_the_ones_indico_allows(people, create_category):
     before = _caps(user)
     category.update_principal(user, permissions={"create"})
     after = _caps(user)  # nothing is cached between questions (spec US2 AS-5)
-    assert "Team Meetings" not in before.create_in and "Team Meetings" in after.create_in
+    assert not any("Team Meetings" in c for c in before.create_in) and any("Team Meetings" in c for c in after.create_in)
     with acting_as(user):
-        assert after.create_in == [c.title for c in creatable_categories(user)]
+        assert after.create_in == [category_path(c) for c in creatable_categories(user)][:MAX_CHOICES]
     if not before.create_in:
         assert ACTIONS["create_event"].summary in dict(before.cannot)
+
+
+def test_an_admin_creates_anywhere_without_a_list(people, monkeypatch):
+    from indico_assistant.services.actions import resolve
+    from indico_assistant.services.knowledge import capabilities
+
+    monkeypatch.setattr(resolve, "creatable_categories", lambda user: pytest.fail("every category was checked"))
+    people["stranger"].is_admin = True
+    caps = _caps(people["stranger"])
+    assert caps.create_in == [capabilities.ANYWHERE] and caps.propose_in == []
+    assert ACTIONS["create_event"].summary in caps.can
+
+
+def test_a_long_category_list_is_cut_short():
+    from types import SimpleNamespace
+
+    from indico_assistant.services.knowledge.capabilities import _places
+
+    many = [SimpleNamespace(chain_titles=["Home", f"Group {n}"]) for n in range(MAX_CHOICES + 5)]
+    assert _places(many) == [f"Home » Group {n}" for n in range(MAX_CHOICES)] + ["5 more"]
+    assert _places(many[:2]) == ["Home » Group 0", "Home » Group 1"]
 
 
 def test_an_action_the_admin_switched_off(people, dummy_event):
@@ -83,6 +105,16 @@ def test_the_page_lists_of_a_manager_and_a_stranger(people, dummy_event):
     assert f"/event/{dummy_event.id}/" in stranger and "/user/tokens/" in stranger & managed
     rooms = [p for p in _pages(people["stranger"]) if p.title == "Room booking"]
     assert bool(rooms) == bool(config.ENABLE_ROOMBOOKING)
+
+
+def test_room_booking_is_listed_only_for_those_indico_shows_it_to(people):
+    """(review, PR #15) Indico hides the module from users outside its authorized list, if the admin says so"""
+    from indico.modules.rb import rb_settings
+
+    rb_settings.set("hide_module_if_unauthorized", True)
+    rb_settings.acls.set("authorized_principals", {people["manager"]})
+    assert not any(p.path.startswith("/rooms") for p in _pages(people["stranger"]))
+    assert any(p.path.startswith("/rooms") for p in _pages(people["manager"])) == bool(config.ENABLE_ROOMBOOKING)
 
 
 def test_the_page_list_is_built_as_the_user_only(people, dummy_event):

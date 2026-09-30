@@ -11,6 +11,7 @@ from indico.core.db import db
 from indico.modules.events import Event
 from indico.modules.events.reminders.models.reminders import EventReminder, ReminderType
 from indico.modules.logs import EventLogRealm, LogKind
+from indico.util.caching import memoize_request
 from indico.util.date_time import now_utc
 
 from indico_assistant.services.actions import register
@@ -101,6 +102,7 @@ def _attach_refusal(obj, user):
     return None
 
 
+@memoize_request  # (attach_link and attach_file ask the same)
 def _attach_available(user, event):
     """``available`` for material: on ``event`` its managers and submitters, or a speaker with submission rights on
     one of its talks; without an event page, the same over the meetings the chat can find by name."""

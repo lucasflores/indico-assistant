@@ -149,8 +149,8 @@ registrations, payments, room booking.
 a knowledge answer, a **chat answer** (from the conversation so far, informed by general knowledge; nothing looked
 up or changed), a data answer (the NL2SQL pipeline, with Jev's intent and no classifier call), a change (the
 planner), or a refusal. "Can you add a Teams meeting?" is a change: the plan card, which asks for confirmation, is the
-offer; anything the planner cannot plan gets the knowledge answer. A plain yes, or one of a waiting plan's own
-choices, goes straight to the planner. Without a Jev key, or when it is slow, the classifier routes instead (never
+offer; anything the planner cannot plan gets the knowledge answer. A plain yes to a change the last answer offered
+plans that change; a plain yes, or one of a waiting plan's own choices, goes straight to the planner. Without a Jev key, or when it is slow, the classifier routes instead (never
 both). Every answer records its route in its metadata.
 
 **The guide copy.** `indico assistant guide-build --commit <sha>` rebuilds it from a guide commit, for a release.

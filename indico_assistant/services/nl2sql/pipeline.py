@@ -384,6 +384,8 @@ class NL2SQLPipeline:
 
                 classification = QueryClassification(
                     intent=intent, confidence=intent_confidence if intent_confidence is not None else 0.9)
+                # "last week" -> dates: plain code, not the classifier's model call
+                classification = self._classifier._resolve_time_references(classification, question)
                 classification_time = 0
             else:
                 # Step 2: Classify the question (T025)

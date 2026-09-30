@@ -381,6 +381,16 @@ class TestNL2SQLPipelineRoutedByJev:
         assert classification.intent == "speaker_query" and classification.confidence == 0.97
         assert classification.entities == [] and classification.time_range is None  # the generator reads them
 
+    def test_a_given_intent_still_gets_its_dates(self, pipeline: NL2SQLPipeline) -> None:
+        """(review, PR #15) "last week" -> dates is plain code, not the classifier's model call: it still runs"""
+        pipeline._classifier.classify = MagicMock()
+        pipeline._generator.generate = MagicMock(return_value=MagicMock(success=False, data=None, error="stop here"))
+
+        pipeline.process("Which meetings did I have last week?", user_id=1, intent="event_query")
+
+        pipeline._classifier.classify.assert_not_called()
+        assert pipeline._generator.generate.call_args.args[1].time_range is not None
+
     def test_the_chat_intent_stops_after_classification(
         self,
         pipeline: NL2SQLPipeline,

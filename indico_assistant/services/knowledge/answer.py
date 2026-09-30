@@ -31,6 +31,7 @@ Rules:
 - If the material does not cover the question, say so plainly. Never invent menus, buttons, pages or steps.
 - Answer in the language of the question. Be short: a few sentences, or a short numbered list."""
 
+EARLIER_CHARS = 300
 NOT_ANSWERED = "I could not answer that just now. Please try again in a moment."
 
 
@@ -59,9 +60,10 @@ def answer(message, history, *, llm, caps, pages, guide, base_url, event=None):
     """Answer ``message``. ``caps`` and ``pages`` are this user's lists (built as the user by the caller)."""
     from indico_assistant.services.llm.service import collect_calls
 
-    # a follow-up ("how would I do it myself?") names nothing: search with the user's question before it too
+    # a follow-up ("how would I do it myself?") names nothing: search with the user's question before it too, after
+    # this one and cut short, so a long earlier message cannot push the question out of the model's 512 tokens
     earlier = next((m.get("content") for m in reversed(history) if m.get("role") == "user"), None)
-    excerpts = guide.excerpts(f"{earlier}\n{message}" if earlier else message)
+    excerpts = guide.excerpts(f"{message}\n{earlier[:EARLIER_CHARS]}" if earlier else message)
     prompt = "\n\n".join((
         "## Indico's user guide (excerpts; cite the ones you use)\n" + _excerpts_block(excerpts),
         "## Pages\n" + page_list.render(pages, event),

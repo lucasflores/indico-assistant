@@ -1,7 +1,8 @@
 """Links in a knowledge answer, checked by code after the model wrote them (spec 022, FR-012 and FR-016).
 
 A link to this Indico must be a page of the user's page list; it is rebased onto the instance's address, whatever host
-the model put in front of the path. A guide link must be a page of the shipped copy. Anything else loses its link:
+the model put in front of the path, except the home page "/", which every site has (``[Google](https://google.com/)``
+is not a link to this Indico). A guide link must be a page of the shipped copy. Anything else loses its link:
 a markdown link keeps its label, a bare URL is removed.
 """
 
@@ -35,7 +36,7 @@ def _key(path):
 def check(text, pages, guide_urls, base_url):
     """``text`` with every link checked. ``pages``: paths the user can open; ``guide_urls``: the copy's pages."""
     known = {_key(p): p for p in pages}
-    base = base_url.rstrip("/")
+    base, host = base_url.rstrip("/"), urlsplit(base_url).netloc
 
     def resolve(url):
         parts = urlsplit(url)
@@ -45,6 +46,8 @@ def check(text, pages, guide_urls, base_url):
             return url if page in guide_urls else None
         if parts.netloc in KEPT_HOSTS:
             return url
+        if parts.netloc not in ("", host) and _key(parts.path) == "/":
+            return None
         if parts.path.startswith("/") and (page := known.get(_key(parts.path))):
             return base + page + anchor
         return None

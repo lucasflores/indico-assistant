@@ -70,12 +70,13 @@ class TestSettingsForm:
         assert range_validator.max == 32000
 
     def test_api_key_is_password_field(self):
-        """API key field should be a PasswordField for masking."""
-        from wtforms.fields import PasswordField
+        """The secrets are masked, and re-rendered: a plain PasswordField comes back empty, and Indico saves
+        form.data, so saving any other setting would clear them."""
+        from indico.web.forms.fields import IndicoPasswordField
         from indico_assistant.forms import SettingsForm
 
-        api_key_field = SettingsForm.llm_api_key
-        assert api_key_field.field_class == PasswordField
+        for field in (SettingsForm.llm_api_key, SettingsForm.jev_api_key, SettingsForm.chainlit_auth_secret):
+            assert field.field_class is IndicoPasswordField and field.kwargs["toggle"] is True
 
 
 class TestEventSettingsForm:
@@ -159,14 +160,15 @@ def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
 
 
 def test_the_jev_settings(monkeypatch):
-    """Spec 022: the router's key (a password field, never shown) and its timeout."""
-    from wtforms.fields import FloatField, PasswordField
+    """Spec 022: the router's key (a password field, hidden unless shown) and its timeout."""
+    from indico.web.forms.fields import IndicoPasswordField
+    from wtforms.fields import FloatField
     from wtforms.validators import NumberRange
 
     from indico_assistant.default_settings import DEFAULT_SETTINGS
     from indico_assistant.forms import SettingsForm
 
-    assert SettingsForm.jev_api_key.field_class is PasswordField and DEFAULT_SETTINGS["jev_api_key"] is None
+    assert SettingsForm.jev_api_key.field_class is IndicoPasswordField and DEFAULT_SETTINGS["jev_api_key"] is None
     field = SettingsForm.jev_timeout_seconds
     (bounds,) = [v for v in field.kwargs["validators"] if isinstance(v, NumberRange)]
     assert field.field_class is FloatField and (bounds.min, bounds.max) == (0.2, 10)

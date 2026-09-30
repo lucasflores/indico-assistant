@@ -150,20 +150,46 @@ def test_without_jev_a_change_it_cannot_plan_also_falls_through(routed):
     assert s.plan.call_args.args[4] is None  # a new request
 
 
+OFFER = "add a Microsoft Teams meeting to Sync"
+
+
+def test_a_plain_yes_to_an_offer_plans_what_was_offered(routed):
+    """Not the older waiting plan, and with no Jev decision: the planner is asked for the offered change."""
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.plan.return_value = PLAN
+    result, route = run("yes please", waiting_plan=MagicMock(questions=[], suggestions=[], draft={}))
+    assert result.plan == {"id": "p1"} and route["route"] == "change" and route["shortcut"] is True
+    s.decide.assert_not_called() and s.nl2sql.assert_not_called()
+    assert s.plan.call_args.args[2] == OFFER and s.plan.call_args.args[4] is None
+
+
+def test_any_other_reply_to_an_offer_goes_to_jev_with_the_offer(routed):
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.decide.return_value = jev("change")
+    s.plan.return_value = PLAN
+    run("yes, but only for next week's", waiting_plan=MagicMock())
+    assert s.decide.call_args.kwargs == {"plan_waiting": False, "offer": OFFER}
+    assert s.plan.call_args.args[2] == "yes, but only for next week's" and s.plan.call_args.args[4] is None
+
+
 def test_without_jev_an_offer_sends_the_next_message_to_the_planner(routed):
     run, s = routed
-    s.manager.offer_before.return_value = "add a Microsoft Teams meeting to Sync"
+    s.manager.offer_before.return_value = OFFER
     s.plan.return_value = PLAN
-    result, route = run("yes please")
+    result, route = run("sure, for Sync")
     assert result.plan == {"id": "p1"} and route["route"] == "change"
     s.nl2sql.assert_not_called()
 
 
-def test_with_jev_the_offer_is_not_consulted(routed):
+def test_without_jev_the_planner_is_not_asked_twice(routed):
     run, s = routed
-    s.decide.return_value = jev("chat")
-    run("thanks")
-    s.manager.offer_before.assert_not_called()
+    s.manager.offer_before.return_value = OFFER
+    s.plan.return_value = CANNOT
+    s.nl2sql.return_value = ("", {"write_request": True})
+    result, route = run("sure, for Sync")
+    assert s.plan.call_count == 1 and result.response == KNOWLEDGE.text and route["fallback"] == "classifier, planner"
 
 
 def test_the_planners_answer_carries_its_cannot_plan_flag():

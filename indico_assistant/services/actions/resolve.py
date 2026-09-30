@@ -19,6 +19,7 @@ from indico.core.db.sqlalchemy.principals import PrincipalType
 from indico.modules.categories.models.principals import CategoryPrincipal
 from indico.modules.categories.util import can_create_unlisted_events
 from indico.modules.users.util import search_users
+from indico.util.caching import memoize_request
 from indico.util.date_time import now_utc
 
 from indico_assistant.default_settings import DEFAULT_SETTINGS
@@ -177,12 +178,14 @@ def _candidates(user, permission, modes):
     return query.filter(or_(Category.id.in_(ids), Category.event_creation_mode.in_(modes)))
 
 
+@memoize_request  # (per job: each Celery job is its own request, so new rights show up next time)
 def creatable_categories(user):
     """Categories where ``user`` may create events, as Indico decides it (``can_create_events``)."""
     candidates = _candidates(user, 'create', [EventCreationMode.open])
     return sorted((c for c in candidates if c.can_create_events(user)), key=category_path)
 
 
+@memoize_request
 def proposable_categories(user):
     """Categories where ``user`` may only propose events (``can_propose_events``, research R4)."""
     candidates = _candidates(user, 'event_move_request', [EventCreationMode.moderated])
@@ -579,6 +582,7 @@ def meeting_in_view(chat_session_id, user, page_event_id=PAGE_FROM_CHAT):
     return page if arrived is not None and arrived > made_at else made
 
 
+@memoize_request
 def managed_meetings(user):
     """Meetings the user manages, from a month ago onwards, soonest first."""
     from indico.modules.users.util import get_linked_events

@@ -173,28 +173,35 @@ class ChatService:
             context = [*context[:at], note, *context[at:]]
         from indico_assistant.services.actions.executor import open_plan
         waiting_plan = open_plan(session.id)
+        # the change the last answer offered: newer than any waiting plan, so a "yes" now agrees to it
+        offer = self._session_manager.offer_before(session.id, message_id)
+        if offer:
+            waiting_plan = None
         db.session.commit()
 
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
-        # Spec 022 (Lucas, 2026-09-30), in order: a plain yes, or one of the plan's own choices, to a waiting plan goes
-        # straight to the planner; otherwise one Jev decision gives the route and a data question's kind; without
-        # Jev the classifier routes, with the planner first after an offer. A change the planner cannot plan gets
-        # the knowledge answer.
-        from indico_assistant.services.actions.planner import exact_reply
+        # Spec 022 (Lucas, 2026-09-30), in order: a plain yes to an offer plans the offered change, and a plain yes,
+        # or one of the plan's own choices, to a waiting plan goes straight to the planner; otherwise one Jev
+        # decision gives the route and a data question's kind; without Jev the classifier routes, with the planner
+        # first after an offer. A change the planner cannot plan gets the knowledge answer.
+        from indico_assistant.services.actions.planner import AFFIRMATIVE, exact_reply
         from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 
         decision, fallback, planned, answer, open_for_change = None, None, None, None, waiting_plan
-        if exact_reply(waiting_plan, message):
+        request, tried = message, False  # what the planner is asked; whether it was already asked
+        if offer and AFFIRMATIVE.fullmatch(message):
+            route, request = "change", offer  # (the planner has no plan to confirm: it plans what was offered)
+        elif exact_reply(waiting_plan, message):
             route = "change"
         else:
-            decision = self._decide(context, plan_waiting=waiting_plan is not None)
+            decision = self._decide(context, plan_waiting=waiting_plan is not None, offer=offer)
             route = decision.route
             if decision.skipped:  # no key, slow, or an error: the classifier routes, as before the router
                 fallback, open_for_change = "classifier", None  # (a change it finds is a new request)
-                offer = None if waiting_plan else self._session_manager.offer_before(session.id, message_id)
                 if waiting_plan or offer:
                     planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
+                    tried = waiting_plan is None  # (asked as a new request: asking again would give the same)
                     if planned is not None and waiting_plan is None and planned[1].get("cannot_plan"):
                         planned = None  # not a change after all: routed as if there had been no offer
                 route = "change" if planned is not None else None
@@ -210,7 +217,8 @@ class ChatService:
             elif route == "out_of_scope":
                 route, response_text, metadata = "refusal", OUT_OF_SCOPE_MESSAGE, {}
         if route == "change" and planned is None:
-            planned = self._plan(user, session.id, message, context, open_for_change, event_id)
+            if not tried:
+                planned = self._plan(user, session.id, request, context, open_for_change, event_id)
             if planned is None or (planned[1].get("cannot_plan") and open_for_change is None):
                 planned, route, fallback = None, "knowledge", ", ".join(filter(None, (fallback, "planner")))
         if route == "knowledge":
@@ -274,7 +282,7 @@ class ChatService:
         return (turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None,
                              "cannot_plan": turn.cannot_plan}, turn.plan)
 
-    def _decide(self, context, plan_waiting=False):
+    def _decide(self, context, plan_waiting=False, offer=None):
         """Jev's route for the latest message; skipped (the classifier routes) without a key, slow, or on an error."""
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.knowledge import gate
@@ -283,7 +291,7 @@ class ChatService:
             settings = AssistantPlugin.instance.settings.get_all()
         except RuntimeError:  # the plugin is not active (tests, scripts): no key, so the classifier routes
             settings = {}
-        return gate.decide(context, settings, plan_waiting=plan_waiting)
+        return gate.decide(context, settings, plan_waiting=plan_waiting, offer=offer)
 
     def _chat(self, message, context):
         """The chat answer (spec 022): from the conversation, informed by general knowledge."""
