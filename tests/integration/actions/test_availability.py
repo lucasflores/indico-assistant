@@ -107,3 +107,10 @@ def test_categories_a_reason_means_no_category_allows_it(action_allows, create_c
 
 def test_undo_is_always_offered(people):
     assert _available('delete_created', people['stranger']) is None  # it undoes only what it did in the chat
+
+
+@pytest.mark.parametrize('name', ['update_event', 'add_contribution', 'add_reminder', 'attach_link'])
+def test_without_an_event_page_a_locked_meeting_does_not_count(people, dummy_event, name):
+    """(Copilot, PR #15) the checks refuse every change to a locked meeting"""
+    dummy_event.is_locked = True
+    assert _available(name, people['manager']) == 'The meetings you manage are locked'

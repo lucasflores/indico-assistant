@@ -101,3 +101,25 @@ def test_reasons_are_about_the_user_not_the_assistant():
     text = caps.render()
     assert "they cannot create events in any category on this Indico" in text and "You cannot" not in text
     assert "never tell the user to do it themselves" in knowledge.RULES
+
+
+def test_a_follow_up_searches_the_guide_with_the_question_before_it():
+    """(Copilot, PR #15) "how would I do it myself?" alone finds nothing about the thing discussed"""
+    asked = []
+
+    class Recording(FakeGuide):
+        def excerpts(self, question, k=6):
+            asked.append(question)
+            return super().excerpts(question, k)
+
+    history = [{"role": "user", "content": "Can you add a Teams meeting to this event?"},
+               {"role": "assistant", "content": "Yes, here is the plan."}]
+    knowledge.answer("how would I do it myself?", history, llm=FakeLLM(reply="Open Videoconference."), caps=CAPS,
+                     pages=PAGES, guide=Recording(), base_url=BASE)
+    assert asked == ["Can you add a Teams meeting to this event?\nhow would I do it myself?"]
+
+
+def test_the_never_line_does_not_deny_teams():
+    """(Copilot, PR #15) Teams is outside Indico and supported: only name what it has no access to"""
+    text = CAPS.render()
+    assert "no connection to anything outside Indico" not in text and "GitHub" in text

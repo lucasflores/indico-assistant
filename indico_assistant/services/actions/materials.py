@@ -112,10 +112,13 @@ def _attach_available(user, event):
         if (reason := _attach_refusal(event, user)) is None or _own_talks(event, user):
             return None
         return reason
-    if managed_meetings(user) or any(_own_talks(e, user) for e in map(Event.get, get_events_with_linked_contributions(
-            user, dt=now_utc() - timedelta(days=30))) if e is not None and not e.is_deleted):
+    from indico_assistant.services.actions.contributions import _reachable_refusal
+
+    if (reason := _reachable_refusal(managed_meetings(user))) is None or any(
+            _own_talks(e, user) for e in map(Event.get, get_events_with_linked_contributions(
+                user, dt=now_utc() - timedelta(days=30))) if e is not None and not e.is_deleted):
         return None
-    return 'You do not manage any meeting'
+    return reason
 
 
 def _own_talks(event, user):

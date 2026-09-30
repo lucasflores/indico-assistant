@@ -41,8 +41,12 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
   - Chainlit Server URL: `https://assistant.example.org`
   - Chainlit Auth Secret: the same as Chainlit's
 - Restart Indico after changing the secret.
-- Knowledge answers (spec 022) work without anything more: the user-guide copy ships in the plugin, and answering
-  needs no internet access beyond the LLM service.
+- Knowledge answers (spec 022): the user-guide copy ships in the plugin. Searching it needs the embedding model
+  `BAAI/bge-small-en-v1.5` in the worker's Hugging Face cache, the same model document search uses. The worker
+  downloads it on first use; on an instance without internet access, pre-download it (for example
+  `python -c "from sentence_transformers import SentenceTransformer as S; S('BAAI/bge-small-en-v1.5')"` where there
+  is access, then copy the cache, or set `HF_HOME`). Without it, knowledge answers come from the capability and page
+  lists alone, and the worker's log says "guide copy unavailable" (the health check reads only the copy's files).
 - Optional: **Router key (Jev)**, an OpenRouter key. The Celery worker then needs outbound HTTPS to `openrouter.ai`
   (the decisions endpoint). Without the key, or when it is unreachable, the classifier routes.
 - For a release, rebuild the guide copy from a pinned commit: `indico assistant guide-build --commit <sha>`
