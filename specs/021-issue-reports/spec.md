@@ -76,8 +76,8 @@ through the assistant's API as that user.
 ### User Story 2 - The user sees their reports and their status (Priority: P1)
 
 The user opens their Indico profile, where a new "Assistant reports" item lists what they sent. Each report shows
-its category, when it was sent, its status (open, under review or closed), the team's note, and when the status last
-changed. They can open a report and see exactly what was sent, including the attached copy.
+its category, when it was sent, its status (open, under review or closed), the team's note, and when the team last
+updated it. They can open a report and see exactly what was sent, including the attached copy.
 
 **Why this priority**: Lucas asked for the status to be visible to the user. It is also the only way the user hears
 back, since there is no email.
@@ -90,7 +90,7 @@ API.
 
 1. **Given** the user has sent reports, **When** they open their profile, **Then** "Assistant reports" is in the
    profile menu and lists their reports, newest first, each with its category, the start of the text, the date
-   sent, the status, the team's note and when the status last changed.
+   sent, the status, the team's note and when the team last updated it.
 2. **Given** the user opens one of their reports, **Then** they see the full text and, if attached, the copy of the
    conversation exactly as the team sees it.
 3. **Given** an admin changed the status or the note, **When** the user next loads the page, **Then** they see the
@@ -166,8 +166,7 @@ No report exists until Send is pressed.
 - **Navigation**: an offer, an open form or a "Report sent" note under an answer is not drawn again after the panel
   reloads on the next page. The Report button in the input bar always is. A form not yet sent is lost with the page,
   and the user starts it again.
-- **The conversation is deleted or purged** after a report: the report and its copy stay. The link from the report to
-  the conversation is cleared.
+- **The conversation is deleted or purged** after a report: the report and its copy stay unchanged.
 - **Very long conversations**: the copy holds the 50 messages that end at the reported answer (or at the latest
   message). The copy says when earlier messages were left out.
 - **The reported answer is still being prepared**: an offer exists only under a finished answer. The input bar's
@@ -202,6 +201,9 @@ No report exists until Send is pressed.
   question's recorded evidence: intent and its confidence, row count, success or error, a check's rejection,
   correction attempts, and cached or not. The copy MUST NOT include email addresses or IP addresses from the
   assistant's query log.
+- **FR-003a**: A report MUST copy only a conversation of the user sending it, and a reported answer MUST belong to
+  that conversation. Anything else is refused, with the same refusal whether the conversation exists or not
+  (FR-014).
 - **FR-004**: When the box is unticked, the report MUST store only the category and the text, plus the user and the
   time.
 - **FR-005**: A report MUST be stored at most once per form, however many times Send is pressed.
@@ -209,8 +211,8 @@ No report exists until Send is pressed.
   Indico page (spec 020 FR-006b).
 - **FR-007**: The form MUST follow the panel's look (light or dark), and MUST work with the keyboard and a screen
   reader. The categories form one labelled choice, and the result of Send is announced.
-- **FR-008**: Report sending MUST be limited to 20 reports per user per day. It MUST NOT count against the chat's
-  question limit.
+- **FR-008**: Report sending MUST be limited to 20 reports per user per day. Sending the same form again (FR-005)
+  MUST NOT count again. It MUST NOT count against the chat's question limit.
 
 **Suggesting a report (US4)**
 
@@ -223,7 +225,7 @@ No report exists until Send is pressed.
 **Seeing reports (US2)**
 
 - **FR-012**: A user's Indico profile MUST show an "Assistant reports" item once they have sent a report. It lists
-  their reports, newest first, with category, date, status, the team's note and when the status last changed.
+  their reports, newest first, with category, date, status, the team's note and when the team last updated it.
 - **FR-013**: A user MUST be able to read each of their reports in full, including the copy exactly as the team sees
   it.
 - **FR-014**: A user MUST only ever see their own reports. This is checked by Indico on every request, and a refusal
@@ -233,8 +235,8 @@ No report exists until Send is pressed.
 **Triage (US3)**
 
 - **FR-015**: Indico admins, and only they, MUST have an "Assistant reports" page in the admin menu. The menu item
-  shows the number of open reports. The page lists all reports, newest first, and can be filtered by status and
-  category.
+  shows the number of open reports. The page lists all reports, newest first, a page at a time, and can be
+  filtered by status and category.
 - **FR-016**: An admin MUST be able to open any report and read its text and copy, with the reported answer marked
   and its evidence shown (FR-003).
 - **FR-017**: An admin MUST be able to set the status (open, under review, closed) and edit one note. Each save
@@ -244,8 +246,8 @@ No report exists until Send is pressed.
 
 **Storage and retention**
 
-- **FR-019**: Reports MUST be stored in the plugin's own schema. A report keeps its copy when the conversation is
-  deleted or purged. Its link to the conversation is then cleared.
+- **FR-019**: Reports MUST be stored in the plugin's own schema. A report does not point at the live conversation. It
+  keeps its copy, unchanged, when the conversation is deleted or purged.
 - **FR-020**: A closed report MUST be deleted, with its copy, once it has been closed for the report retention
   period. This is a new admin setting, 365 days by default, where 0 means keep forever. Open reports and reports
   under review MUST NOT be deleted by retention. Reopening a report restarts its count.
@@ -256,7 +258,8 @@ No report exists until Send is pressed.
 
 - **Issue report**: one report from one user. It has a category, the user's text, a status, the team's note, who
   last changed the status or note and when, when it was sent, and when it was closed (empty unless closed). It
-  optionally has a conversation copy. It links to the conversation and to the reported answer while they exist.
+  optionally has a conversation copy. It does not point at the live conversation. The copy marks the reported
+  answer.
 - **Conversation copy**: a frozen snapshot, taken when the report is sent. It holds up to 50 messages with their
   times, pages and recorded evidence, and marks the reported answer. It notes whether earlier messages were left
   out. It is never updated afterwards.
@@ -279,8 +282,7 @@ No report exists until Send is pressed.
 - **SC-005**: Automated tests show that retention deletes a closed report past the period and keeps every open or
   under-review report, whatever its age.
 - **SC-006**: An admin's status or note change shows on the user's profile page at its next load, in every test.
-- **SC-007**: No regression. The unit and contract suite passes (1207 at `2e52051`, plus the new tests), and spec
-  020's browser walks (walk, sidebar, feedback) pass unchanged.
+- **SC-007**: No regression. Every existing automated test and browser check of the chat panel passes unchanged.
 
 ## Assumptions
 
@@ -333,5 +335,8 @@ A throwaway Chainlit 2.12.0 app, run headless in Chrome at a panel's 480 px widt
   (`services/actions/planner.py`).
 - **Retention**: `tasks/cleanup.py`'s `RETENTION` list takes the reports table keyed on `closed_at`. Rows with no
   `closed_at` never match, which is exactly FR-020.
-- **Rate limit**: a new `report` entry in `RATE_LIMITS` (`services/chat/rate_limiter.py`), used through
-  `RHChatBase.RATE_LIMIT`.
+- **No-regression baseline** (SC-007): `pytest tests/unit tests/contract` passes 1207 at `2e52051`. Spec 020's
+  `tests/browser/` walks are walk, sidebar and feedback.
+- **Rate limit**: a new `report` entry in `RATE_LIMITS` (`services/chat/rate_limiter.py`). It is checked only after
+  the idempotency check (FR-005, FR-008), because `RHChatBase.RATE_LIMIT` counts in `_check_access`, before the
+  handler runs, so a resend would count twice there.
