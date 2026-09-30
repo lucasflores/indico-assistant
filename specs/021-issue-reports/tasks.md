@@ -417,12 +417,12 @@ without overwriting anyone.
     retention;
   - `docs/DEPLOYMENT.md`: migration 009 and the `retention_report_days` setting;
   - `quickstart.md`: anything learned while building.
-- [ ] T046 Full checks:
+- [x] T046 Full checks:
   - the plugin suite equals the baseline plus the new tests, with only the 7 citation failures;
   - the Chainlit tests pass;
   - `ruff check` is clean on every changed Python file;
   - `reports.mjs` passes.
-- [ ] T047 Open the feature's one PR, `021-issue-reports-build` → `main`:
+- [x] T047 Open the feature's one PR, `021-issue-reports-build` → `main`:
   - the description covers the spec, the plan, and the numbers from T043, T044 and T046;
   - add Copilot as reviewer once;
   - hand Lucas the link, and never merge.
