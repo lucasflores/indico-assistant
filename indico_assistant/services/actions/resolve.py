@@ -33,6 +33,8 @@ DEFAULT_SLOT = 20  # Indico's default contribution duration
 MAX_CHOICES = 10
 ME = {'me', 'i', 'myself', 'us', 'we', 'both of us'}
 WEEKDAYS = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')
+#: The refusal when a change request changes nothing (spec 022: the chat gives the knowledge answer instead)
+NOTHING_TO_CHANGE = 'I did not find anything to change. What should be different?'
 
 
 @dataclass
@@ -735,7 +737,7 @@ def _change_meeting(step, user, settings, chat_session_id, page_event_id=PAGE_FR
         notes.append(f'The meeting is extended to end at {after.astimezone(tz):%H:%M} to fit the new talks.')
 
     if not steps and not questions:
-        return Resolved(refusal='I did not find anything to change. What should be different?')
+        return Resolved(refusal=NOTHING_TO_CHANGE)
     if change.get('start_dt'):
         notes.extend(_clashes(user, [user], start, end))
     _describe(steps)

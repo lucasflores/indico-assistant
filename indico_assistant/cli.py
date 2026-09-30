@@ -72,6 +72,16 @@ def health_command():
     if llm_error:
         click.echo(f"  Error: {llm_error}")
 
+    from indico_assistant.services.knowledge import guide
+
+    knowledge = guide.status({"knowledge_jev_api_key": plugin.settings.get("knowledge_jev_api_key")})
+    click.echo("Knowledge: ", nl=False)
+    if knowledge["ok"]:
+        click.secho(f"guide {knowledge['guide_commit'][:7]}, {knowledge['pages']} pages, {knowledge['model']}; "
+                    f"gate: {knowledge['gate']}", fg="green")
+    else:
+        click.secho(f"{knowledge['problem']}; gate: {knowledge['gate']}", fg="yellow")
+
 
 @cli.command("config")
 @click.option("--show-secrets", is_flag=True, help="Show API keys (masked by default)")

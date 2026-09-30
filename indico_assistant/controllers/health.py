@@ -60,10 +60,16 @@ class RHHealth(RH):
         llm_info = self._check_llm_status(plugin)
         llm_status = llm_info.get("status", "not_configured")
 
+        # Spec 022: the guide copy and the gate (a broken copy degrades the plugin, it never fails it)
+        from indico_assistant.services.knowledge import guide
+
+        knowledge = guide.status({"knowledge_jev_api_key": plugin.settings.get("knowledge_jev_api_key")}
+                                 if plugin else {})
+
         # Determine overall status
         if not enabled:
             status = "unhealthy"
-        elif llm_status not in ("connected", "configured"):
+        elif llm_status not in ("connected", "configured") or not knowledge.get("ok"):
             status = "degraded"
         else:
             status = "healthy"
@@ -76,6 +82,7 @@ class RHHealth(RH):
             "plugin_version": __version__,
             "indico_version": get_indico_version(),
             "llm": llm_info,  # Full LLM status with details
+            "knowledge": knowledge,
             "settings_valid": settings_valid,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

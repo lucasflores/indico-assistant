@@ -32,6 +32,7 @@ class TestChatService:
         manager = MagicMock()
         manager.commit = MagicMock()
         manager.rollback = MagicMock()
+        manager.offer_before.return_value = None  # spec 022: no answer offered a change
         return manager
 
     @pytest.fixture
