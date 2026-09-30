@@ -164,14 +164,57 @@ def test_a_plain_yes_to_an_offer_plans_what_was_offered(routed):
     assert s.plan.call_args.args[2] == OFFER and s.plan.call_args.args[4] is None
 
 
-def test_any_other_reply_to_an_offer_goes_to_jev_with_the_offer(routed):
+def test_any_other_reply_to_an_offer_goes_to_jev_with_both_notes(routed):
     run, s = routed
     s.manager.offer_before.return_value = OFFER
     s.decide.return_value = jev("change")
     s.plan.return_value = PLAN
-    run("yes, but only for next week's", waiting_plan=MagicMock())
-    assert s.decide.call_args.kwargs == {"plan_waiting": False, "offer": OFFER}
-    assert s.plan.call_args.args[2] == "yes, but only for next week's" and s.plan.call_args.args[4] is None
+    waiting = MagicMock()
+    run("yes, but only for next week's", waiting_plan=waiting)
+    assert s.decide.call_args.kwargs == {"plan_waiting": True, "offer": OFFER}
+    assert s.plan.call_args.args[2] == "yes, but only for next week's" and s.plan.call_args.args[4] is waiting
+
+
+def test_a_choice_on_the_waiting_plan_still_answers_it_after_an_offer(routed, monkeypatch):
+    """(review, PR #15) FR-001: an offer wins over the waiting plan only for a plain yes"""
+    from indico_assistant.services.actions import planner
+
+    monkeypatch.setattr(planner, "answered_draft", lambda plan, message: "draft" if message == "Engineering" else None)
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.plan.return_value = PLAN
+    waiting = MagicMock(questions=[], suggestions=[], draft={})
+    result, route = run("Engineering", waiting_plan=waiting)
+    assert route["shortcut"] is True and s.plan.call_args.args[4] is waiting
+    s.decide.assert_not_called()
+
+
+def test_a_plain_no_answers_the_waiting_plan(routed):
+    """(review, PR #15) the planner cancels it: left waiting, a later yes to anything would carry it out"""
+    run, s = routed
+    s.plan.return_value = ("OK, I cancelled that plan; nothing was changed.", {"plan_id": None}, None)
+    waiting = MagicMock(questions=[], suggestions=[], draft={})
+    result, route = run("no thanks", waiting_plan=waiting)
+    assert route["shortcut"] is True and s.plan.call_args.args[4] is waiting
+    s.decide.assert_not_called()
+
+
+def test_a_plain_no_to_an_offer_turns_down_the_offer_not_the_plan(routed):
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.decide.return_value = jev("chat")
+    run("no", waiting_plan=MagicMock(questions=[], suggestions=[], draft={}))
+    s.plan.assert_not_called()
+    assert s.decide.call_args.kwargs["offer"] == OFFER
+
+
+def test_an_offer_the_planner_cannot_plan_gets_a_knowledge_answer_about_the_offer(routed):
+    """(review, PR #15) about the offered change, not the word "yes", which would offer it again"""
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.plan.return_value = CANNOT
+    result, route = run("yes")
+    assert result.response == KNOWLEDGE.text and s.knowledge.call_args.args[1] == OFFER
 
 
 def test_without_jev_an_offer_sends_the_next_message_to_the_planner(routed):
@@ -180,6 +223,7 @@ def test_without_jev_an_offer_sends_the_next_message_to_the_planner(routed):
     s.plan.return_value = PLAN
     result, route = run("sure, for Sync")
     assert result.plan == {"id": "p1"} and route["route"] == "change"
+    assert route["fallback"] == "planner first"  # (review, PR #15) the classifier never ran
     s.nl2sql.assert_not_called()
 
 
@@ -206,6 +250,15 @@ def test_the_planners_answer_carries_its_cannot_plan_flag():
         reply, metadata, plan = service._plan(MagicMock(), uuid4(), "Can you book a room?", [], None)
     assert (reply, metadata, plan) == ("I cannot do that from the chat yet.", {"plan_id": None, "cannot_plan": True}, None)
 
+
+
+def test_the_history_is_the_conversation_before_the_question():
+    """For an accepted offer the planner is asked the offer: the bare "yes" must not stay in its history."""
+    from indico_assistant.services.chat.service import _history
+
+    talk = [{"role": "user", "content": "can you add Teams?"}, {"role": "assistant", "content": "Shall I?"},
+            {"role": "system", "content": "The user is on event 5."}, {"role": "user", "content": "yes"}]
+    assert _history(talk) == talk[:-1] and _history(talk[:-1]) == talk[:-1] and _history([]) == []
 
 
 def test_an_unknown_data_intent_is_recorded_as_the_classifiers(routed):

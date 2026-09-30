@@ -1,6 +1,7 @@
 """The router: one Jev decision gives the route and, for data, the kind of question (spec 022, Lucas 2026-09-30)."""
 
 import re
+import time
 
 import httpx
 import pytest
@@ -117,6 +118,16 @@ def test_a_late_decision_is_skipped(monkeypatch):
     monkeypatch.setattr(gate.time, "monotonic", lambda: next(clock))
     decision = gate.decide(TALK, SETTINGS, transport=_transport())
     assert decision.skipped and decision.reason == "timeout" and decision.route is None
+
+
+def test_one_deadline_for_the_whole_call():
+    """(review, PR #15) httpx's timeout is per phase: the user never waits past the setting for a decision"""
+    def slow(payload, key, timeout):
+        time.sleep(1.0)
+        return _answer()
+    started = time.monotonic()
+    decision = gate.decide(TALK, {**SETTINGS, "jev_timeout_seconds": 0.2}, transport=slow)
+    assert decision.skipped and decision.reason == "timeout" and time.monotonic() - started < 0.6
 
 
 def test_a_conversation_without_a_user_message_is_skipped():

@@ -6,6 +6,7 @@ loaded copy serves both. Anything wrong (no copy, a model that cannot load, dime
 guide unavailable, never an exception: knowledge answers then come from the capability and page lists alone.
 """
 
+import functools
 import json
 import logging
 import threading
@@ -101,9 +102,14 @@ def get_guide():
     return _guide
 
 
+@functools.lru_cache(maxsize=4)
+def _described(directory):
+    """(the shipped files do not change while a process runs: read once, not on every health request)"""
+    return Guide(directory).describe()
+
+
 def status(settings):
     """The knowledge route's state for the health check: the guide copy's files and which gate decides."""
     from indico_assistant.services.knowledge.guide_build import OUT_DIR
 
-    return {**Guide(OUT_DIR).describe(),
-            "gate": "jev" if settings.get("jev_api_key") else "classifier only"}
+    return {**_described(OUT_DIR), "gate": "jev" if settings.get("jev_api_key") else "classifier only"}

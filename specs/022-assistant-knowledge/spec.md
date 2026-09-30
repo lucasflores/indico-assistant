@@ -155,9 +155,10 @@ With the guide index present, no question needs the internet beyond the instance
 **Routing** (each message, in this order; revised 2026-09-30)
 - **FR-001**: **The shortcut.** When the last answer offered a change and the message is a plain yes, the planner MUST
   be asked for the offered change, as a new request; an offer is newer than any waiting plan. Otherwise, when a plan
-  is waiting and the message is a plain yes, or one of the plan's own choices or suggestions (a button, or typed), the
-  planner MUST take it. Neither needs a routing decision. Any other reply to an offer goes to Jev with a note of the
-  offer (FR-006).
+  is waiting and the message is a plain yes or no, or one of the plan's own choices or suggestions (a button, or
+  typed), the planner MUST take it: it confirms, cancels or answers the plan. A plain no to an offer turns down the
+  offer, not the plan. None of these needs a routing decision. Any other reply goes to Jev with a note of the offer
+  and of the waiting plan (FR-006).
 - **FR-002**: **One Jev decision.** Otherwise, when a Jev key is set, one call to Jev MUST answer two `choice`
   questions about the latest message: its route (knowledge, change, data, chat, out_of_scope) and, for data, its kind
   (the classifier's 11 data intents). The highest-probability route wins.
@@ -235,11 +236,13 @@ With the guide index present, no question needs the internet beyond the instance
   across page navigation.
 - **FR-020**: Each answer MUST record for auditing its route (knowledge, chat, data, change, refusal); Jev's decision
   (route, intent, confidence, and whether and why it was skipped); whether the shortcut was used; any fallback
-  (classifier, planner); and any change the answer offered.
+  (classifier, planner, or "planner first" when, without Jev, an offer or a waiting plan sent it to the planner and
+  the planner took it); and any change the answer offered.
 
 **Settings**
 - **FR-021**: New admin settings: the router's Jev key (optional; stored like the other keys, never displayed) and
-  its timeout (default 1.5 s).
+  its timeout (default 1.5 s), a deadline for the whole call. A secret left empty on the settings form keeps the
+  stored one (a password field is never filled in, so saving any other setting would otherwise clear it).
 
 **The chat answer** (revised 2026-09-30)
 - **FR-023**: A chat answer MUST be one model call through ibis, given the conversation so far. It may use general

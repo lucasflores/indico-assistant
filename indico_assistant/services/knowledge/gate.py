@@ -14,6 +14,8 @@ classifier has it), and chat answers from the conversation, informed by general 
 
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as TooLate
 from dataclasses import dataclass, field
 
 JEV_URL = "https://openrouter.ai/api/alpha/decisions"
@@ -107,7 +109,7 @@ def state_of(messages, plan_waiting=False, offer=None):
     return f"Earlier conversation:\n{convo}{note}LATEST MESSAGE: {latest}"
 
 
-_client = None
+_client = _pool = None
 
 
 def _http(payload, key, timeout):
@@ -144,10 +146,15 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_htt
         payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": QUESTIONS}
     except ValueError:
         return _skipped("error")
+    global _pool
+    if _pool is None:  # (made on first use, after a fork, like the client)
+        _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="jev")
     started = time.monotonic()
     try:
-        body = transport(payload, key, timeout)
-    except httpx.TimeoutException:
+        # one deadline for the whole call: httpx's timeout applies to each phase (connect, read...) separately, so a
+        # slow handshake plus a slow answer could keep the user waiting twice as long. A late call finishes unseen.
+        body = _pool.submit(transport, payload, key, timeout).result(timeout=timeout)
+    except (httpx.TimeoutException, TooLate):
         return _skipped("timeout", int((time.monotonic() - started) * 1000))
     except Exception:  # noqa: BLE001 - the classifier routes instead
         return _skipped("error", int((time.monotonic() - started) * 1000))

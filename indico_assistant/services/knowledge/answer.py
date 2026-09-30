@@ -77,6 +77,7 @@ def answer(message, history, *, llm, caps, pages, guide, base_url, event=None):
     if not response.success:
         result.failed = True
         return result
-    result.text = links.check(response.result.reply, [p.path for p in pages], guide.page_urls, base_url)
+    # (never an empty reply: the model can write none, and the link check can remove a reply that is only a link)
+    result.text = links.check(response.result.reply, [p.path for p in pages], guide.page_urls, base_url) or NOT_ANSWERED
     result.offer = (response.result.offer or "").strip() or None
     return result

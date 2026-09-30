@@ -70,13 +70,12 @@ class TestSettingsForm:
         assert range_validator.max == 32000
 
     def test_api_key_is_password_field(self):
-        """The secrets are masked, and re-rendered: a plain PasswordField comes back empty, and Indico saves
-        form.data, so saving any other setting would clear them."""
-        from indico.web.forms.fields import IndicoPasswordField
-        from indico_assistant.forms import SettingsForm
+        """The secrets are never displayed (spec 022 FR-021): plain password fields, never filled in."""
+        from wtforms.fields import PasswordField
+        from indico_assistant.forms import SECRETS, SettingsForm
 
-        for field in (SettingsForm.llm_api_key, SettingsForm.jev_api_key, SettingsForm.chainlit_auth_secret):
-            assert field.field_class is IndicoPasswordField and field.kwargs["toggle"] is True
+        for name in SECRETS:
+            assert getattr(SettingsForm, name).field_class is PasswordField
 
 
 class TestEventSettingsForm:
@@ -160,17 +159,27 @@ def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
 
 
 def test_the_jev_settings(monkeypatch):
-    """Spec 022: the router's key (a password field, hidden unless shown) and its timeout."""
-    from indico.web.forms.fields import IndicoPasswordField
-    from wtforms.fields import FloatField
+    """Spec 022: the router's key (a password field, never displayed) and its timeout."""
+    from wtforms.fields import FloatField, PasswordField
     from wtforms.validators import NumberRange
 
     from indico_assistant.default_settings import DEFAULT_SETTINGS
     from indico_assistant.forms import SettingsForm
 
-    assert SettingsForm.jev_api_key.field_class is IndicoPasswordField and DEFAULT_SETTINGS["jev_api_key"] is None
+    assert SettingsForm.jev_api_key.field_class is PasswordField and DEFAULT_SETTINGS["jev_api_key"] is None
     field = SettingsForm.jev_timeout_seconds
     (bounds,) = [v for v in field.kwargs["validators"] if isinstance(v, NumberRange)]
     assert field.field_class is FloatField and (bounds.min, bounds.max) == (0.2, 10)
     assert DEFAULT_SETTINGS["jev_timeout_seconds"] == 1.5
     assert not any(k.startswith("knowledge_jev") for k in DEFAULT_SETTINGS)
+
+
+def test_an_empty_secret_keeps_the_stored_one(request_context):
+    """(review, PR #15) Indico saves form.data: an empty password field must not overwrite the stored secret"""
+    from werkzeug.datastructures import MultiDict
+
+    from indico_assistant.forms import SettingsForm
+
+    form = SettingsForm(formdata=MultiDict({"jev_api_key": "", "llm_api_key": "sk-new"}), meta={"csrf": False})
+    assert "jev_api_key" not in form.data and "chainlit_auth_secret" not in form.data
+    assert form.data["llm_api_key"] == "sk-new"

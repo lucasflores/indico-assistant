@@ -2,8 +2,10 @@
 
 A link to this Indico must be a page of the user's page list; it is rebased onto the instance's address, whatever host
 the model put in front of the path, except the home page "/", which every site has (``[Google](https://google.com/)``
-is not a link to this Indico). A guide link must be a page of the shipped copy. Anything else loses its link:
-a markdown link keeps its label, a bare URL is removed.
+is not a link to this Indico). A guide link must be a page of the shipped copy. Anything else loses its link: a
+markdown link keeps its label, a bare URL and a reference definition (``[1]: /admin/``) are removed. Paths are
+relative to BASE_URL, which can have a path of its own (``https://host/indico``). (Raw HTML links are not checked:
+the chat shows HTML as text, never as a link.)
 """
 
 import re
@@ -11,21 +13,31 @@ from urllib.parse import urlsplit
 
 GUIDE_HOST = "learn.getindico.io"
 KEPT_HOSTS = {"docs.getindico.io"}  # Indico's admin documentation: linked as it is, not checked page by page
-_LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)|( ?)(https?://[^\s)\]<>]+)")
+_URL = r"(?:[^\s()<>]|\([^\s()<>]*\))+"  # (one level of parentheses: Wikipedia's "Pion_(particle)")
+_BARE = r"https?://(?:[^\s()<>\]]|\([^\s()<>]*\))+"
+_TITLE = r'(?:\s+"[^"]*")?'
+_LINK = re.compile(rf"\[([^\]]+)\]\(\s*<?({_URL})>?{_TITLE}\s*\)"  # [label](url "title")
+                   rf"|( ?)({_BARE})"  # a bare URL
+                   rf"|^( {{0,3}}\[[^\]]+\]:[ \t]*)<?({_URL})>?{_TITLE}[ \t]*$", re.M)  # [1]: url "title"
+
+
+def _local(path, root):
+    """``path`` relative to BASE_URL's own path (``/indico/event/5/`` -> ``/event/5/`` under ``/indico``)."""
+    return path[len(root):] if root and (path == root or path.startswith(root + "/")) else path
 
 
 def found_in(texts, base_url):
     """(paths of this Indico, guide pages) linked in ``texts``: what a chat answer may link again."""
-    host = urlsplit(base_url).netloc
+    host, root = urlsplit(base_url).netloc, urlsplit(base_url).path.rstrip("/")
     paths, guide = set(), set()
     for text in texts:
         for match in _LINK.finditer(text or ""):
-            url = (match.group(2) or match.group(4)).rstrip(".,;:!?")
+            url = (match.group(2) or match.group(4) or match.group(6)).rstrip(".,;:!?")
             parts = urlsplit(url)
             if parts.netloc == GUIDE_HOST:
                 guide.add(f"https://{GUIDE_HOST}{_key(parts.path) if _key(parts.path) != '/' else ''}/")
             elif parts.path.startswith("/") and parts.netloc in ("", host):
-                paths.add(parts.path)
+                paths.add(_local(parts.path, root))
     return paths, guide
 
 
@@ -36,7 +48,8 @@ def _key(path):
 def check(text, pages, guide_urls, base_url):
     """``text`` with every link checked. ``pages``: paths the user can open; ``guide_urls``: the copy's pages."""
     known = {_key(p): p for p in pages}
-    base, host = base_url.rstrip("/"), urlsplit(base_url).netloc
+    base = base_url.rstrip("/")
+    host, root = urlsplit(base).netloc, urlsplit(base).path
 
     def resolve(url):
         parts = urlsplit(url)
@@ -48,12 +61,15 @@ def check(text, pages, guide_urls, base_url):
             return url
         if parts.netloc not in ("", host) and _key(parts.path) == "/":
             return None
-        if parts.path.startswith("/") and (page := known.get(_key(parts.path))):
+        path = _local(parts.path, root) if parts.netloc in ("", host) else parts.path
+        if path.startswith("/") and (page := known.get(_key(path))):
             return base + page + anchor
         return None
 
     def replace(match):
-        label, url, space, bare = match.groups()
+        label, url, space, bare, ref, target = match.groups()
+        if ref is not None:
+            return f"{ref}{new}" if (new := resolve(target)) else ""
         if url is not None:
             return f"[{label}]({new})" if (new := resolve(url)) else label
         trail = re.search(r"[.,;:!?]+$", bare)

@@ -53,6 +53,11 @@ def test_the_rules_allow_general_knowledge_but_no_lookups():
     assert "general knowledge" in chat.RULES and "never invent" in chat.RULES.lower()
 
 
+def test_never_an_empty_reply():
+    assert chat.chat_answer("thanks", HISTORY, llm=FakeLLM(reply="https://evil.com/"), base_url=BASE).text == \
+        chat.NOT_ANSWERED
+
+
 def test_a_failed_call_gives_a_plain_message():
     result = chat.chat_answer("thanks", HISTORY, llm=FakeLLM(success=False), base_url=BASE)
     assert result.failed and result.text == chat.NOT_ANSWERED
