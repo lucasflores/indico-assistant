@@ -1,6 +1,6 @@
 # Assistant knowledge: how the assistant answers "how do I…" and "can you…"
 
-**Research** · 2026-09-29 · a proposal for Lucas to decide · no code yet
+**Research** · 2026-09-29 · decided by Lucas 2026-09-29 (see the end) · no code yet
 
 ## The problem
 
@@ -33,10 +33,17 @@ can't know who is asking, or what this instance has switched on:
   on. The list includes plugin pages (Teams, meeting notes) and knows that room booking is off here. Every link in
   an answer must come from this list; code checks each one.
 
-**Routing.**
-- A `knowledge` category is added to the classifier the chat already calls.
+**Routing: a Jev gate in front of the classifier.**
+- Jev (the decision model ibis uses for its web-search gate) is asked whether the latest message is a knowledge
+  question. It sees the last two exchanges, in the format ibis's web gate uses.
+- Above the cut-off, the message goes to the knowledge answer. Below it, the classifier routes it as today.
 - When the planner finds nothing to change, the question goes to the knowledge answer instead of "I could not work
-  out what to change".
+  out what to change". This covers "Can you [do X] for this event?", which both Jev and the classifier read as a
+  request.
+- "Can you do X?", when the assistant can, gets an offer first ("Yes, shall I?"). A yes then goes to the planner.
+
+**Model: through ibis only.** Every call, the knowledge answer included, goes through the ibis API. The local
+instance was switched to the Balanced dial on 2026-09-29.
 
 **Hand-off.** Changes the assistant already makes keep today's plan-and-confirm flow. It sends the user to the right
 page, with a link, for:
@@ -75,16 +82,38 @@ answer, and code checked every link. Treat the figures as good to about ±10 poi
 - **Click-through tours** (Pendo/WalkMe style). They break silently when an instance changes its pages.
 - **Hosted docs bots** (Kapa, Fin, Mintlify). None runs on-premises.
 
-## Decisions for Lucas
+## Routing, measured (Jev vs the classifier)
 
-1. **The model.** gpt-4o-mini offers to do things it can't in 11–18 of 53 answers once the guide is in the prompt;
-   gpt-5.6-luna does in 2–4. Options: switch the instance's model, or send knowledge answers to another model
-   through ibis.
-2. **Routing.** Use the classifier category (measured above), or test a Jev gate first? The Jev gate may be better on
-   follow-ups like "yes, do it". The test costs under $0.05 and waits for your go.
-3. **The admin docs** (docs.getindico.io) for admins' questions: now, or later?
-4. **"Can you add a Teams meeting?"** when it can: offer first, or start a plan right away?
-5. **The hand-off list above:** agree?
+Two sets were used:
+- **Single questions:** the 55 questions above and 22 ordinary ones. The ordinary ones are data questions and change
+  requests, some phrased like "How many…" or "Can you move it to 3pm?".
+- **Follow-up turns:** 24 cases, where the right route depends on the conversation. Examples: "yes please" after an
+  offer, "how would I do it myself?", "who uploaded them?".
+
+| Router | Knowledge questions caught (53) | Data questions and changes wrongly caught (24) | Follow-ups right (24) |
+|---|---|---|---|
+| Classifier with a knowledge category | 41 | 0 | 20 |
+| Classifier, also shown the conversation | | | 20 |
+| Jev, message only | 44 | 0 | 23 |
+| **Jev, with the conversation** | 44 | 0 | **23** |
+
+- The Jev rows use a cut-off of 0.20, fitted on the single questions. The follow-ups were not used to fit it.
+- Jev's scores separate the two sets almost perfectly: AUC 0.97 on single questions.
+- At this cut-off, the conversation doesn't change Jev's follow-up score. It does give more room: AUC 1.00 against
+  0.98 without it. At a looser cut-off (0.08) it was 24 of 24 against 19. Keep it, as in ibis's web gate.
+- A decision costs $0.000015 and takes about half a second.
+- As in the ibis web-gate study, the cut-off must be refitted on real Indico traffic before it is trusted.
+
+## Decided (Lucas, 2026-09-29)
+
+1. **The model:** everything goes through the ibis API; the instance now uses the Balanced dial. Open: ibis has no
+   route for Jev yet. The only client is `JevGate` in ibis-routing, which calls OpenRouter's decisions endpoint
+   directly. So the gate needs an ibis endpoint first.
+2. **Routing:** tested Jev first. It beats the classifier on single questions (44 vs 41) and on follow-ups (23 vs 20)
+   (above), so it becomes the gate.
+3. **The admin docs:** later.
+4. **"Can you add a Teams meeting?"** when it can: offer first.
+5. **The hand-off list:** agreed.
 
 The study behind this (the question set, prototypes, every answer and grade, and the industry survey with sources)
 is in Lucas's scratch notes, not in this repo. The question set moves into the eval repo when the eval gets a
