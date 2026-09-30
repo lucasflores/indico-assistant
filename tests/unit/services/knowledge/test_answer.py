@@ -116,7 +116,11 @@ def test_a_follow_up_searches_the_guide_with_the_question_before_it():
                {"role": "assistant", "content": "Yes, here is the plan."}]
     knowledge.answer("how would I do it myself?", history, llm=FakeLLM(reply="Open Videoconference."), caps=CAPS,
                      pages=PAGES, guide=Recording(), base_url=BASE)
-    assert asked == ["Can you add a Teams meeting to this event?\nhow would I do it myself?"]
+    assert asked == ["how would I do it myself?\nCan you add a Teams meeting to this event?"]
+    asked.clear()  # (review, PR #15) the question first, a long earlier message cut short: bge-small reads 512 tokens
+    knowledge.answer("how do I lock an event?", [{"role": "user", "content": "abstract " * 500}], llm=FakeLLM(reply="x"),
+                     caps=CAPS, pages=PAGES, guide=Recording(), base_url=BASE)
+    assert asked[0].startswith("how do I lock an event?\n") and len(asked[0]) <= 24 + knowledge.EARLIER_CHARS
 
 
 def test_the_never_line_does_not_deny_teams():

@@ -19,6 +19,13 @@ def test_a_listed_page_is_rebased_onto_this_indico_whatever_host_was_written():
         f"see [settings]({BASE}/event/657/manage/)"  # the trailing slash as the menu has it
 
 
+def test_another_sites_home_page_is_not_this_indicos():
+    home = ["/", *PAGES]
+    assert check("[Google](https://www.google.com/) or [Indico](https://getindico.io)", home, GUIDE, BASE) == \
+        "Google or Indico"
+    assert check("[Home](/) and [home](http://127.0.0.1:8000/)", home, GUIDE, BASE) == f"[Home]({BASE}/) and [home]({BASE}/)"
+
+
 def test_a_page_not_in_the_list_becomes_plain_text():
     assert _check("Open [Registration](/event/657/manage/registration/) now.") == "Open Registration now."
     assert _check("Open [Protection](/event/999/manage/protection).") == "Open Protection."

@@ -4,11 +4,11 @@ This module defines WTForms form classes for plugin configuration,
 including global settings and per-event settings.
 """
 
-from wtforms.fields import BooleanField, FloatField, IntegerField, PasswordField, SelectField, StringField, TextAreaField
+from wtforms.fields import BooleanField, FloatField, IntegerField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, InputRequired, NumberRange, Optional, URL, ValidationError
 
 from indico.web.forms.base import IndicoForm
-from indico.web.forms.fields import IndicoSelectMultipleCheckboxField
+from indico.web.forms.fields import IndicoPasswordField, IndicoSelectMultipleCheckboxField
 
 from indico_assistant.default_settings import IBIS_MODE_CHOICES, WRITE_ACTIONS
 
@@ -48,10 +48,11 @@ class SettingsForm(IndicoForm):
         description="Base URL for the LLM API (e.g., https://labs.aithoth.com/ibis-api; http://localhost:11434 for Ollama)",
     )
 
-    llm_api_key = PasswordField(
+    llm_api_key = IndicoPasswordField(  # (re-rendered: a plain PasswordField is saved empty)
         "API Key",
         validators=[Optional()],
-        description="API key for cloud providers (stored securely, not displayed)",
+        description="API key for cloud providers (hidden unless shown)",
+        toggle=True,
     )
 
     llm_ibis_mode = SelectField(
@@ -73,12 +74,13 @@ class SettingsForm(IndicoForm):
         description="Maximum response tokens (100-32000)",
     )
 
-    jev_api_key = PasswordField(
+    jev_api_key = IndicoPasswordField(
         "Router key (Jev)",
         validators=[Optional()],
         description="An OpenRouter key for Jev, which routes each message (a question about Indico, a change, a data "
                     "question, the conversation) in one decision. Optional: without it the classifier routes. "
-                    "Stored securely, not displayed.",
+                    "Hidden unless shown.",
+        toggle=True,
     )
 
     jev_timeout_seconds = FloatField(
@@ -183,10 +185,11 @@ class SettingsForm(IndicoForm):
         description="URL of the Chainlit server (e.g., http://localhost:8000)",
     )
 
-    chainlit_auth_secret = PasswordField(
+    chainlit_auth_secret = IndicoPasswordField(
         "Chainlit Auth Secret",
         validators=[Optional()],
         description="Shared secret for JWT authentication with Chainlit (must match CHAINLIT_AUTH_SECRET)",
+        toggle=True,
     )
 
     def validate_nl2sql_allowed_tables(self, field):

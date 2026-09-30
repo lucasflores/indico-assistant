@@ -22,6 +22,7 @@ JEV_MODEL = "typesafe/jev-1.13"
 CONTEXT_EXCHANGES = 2
 ASSISTANT_CHARS = 400
 PLAN_WAITING = "(A plan made in this chat is waiting for the user to confirm it.)"
+OFFERED = "(The assistant's last answer offered to make this change: {offer})"
 
 ROUTES = {
     "knowledge": "How to do something in Indico, where a page or setting is, or what the assistant itself can or "
@@ -85,8 +86,9 @@ def _skipped(reason, ms=0, cost=None):
     return Decision(None, None, True, reason, ms=ms, cost=cost)
 
 
-def state_of(messages, plan_waiting=False):
-    """What Jev reads: user and assistant turns only, the last two exchanges and the latest message."""
+def state_of(messages, plan_waiting=False, offer=None):
+    """What Jev reads: user and assistant turns only, the last two exchanges and the latest message, with a note of
+    a waiting plan or an offer (a reply is cut to 400 characters, and an offer usually comes at its end)."""
     turns = [(m.get("role"), m.get("content") or "") for m in messages if m.get("role") in ("user", "assistant")]
     last_user = max((i for i, (role, _) in enumerate(turns) if role == "user"), default=None)
     if last_user is None:
@@ -98,17 +100,23 @@ def state_of(messages, plan_waiting=False):
         elif exchanges and not exchanges[-1][1]:
             exchanges[-1][1] = text[:ASSISTANT_CHARS]
     latest = turns[last_user][1].strip()
-    note = f"{PLAN_WAITING}\n" if plan_waiting else ""
+    note = "".join(f"{n}\n" for n in (plan_waiting and PLAN_WAITING, offer and OFFERED.format(offer=offer)) if n)
     if not exchanges and not note:
         return latest
     convo = "".join(f"USER: {u}\nASSISTANT: {a}\n\n" for u, a in exchanges[-CONTEXT_EXCHANGES:])
     return f"Earlier conversation:\n{convo}{note}LATEST MESSAGE: {latest}"
 
 
+_client = None
+
+
 def _http(payload, key, timeout):
     import httpx
 
-    response = httpx.post(JEV_URL, json=payload, timeout=timeout, headers={"Authorization": f"Bearer {key}"})
+    global _client
+    if _client is None:  # one per process, made on first use (after a fork): the connection stays open between
+        _client = httpx.Client()  # messages, so the TLS handshake does not come out of the timeout each time
+    response = _client.post(JEV_URL, json=payload, timeout=timeout, headers={"Authorization": f"Bearer {key}"})
     response.raise_for_status()
     return response.json()
 
@@ -120,7 +128,11 @@ def _number(value):
     return float(value) if 0.0 <= value <= 1.0 else None
 
 
-def decide(messages, settings, *, plan_waiting=False, transport=_http):
+def _dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_http):
     """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision."""
     import httpx
 
@@ -129,7 +141,7 @@ def decide(messages, settings, *, plan_waiting=False, transport=_http):
         return _skipped("no key")
     timeout = float(settings.get("jev_timeout_seconds") or 1.5)
     try:
-        payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting), "questions": QUESTIONS}
+        payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": QUESTIONS}
     except ValueError:
         return _skipped("error")
     started = time.monotonic()
@@ -140,15 +152,16 @@ def decide(messages, settings, *, plan_waiting=False, transport=_http):
     except Exception:  # noqa: BLE001 - the classifier routes instead
         return _skipped("error", int((time.monotonic() - started) * 1000))
     ms = int((time.monotonic() - started) * 1000)
-    answers = (body or {}).get("answers") or {}
-    cost = ((body or {}).get("usage") or {}).get("cost")
-    route, intent = answers.get("route") or {}, answers.get("intent") or {}
-    probabilities = route.get("probabilities") or {}
-    if (route.get("choice") not in ROUTES or not probabilities
+    # any shape can come back from an alpha endpoint (a list, a bare string, a list as the choice): check each level
+    answers = _dict(_dict(body).get("answers"))
+    cost = _dict(_dict(body).get("usage")).get("cost")
+    route, intent = _dict(answers.get("route")), _dict(answers.get("intent"))
+    choice, probabilities = route.get("choice"), _dict(route.get("probabilities"))
+    if (not isinstance(choice, str) or choice not in ROUTES or not probabilities
             or any(k not in ROUTES or _number(v) is None for k, v in probabilities.items())):
         return _skipped("invalid", ms, cost)
     if ms > timeout * 1000:  # late: it does not decide
         return _skipped("timeout", ms, cost)
-    return Decision(route["choice"], intent.get("choice") if intent.get("choice") in INTENTS else None, False,
-                    "score", confidence=_number(route.get("confidence")), probabilities=probabilities, ms=ms,
-                    cost=cost)
+    kind = intent.get("choice")
+    return Decision(choice, kind if isinstance(kind, str) and kind in INTENTS else None, False, "score",
+                    confidence=_number(route.get("confidence")), probabilities=probabilities, ms=ms, cost=cost)

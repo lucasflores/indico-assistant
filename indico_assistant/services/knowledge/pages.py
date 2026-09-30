@@ -22,10 +22,9 @@ def _menu(menu_id, **kwargs):
 
 
 def page_list(user, event=None):
-    """[Page]: the event page and its management menu (when on an event page), the profile menu, the top menu, and
-    Room Booking when it is enabled. Must run as ``user`` (``acting_as``): the menus read ``session.user``."""
-    from indico.core.config import config
-
+    """[Page]: the event page and its management menu (when on an event page), the profile menu and the top menu
+    (Room booking is there when the user may see it). Must run as ``user`` (``acting_as``): the menus read
+    ``session.user``."""
     if session.user != user:
         raise RuntimeError(f"page_list({user}) must run as that user, not as {session.user}")
     pages = []
@@ -36,8 +35,6 @@ def page_list(user, event=None):
                   for section, title, url in _menu("event-management-sidemenu", event=event)]
     pages += [Page(title, "my profile", url) for _, title, url in _menu("user-profile-sidemenu", user=user)]
     pages += [Page(title, "top menu", url) for _, title, url in _menu("top-menu")]
-    if config.ENABLE_ROOMBOOKING:
-        pages.append(Page("Room booking", "top menu", "/rooms/"))
     return pages
 
 
@@ -48,5 +45,5 @@ def render(pages, event=None):
     if event is not None and not any("/manage" in p.path for p in pages):
         lines.append("- (no management pages: they do not manage this event)")
     if not any(p.path == "/rooms/" for p in pages):
-        lines.append("- Room booking is NOT enabled on this Indico.")
+        lines.append("- Room booking is NOT available to them on this Indico.")
     return "\n".join(lines)

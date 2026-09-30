@@ -44,8 +44,10 @@ Analyze the user's question and classify it into one of these intents:
 - **knowledge**: How to do something in Indico, where to find a page or setting, or what the assistant itself can
   do: "how do I add a timetable entry?", "where do I change the protection?", "can you create meetings?", "what can
   you do?", "do you have access to my calendar?". A question about how, or whether, not an instruction with details.
-- **chat**: Answerable from the conversation so far, using general knowledge to explain it, with nothing looked up
-  or changed: "thanks!", "summarise that", "which of those is earliest?", "what does that term mean?".
+- **chat**: Needs nothing from Indico whatever came before: thanks, a greeting, or a request to rephrase, summarise,
+  translate or explain the last answer: "thanks!", "summarise that", "what does that term mean?". A follow-up asking
+  about events, people, talks or dates ("which of those is earliest?", "and the ones next month?") is a data question,
+  never chat.
 - **out_of_scope**: Questions not related to events/registrations/contributions/documents
 
 ## CLASSIFICATION HINTS

@@ -83,8 +83,7 @@ class Guide:
             query = self._model.encode([question], normalize_embeddings=True)[0]
             scores = self._vectors @ query
         except Exception as exc:  # inference failed (memory, say): this answer comes from the two lists alone
-            self.problem = f"guide search failed: {exc}"
-            logger.warning(self.problem)
+            logger.warning("guide search failed: %s", exc)  # (not self.problem: the next question may work)
             return []
         return [self._chunks[i] | {"score": round(float(scores[i]), 4)} for i in np.argsort(-scores)[:k]]
 

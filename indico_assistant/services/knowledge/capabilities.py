@@ -17,6 +17,7 @@ NEVER = ("register people", "take payments", "send an email of its own (the remi
          "changes cause are shown in the plan)", "change permissions or protection", "delete events (other than "
          "undoing its own changes)", "book rooms", "review abstracts")
 OFF = "switched off by the administrator"
+ANYWHERE = "any category (they are an Indico administrator)"
 
 
 @dataclass
@@ -68,6 +69,15 @@ def _about_them(reason):
     return re.sub(r"\b[Yy]our\b", "their", reason)
 
 
+def _places(categories):
+    """Category paths (titles repeat across an instance), at most MAX_CHOICES, then how many more."""
+    from indico_assistant.services.actions.base import category_path
+    from indico_assistant.services.actions.resolve import MAX_CHOICES
+
+    paths = [category_path(c) for c in categories[:MAX_CHOICES]]
+    return paths + [f"{len(categories) - MAX_CHOICES} more"] if len(categories) > MAX_CHOICES else paths
+
+
 def capability_list(user, event=None, settings=None):
     """The list for ``user`` (and the event on the page). Runs as ``user`` (``acting_as``), like the planner."""
     from indico_assistant.default_settings import WRITE_ACTIONS
@@ -79,9 +89,10 @@ def capability_list(user, event=None, settings=None):
     create_in, propose_in, can, cannot = [], [], [], []
     if enabled:
         if "create_event" in enabled:
-            create_in = [c.title for c in creatable_categories(user)]
-        if "propose_event" in enabled and ACTIONS["propose_event"].available(user) is None:
-            propose_in = [c.title for c in proposable_categories(user)]
+            create_in = [ANYWHERE] if user.is_admin else _places(creatable_categories(user))
+        # (an admin creates everywhere, so proposes nowhere)
+        if "propose_event" in enabled and not user.is_admin and ACTIONS["propose_event"].available(user) is None:
+            propose_in = _places(proposable_categories(user))
     for name in WRITE_ACTIONS:
         action = ACTIONS.get(name)
         if action is None:

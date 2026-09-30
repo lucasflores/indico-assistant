@@ -78,10 +78,33 @@ def test_a_concrete_can_you_is_a_change_as_the_classifier_has_it():
     (SETTINGS, _transport(body=_answer(route="gossip")), "invalid"),
     (SETTINGS, _transport(body={"answers": {}}), "invalid"),
     (SETTINGS, _transport(body=_answer(probabilities={"change": float("nan")})), "invalid"),
+    (SETTINGS, _transport(body=[]), "invalid"),  # (shapes an alpha endpoint could send: none may raise)
+    (SETTINGS, _transport(body={"answers": {"route": "knowledge"}}), "invalid"),
+    (SETTINGS, _transport(body={"answers": {"route": {"choice": ["knowledge"], "probabilities": {}}}}), "invalid"),
+    (SETTINGS, _transport(body={"answers": [], "usage": "free"}), "invalid"),
 ])
 def test_skipped_never_fails(settings, transport, reason):
     decision = gate.decide(TALK, settings, transport=transport)
     assert decision.skipped and decision.reason == reason and decision.route is None
+
+
+def test_a_malformed_intent_is_dropped_too():
+    body = _answer(route="data")
+    body["answers"]["intent"] = {"choice": ["event_query"]}
+    decision = gate.decide(TALK, SETTINGS, transport=_transport(body=body))
+    assert decision.route == "data" and decision.intent is None
+    body["answers"]["intent"] = "event_query"
+    assert gate.decide(TALK, SETTINGS, transport=_transport(body=body)).intent is None
+
+
+def test_an_offer_is_noted_for_jev():
+    """The offer usually ends a reply, past the 400 characters Jev sees of it."""
+    state = gate.state_of(TALK, offer="add a Teams meeting to Sync")
+    assert state.endswith("(The assistant's last answer offered to make this change: add a Teams meeting to Sync)\n"
+                          "LATEST MESSAGE: yes please")
+    sent = []
+    gate.decide(TALK, SETTINGS, offer="add a Teams meeting to Sync", transport=_transport(record=sent))
+    assert "add a Teams meeting to Sync" in sent[0][0]["state"]
 
 
 def test_an_unknown_intent_is_dropped_not_fatal():

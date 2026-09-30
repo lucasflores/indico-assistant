@@ -106,8 +106,14 @@ def test_describe_reads_the_files_without_loading_the_model(copy_dir, monkeypatc
 def test_a_search_that_fails_is_unavailable_not_an_error(copy_dir, monkeypatch):
     """(Copilot, PR #15) the model loads, then encoding fails (out of memory, say): no excerpts, no crash"""
     class Broken(FakeModel):
+        failures = 1
+
         def encode(self, texts, **kwargs):
-            raise RuntimeError("out of memory")
+            if Broken.failures:
+                Broken.failures -= 1
+                raise RuntimeError("out of memory")
+            return super().encode(texts, **kwargs)
     monkeypatch.setattr(embedding, "load_model", lambda name: (Broken(), len(WORDS) + 1))
     guide = Guide(copy_dir)
-    assert guide.excerpts("timetable") == [] and "out of memory" in guide.problem
+    assert guide.excerpts("timetable") == []
+    assert guide.ok and guide.excerpts("timetable")  # (review, PR #15) only that answer: the next search works

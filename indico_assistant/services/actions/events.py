@@ -47,6 +47,8 @@ class CreateEvent(Action):
 
         if category is not None:
             return None if category.can_create_events(user) else f'You cannot create events in {category_path(category)}'
+        if user.is_admin:  # (an admin may create events anywhere: no need to check every category)
+            return None
         return None if creatable_categories(user) else 'You cannot create events in any category on this Indico'
 
     def check(self, user, args):
