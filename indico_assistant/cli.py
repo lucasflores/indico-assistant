@@ -123,6 +123,23 @@ def extend_cli(sender, **kwargs):
     return cli
 
 
+@cli.command("guide-build")
+@click.option("--commit", required=True, help="The indico/indico-user-docs commit to build the guide copy from.")
+def guide_build_command(commit):
+    """Rebuild the user-guide copy the plugin ships (spec 022): fetch, split by heading, embed, write."""
+    import tempfile
+
+    from indico_assistant.services.embedding.service import load_model
+    from indico_assistant.services.knowledge import guide_build
+
+    model, _ = load_model(guide_build.MODEL)
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = guide_build.build(guide_build.fetch(commit, tmp), commit=commit,
+                                     embed=lambda texts: model.encode(texts, normalize_embeddings=True, batch_size=32))
+    click.echo(f"Guide {manifest['commit']}: {len(manifest['pages'])} pages, {manifest['chunks']} pieces, "
+               f"{manifest['model']} ({manifest['dims']}-d) -> {guide_build.OUT_DIR}")
+
+
 @cli.command("nl2sql-db-sql")
 @click.option("--password", help="Password for the read-only role (omit where local trust/peer auth is used).")
 @click.option("--teardown", is_flag=True, help="Print the SQL that removes the role, policies and functions.")
