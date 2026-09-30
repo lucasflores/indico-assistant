@@ -138,3 +138,56 @@ def _copied(message: ChatMessage, plans: dict[str, ActionPlan]) -> dict:
             item['plan'] = {'summary': plan.summary,
                             'steps': [step.get('description', step['action']) for step in plan.steps]}
     return item
+
+
+# --- the user's own reports (US2) --------------------------------------------------------------------------
+
+# what the reporter sees of their copy: the messages as the chat showed them. How answers were made (the query,
+# its errors, the evidence) is for the team only (FR-013)
+USER_KEYS = ('id', 'role', 'content', 'created_at', 'uploads', 'plan')
+TEXT_START = 120
+
+
+def own_reports(user) -> list[IssueReport]:
+    return (IssueReport.query.filter_by(user_id=user.id)
+            .order_by(IssueReport.created_at.desc(), IssueReport.id.desc()).all())
+
+
+def own_report(user, report_id: int) -> IssueReport | None:
+    """The report if it is ``user``'s; None for someone else's and for a missing one alike (FR-014)."""
+    report = db.session.get(IssueReport, report_id)
+    return report if report is not None and report.user_id == user.id else None
+
+
+def delete_own(user, report_id: int) -> bool:
+    """The reporter deletes their report and its copy, whatever its status (FR-013a)."""
+    report = own_report(user, report_id)
+    if report is None:
+        return False
+    db.session.delete(report)
+    db.session.flush()
+    return True
+
+
+def has_reports(user) -> bool:
+    return db.session.query(IssueReport.query.filter_by(user_id=user.id).exists()).scalar()
+
+
+def _when(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def summary(report: IssueReport) -> dict:
+    return {'report_id': report.id, 'category': report.category, 'text_start': report.text[:TEXT_START],
+            'status': report.status, 'note': report.note, 'created_at': _when(report.created_at),
+            'updated_at': _when(report.updated_at)}
+
+
+def user_view(copy: dict | None) -> dict | None:
+    if copy is None:
+        return None
+    return {**copy, 'messages': [{k: m[k] for k in USER_KEYS if k in m} for m in copy.get('messages', [])]}
+
+
+def user_detail(report: IssueReport) -> dict:
+    return {**summary(report), 'text': report.text, 'copy': user_view(report.copy)}

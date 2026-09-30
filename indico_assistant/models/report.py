@@ -19,6 +19,10 @@ CATEGORIES = ('bug', 'feature', 'wrong_answer')
 STATUSES = ('open', 'under_review', 'closed')
 TEXT_MAX = 5000
 NOTE_MAX = 2000
+LABELS = {
+    'category': {'bug': 'Bug', 'feature': 'Feature idea', 'wrong_answer': 'Wrong or poor answer'},
+    'status': {'open': 'Open', 'under_review': 'Under review', 'closed': 'Closed'},
+}
 
 
 def _in(column, values):

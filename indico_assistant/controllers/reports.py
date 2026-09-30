@@ -40,3 +40,35 @@ class RHReportCreate(RHReportsAPI):
                 raise self._rate_limit_error(error.retry_after) from None
             return self._error_response(error.code, error.message, error.details, status=error.status)
         return jsonify({'report_id': report.id, 'url': reports.report_url(report.id)}), 201 if created else 200
+
+
+class RHReportList(RHReportsAPI):
+    """GET /reports: the caller's own reports, newest first (US2)."""
+
+    RATE_LIMIT = "read"
+
+    def _process(self):
+        return jsonify({'reports': [reports.summary(r) for r in reports.own_reports(self.user)]}), 200
+
+
+class RHReportDetail(RHReportsAPI):
+    """GET /reports/<id>: one of the caller's reports, as they see it (the evidence is the team's, FR-013)."""
+
+    RATE_LIMIT = "read"
+
+    def _process(self):
+        report = reports.own_report(self.user, request.view_args['report_id'])
+        if report is None:
+            return self._not_found_error("Report")
+        return jsonify(reports.user_detail(report)), 200
+
+
+class RHReportDelete(RHReportsAPI):
+    """DELETE /reports/<id>: the reporter deletes their report and its copy (FR-013a). Only the reporter."""
+
+    RATE_LIMIT = "read"
+
+    def _process(self):
+        if not reports.delete_own(self.user, request.view_args['report_id']):
+            return self._not_found_error("Report")
+        return '', 204

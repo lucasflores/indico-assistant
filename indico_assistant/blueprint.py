@@ -150,9 +150,19 @@ def _register_routes():
     blueprint.add_url_rule("/feedback/<feedback_id>", "feedback_delete", RHFeedbackDelete, methods=["DELETE"])  # (020)
     
     # Issue reports (Feature 021, contracts/api.md)
-    from indico_assistant.controllers.reports import RHReportCreate
+    from indico_assistant.controllers.report_pages import RHUserReport, RHUserReportDelete, RHUserReports
+    from indico_assistant.controllers.reports import RHReportCreate, RHReportDelete, RHReportDetail, RHReportList
 
     blueprint.add_url_rule("/reports", "report_create", RHReportCreate, methods=["POST"])
+    blueprint.add_url_rule("/reports", "reports", RHReportList, methods=["GET"])
+    blueprint.add_url_rule("/reports/<int:report_id>", "report", RHReportDetail, methods=["GET"])
+    blueprint.add_url_rule("/reports/<int:report_id>", "report_delete", RHReportDelete, methods=["DELETE"])
+    # the profile pages, outside /api/assistant ("!"), for yourself and (admins) for another user, as Indico's are
+    with blueprint.add_prefixed_rules("!/user/<int:user_id>", "!/user"):
+        blueprint.add_url_rule("/assistant-reports/", "user_reports", RHUserReports)
+        blueprint.add_url_rule("/assistant-reports/<int:report_id>/", "user_report", RHUserReport)
+        blueprint.add_url_rule("/assistant-reports/<int:report_id>/delete", "user_report_delete", RHUserReportDelete,
+                               methods=["POST"])
 
     # Admin API endpoints (Feature 005, T043)
     from indico_assistant.controllers.admin import (

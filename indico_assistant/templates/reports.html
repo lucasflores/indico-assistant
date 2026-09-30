@@ -1,0 +1,42 @@
+{% extends 'users/base.html' %}
+{# The user's reports (spec 021 US2, FR-012). #}
+
+{% block user_content %}
+    <div class="i-box">
+        <div class="i-box-header">
+            <div class="i-box-title">Assistant reports</div>
+        </div>
+        <div class="i-box-content">
+            <p>The reports you sent from the assistant's chat. The team sets each one's status and may leave a note.</p>
+            <ul class="group-list">
+                {% for report in reports %}
+                    <li class="flexrow f-a-center">
+                        <span class="list-item-title">
+                            <a href="{{ report_url(report) }}">
+                                #{{ report.id }} · {{ labels.category[report.category] }}: {{ report.text|truncate(120) }}
+                            </a>
+                            {% if report.note %}
+                                <br><span class="text-superfluous">Note: {{ report.note|truncate(200) }}</span>
+                            {% endif %}
+                        </span>
+                        <span class="right">
+                            <span class="list-item-info">
+                                <span class="label">Sent:</span>
+                                <span class="content">{{ report.created_at|format_date }}</span>
+                            </span>
+                            {% if report.updated_at %}
+                                <span class="list-item-info">
+                                    <span class="label">Updated:</span>
+                                    <span class="content">{{ report.updated_at|format_date }}</span>
+                                </span>
+                            {% endif %}
+                            <span class="ui label">{{ labels.status[report.status] }}</span>
+                        </span>
+                    </li>
+                {% else %}
+                    <li class="italic">You have not sent a report yet.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+{% endblock %}

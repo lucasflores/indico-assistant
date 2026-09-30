@@ -11,6 +11,12 @@ import yaml
 # Register Indico's pytest plugin for test fixtures
 pytest_plugins = ("indico.testing.fixtures",)
 
+# Every Indico model is imported before any test module, as the app does before it loads plugins: the report pages
+# (spec 021) subclass Indico's own RHs, whose modules need all models, and test modules import the blueprint.
+from indico.core.db.sqlalchemy.util.models import import_all_models  # noqa: E402
+
+import_all_models()
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config):
