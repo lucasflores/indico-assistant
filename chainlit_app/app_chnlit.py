@@ -307,6 +307,12 @@ async def _ask(text: str, files=()):
     await _show_answer(response, loading_msg, client, auth_token)
 
 
+def _wait_phrase(response: httpx.Response) -> str:
+    """How long a 429 asks to wait, from its Retry-After: " in 11 minutes", or " in a minute"."""
+    retry = response.headers.get("Retry-After")
+    return f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"
+
+
 async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client: httpx.AsyncClient,
                        auth_token: str) -> None:
     """Show Indico's answer to a question (or why there is none) in ``loading_msg``."""
@@ -321,9 +327,8 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
         await loading_msg.send()
         return
     if response.status_code == 429:  # the per-user limits (10 a minute, 200 a day)
-        retry = response.headers.get("Retry-After")
-        wait = f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"
-        loading_msg.content = f"You are asking questions faster than the assistant allows. Please try again{wait}."
+        loading_msg.content = ("You are asking questions faster than the assistant allows. "
+                               f"Please try again{_wait_phrase(response)}.")
         await loading_msg.send()
         return
     if response.status_code == 401:
@@ -506,7 +511,19 @@ async def on_confirm_plan(action: cl.Action):
     response = await _plan_call(f"/api/assistant/plans/{action.payload['plan_id']}/confirm",
                                 {"token": action.payload.get("token")})
     if response is not None:
-        await cl.Message(content=_plan_outcome(response)).send()
+        await cl.Message(content=_plan_outcome(response), actions=_offer_if_not_run(response)).send()
+
+
+def _offer_if_not_run(response: httpx.Response) -> list[cl.Action]:
+    """A confirmed plan that failed or was refused when it ran offers a report (spec 021 R4; fresh review). An
+    expired or already-confirmed plan (409) is no failure: its message says what to do."""
+    if response.status_code >= 500:
+        return [_offer()]
+    if response.status_code == 200:
+        body = response.json()
+        if (body.get("plan") or {}).get("status") not in (None, "done"):
+            return [_offer(body.get("message_id"))]
+    return []
 
 
 @cl.action_callback("cancel_plan")
@@ -599,9 +616,7 @@ def _report_refusal(response: httpx.Response) -> str:
             reason = ""
         return f"The report could not be sent: {reason or 'something in it is not valid'}."
     if response.status_code == 429:
-        retry = response.headers.get("Retry-After")
-        wait = f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"
-        return f"You have sent many reports for now, so please try again{wait}."
+        return f"You have sent many reports for now, so please try again{_wait_phrase(response)}."
     return "The report could not be sent, so please try again shortly."
 
 

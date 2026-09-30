@@ -97,7 +97,8 @@ class RHAdminReportList(RHAdminReportsAPI):
             return self._validation_error('page must be a number', 'page')
         except reports.ReportError as error:
             return self._refused(error)
-        return jsonify({'reports': [reports.admin_summary(r) for r in rows], 'page': page, 'pages': pages,
+        known = reports.people(rows)
+        return jsonify({'reports': [reports.admin_summary(r, known) for r in rows], 'page': page, 'pages': pages,
                         'open': reports.open_count()}), 200
 
 

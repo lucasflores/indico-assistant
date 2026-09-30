@@ -14,6 +14,7 @@ from uuid import UUID
 
 from indico.core.db import db
 from indico.core.plugins import url_for_plugin
+from sqlalchemy import tuple_
 from sqlalchemy.dialects.postgresql import insert
 
 from indico_assistant.models import ActionPlan, ChatMessage, ChatSession, IssueReport
@@ -40,8 +41,10 @@ def _invalid(field: str, message: str) -> ReportError:
     return ReportError(422, 'VALIDATION_ERROR', message, {'field': field})
 
 
-# the same refusal for someone else's conversation and one that does not exist (FR-003a)
-_NO_CONVERSATION = ReportError(404, 'NOT_FOUND', 'Conversation not found')
+def _no_conversation() -> ReportError:
+    """The same refusal for someone else's conversation and one that does not exist (FR-003a). A new one each time:
+    one shared instance, raised again and again, kept every traceback it passed through (fresh review)."""
+    return ReportError(404, 'NOT_FOUND', 'Conversation not found')
 
 
 def _uuid(value: Any, field: str) -> UUID:
@@ -49,6 +52,12 @@ def _uuid(value: Any, field: str) -> UUID:
         return UUID(str(value))
     except (TypeError, ValueError):
         raise _invalid(field, f'{field} must be a UUID') from None
+
+
+def _text(value: Any) -> str:
+    """Trimmed, with a form's CRLF line breaks as LF: a textarea's maxlength counts a line break once, and the
+    limits must agree with it (fresh review)."""
+    return value.replace('\r\n', '\n').strip() if isinstance(value, str) else ''
 
 
 def report_url(report_id: int) -> str:
@@ -68,7 +77,7 @@ def create_report(user, data: Any) -> tuple[IssueReport, bool]:
     data = data if isinstance(data, dict) else {}
     if data.get('category') not in CATEGORIES:
         raise _invalid('category', 'Pick one of the three kinds of problem')
-    text = data.get('text').strip() if isinstance(data.get('text'), str) else ''
+    text = _text(data.get('text'))
     if not text or len(text) > TEXT_MAX:
         raise _invalid('text', f'Say what happened, in at most {TEXT_MAX} characters')
     form_key = _uuid(data.get('form_key'), 'form_key')
@@ -104,21 +113,22 @@ def build_copy(user, session_id: UUID, answer_id: UUID | None) -> dict:
     """
     chat = db.session.get(ChatSession, session_id)
     if chat is None or chat.user_id != user.id:
-        raise _NO_CONVERSATION
-    messages = ChatMessage.query.filter_by(session_id=chat.id).order_by(ChatMessage.created_at,
-                                                                         ChatMessage.id).all()
-    end = len(messages)
+        raise _no_conversation()
+    query = ChatMessage.query.filter_by(session_id=chat.id)
     if answer_id is not None:
-        end = next((i + 1 for i, m in enumerate(messages) if m.id == answer_id and m.role == 'assistant'), None)
-        if end is None:
-            raise _NO_CONVERSATION
-    window = messages[max(0, end - COPY_MESSAGES):end]
+        answer = query.filter_by(id=answer_id, role='assistant').first()
+        if answer is None:
+            raise _no_conversation()
+        query = query.filter(tuple_(ChatMessage.created_at, ChatMessage.id) <= (answer.created_at, answer.id))
+    # the newest 50, and one more to know whether earlier ones were left out (a long chat is never read whole)
+    newest = query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(COPY_MESSAGES + 1).all()
+    window = newest[:COPY_MESSAGES][::-1]
     plan_ids = {(m.metadata_json or {}).get('plan_id') for m in window} - {None}
     plans = {str(p.id): p for p in ActionPlan.query.filter(ActionPlan.id.in_(plan_ids))} if plan_ids else {}
     return {
         'taken_at': datetime.now(UTC).isoformat(),
         'reported_answer_id': str(answer_id) if answer_id else None,
-        'truncated': end > COPY_MESSAGES,
+        'truncated': len(newest) > COPY_MESSAGES,
         'messages': [_copied(m, plans) for m in window],
     }
 
@@ -235,7 +245,7 @@ def admin_update(admin, report_id: int, status: Any, note: Any, seen: Any) -> Is
         raise ReportError(404, 'NOT_FOUND', 'Report not found')
     if status not in STATUSES:
         raise _invalid('status', 'Unknown status')
-    note = note.strip() if isinstance(note, str) else ''
+    note = _text(note)
     if len(note) > NOTE_MAX:
         raise _invalid('note', f'The note is at most {NOTE_MAX} characters')
     if (seen or '') != (report.updated_at.isoformat() if report.updated_at else ''):
@@ -253,19 +263,26 @@ def admin_update(admin, report_id: int, status: Any, note: Any, seen: Any) -> Is
     return report
 
 
-def _person(user_id: int | None, with_email: bool = False) -> dict | None:
+def people(rows: list[IssueReport]) -> dict:
+    """The reporters and the admins who saved these reports, by id, in one query (not one per row)."""
     from indico.modules.users import User
-    user = User.get(user_id) if user_id else None
+    ids = {row.user_id for row in rows} | {row.updated_by_id for row in rows if row.updated_by_id}
+    return {user.id: user for user in User.query.filter(User.id.in_(ids))} if ids else {}
+
+
+def _person(user, with_email: bool = False) -> dict | None:
     if user is None:
         return None
     return {'id': user.id, 'name': user.full_name, **({'email': user.email} if with_email else {})}
 
 
-def admin_summary(report: IssueReport) -> dict:
-    return {**summary(report), 'user': _person(report.user_id)}
+def admin_summary(report: IssueReport, known: dict) -> dict:
+    return {**summary(report), 'user': _person(known.get(report.user_id))}
 
 
 def admin_detail(report: IssueReport) -> dict:
     """Everything, for the team: the reporter as Indico knows them, and the whole copy with its evidence."""
-    return {**summary(report), 'text': report.text, 'user': _person(report.user_id, with_email=True),
-            'updated_by': _person(report.updated_by_id), 'closed_at': _when(report.closed_at), 'copy': report.copy}
+    known = people([report])
+    return {**summary(report), 'text': report.text, 'user': _person(known.get(report.user_id), with_email=True),
+            'updated_by': _person(known.get(report.updated_by_id)), 'closed_at': _when(report.closed_at),
+            'copy': report.copy}

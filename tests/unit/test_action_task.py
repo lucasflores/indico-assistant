@@ -47,7 +47,10 @@ def test_outcome_goes_to_the_chat_and_the_job(confirmed, status, error, reply):
     kwargs = finish.call_args.kwargs
     assert kwargs['status'] == 'done' and kwargs['response'] == reply and kwargs['plan']['status'] == status
     message = ChatMessage.query.get(kwargs['message_id'])
-    assert message.content == reply and message.metadata_json == {'plan_id': str(confirmed.id), 'plan_status': status}
+    expected = {'plan_id': str(confirmed.id), 'plan_status': status}
+    if status != 'done':  # (fresh review, PR #16: a change that did not run carries the report offer, spec 021 R4)
+        expected['problem'] = 'cannot_do'
+    assert message.content == reply and message.metadata_json == expected
 
 
 def test_an_unconfirmed_plan_fails_the_job(confirmed):

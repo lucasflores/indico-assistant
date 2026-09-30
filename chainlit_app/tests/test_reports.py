@@ -217,3 +217,26 @@ async def test_a_resumed_question_that_got_no_answer_offers_a_report(chat, monke
     await app_chnlit._after_resume("http://indico.test", "tok", pending_job_id="job-old")
     [message] = chat["messages"]
     assert message.content == app_chnlit.UNANSWERED and offers(message)[0].payload["answer_id"] is None
+
+
+
+@pytest.mark.parametrize("status,body,offered", [
+    (200, {"status": "done", "response": "Done:", "message_id": "m1", "plan": {"status": "done"}}, None),
+    (200, {"status": "done", "response": "It failed.", "message_id": "m2", "plan": {"status": "failed"}}, "m2"),
+    (200, {"status": "done", "response": "I did not change anything.", "message_id": "m3", "plan": {"status": "refused"}}, "m3"),
+    (500, {"error": "PLAN_FAILED"}, "none"),
+    (409, {"error": "PLAN_NOT_CONFIRMABLE"}, None),  # expired or confirmed elsewhere: no failure of the assistant
+])
+async def test_a_confirmed_plan_that_did_not_run_offers_a_report(chat, monkeypatch, status, body, offered):
+    # (fresh review, PR #16: the Confirm button's failed outcome carried no offer)
+    async def planned(path, body_=None):
+        return httpx.Response(status, json=body)
+    monkeypatch.setattr(app_chnlit, "_plan_call", planned)
+    monkeypatch.setattr(app_chnlit, "_forget_plan_buttons", lambda: _noop())
+    await app_chnlit.on_confirm_plan(action(plan_id="p1", token="t"))
+    got = [o.payload["answer_id"] for o in offers(chat["messages"][-1])]
+    assert got == ([] if offered is None else [None if offered == "none" else offered])
+
+
+async def _noop():
+    return None
