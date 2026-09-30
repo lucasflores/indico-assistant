@@ -1,0 +1,65 @@
+{% extends 'users/base.html' %}
+{# One report, as its reporter sees it: their text and the messages, not how answers were made (spec 021 FR-013). #}
+
+{% block user_content %}
+    <style>
+        .assistant-report-text { white-space: pre-wrap; }
+        .assistant-report-message { border-left: 3px solid #ddd; padding: 0.4em 0.8em; margin: 0.6em 0; }
+        .assistant-report-message.assistant { border-left-color: #007cac; }
+        .assistant-report-message.reported { background: #fff8e1; }
+    </style>
+    <div class="i-box">
+        <div class="i-box-header">
+            <div class="i-box-title">Report #{{ report.id }} · {{ labels.category[report.category] }}</div>
+            {% if can_delete %}
+                <div class="i-box-buttons">
+                    <button class="ui negative small button" data-href="{{ delete_url }}" data-method="POST"
+                            data-confirm="The report and any conversation attached to it will be deleted, and the team will no longer see it.">
+                        Delete
+                    </button>
+                </div>
+            {% endif %}
+        </div>
+        <div class="i-box-content">
+            <dl class="i-data-list">
+                <dt>Sent</dt>
+                <dd>{{ report.created_at|format_datetime('short') }}</dd>
+                <dt>Status</dt>
+                <dd>
+                    <span class="ui label">{{ labels.status[report.status] }}</span>
+                    {% if report.updated_at %}updated {{ report.updated_at|format_datetime('short') }}{% endif %}
+                </dd>
+                {% if report.note %}
+                    <dt>The team's note</dt>
+                    <dd class="assistant-report-text">{{ report.note }}</dd>
+                {% endif %}
+                <dt>What you wrote</dt>
+                <dd class="assistant-report-text">{{ report.text }}</dd>
+            </dl>
+        </div>
+    </div>
+    {% if copy %}
+        <div class="i-box">
+            <div class="i-box-header">
+                <div class="i-box-title">The conversation you attached</div>
+            </div>
+            <div class="i-box-content">
+                {% if copy.truncated %}<p class="italic">Earlier messages were left out.</p>{% endif %}
+                {% for message in copy.messages %}
+                    {% set reported = message.id == copy.reported_answer_id %}
+                    <div class="assistant-report-message {{ message.role }}{% if reported %} reported{% endif %}">
+                        <strong>{{ 'You' if message.role == 'user' else 'Assistant' }}</strong>
+                        · <span class="text-superfluous">{{ message_time(message.created_at) }}</span>
+                        {% if reported %}<span class="ui small label">Reported</span>{% endif %}
+                        <div class="assistant-report-text">{{ message.content }}</div>
+                        {% for upload in message.uploads or [] %}<div>📎 {{ upload.filename }}</div>{% endfor %}
+                        {% if message.plan %}
+                            <div>Plan: {{ message.plan.summary }}</div>
+                            <ol>{% for step in message.plan.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

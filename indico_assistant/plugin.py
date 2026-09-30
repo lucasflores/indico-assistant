@@ -60,6 +60,8 @@ class AssistantPlugin(IndicoPlugin):
     def _setup_chat_widget(self):
         """One deferred, cacheable <script> for logged-in users; it fetches its config only when opened."""
         self.template_hook("html-head", self._render_widget_script)
+        # spec 021: the profile's "Assistant reports"
+        self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
@@ -234,3 +236,9 @@ def _on_attachment_deleted(attachment, **kwargs):
 
 def _on_folder_deleted(folder, **kwargs):
     _drop_chunks([attachment.id for attachment in folder.attachments])
+
+
+def _profile_menu(sender, user, **kwargs):
+    # (imported here: the controllers import the plugin's models, which need the plugin loaded)
+    from indico_assistant.controllers.report_pages import profile_menu_item
+    return profile_menu_item(user)

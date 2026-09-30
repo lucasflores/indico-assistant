@@ -229,7 +229,7 @@ messages as the chat showed them, and the user can delete it.
 
 ### Tests first
 
-- [ ] T021 [P] [US2] In `tests/integration/reports/test_own.py`, the JSON endpoints:
+- [x] T021 [P] [US2] In `tests/integration/reports/test_own.py`, the JSON endpoints:
   - `GET /reports` lists only the caller's reports, newest first, with `text_start` at most 120 characters;
   - `GET /reports/<id>` on the caller's own report returns the user view: each message has only `id`, `role`,
     `content`, `created_at`, `uploads` and `plan`, with no `evidence`, `sql_generated` or `pipeline_error`
@@ -239,7 +239,7 @@ messages as the chat showed them, and the user can delete it.
   - on someone else's report it returns `404`, and the row stays. That holds for an admin too: only the
     reporter deletes (contracts/api.md);
   - `has_reports(user)` follows the rows.
-- [ ] T022 [P] [US2] In `tests/integration/reports/test_pages.py`, the profile pages, with RHs called directly
+- [x] T022 [P] [US2] In `tests/integration/reports/test_pages.py`, the profile pages, with RHs called directly
   and the template rendering mocked to capture its parameters:
   - **own**: the list page for your own profile passes your reports;
   - **someone else's profile**: another non-admin's is refused by `RHUserBase`'s `can_be_modified`. An admin
@@ -252,22 +252,24 @@ messages as the chat showed them, and the user can delete it.
 
 ### Implementation
 
-- [ ] T023 [US2] In `services/reports.py`, add `own_reports(user)`, `own_report(user, report_id)`, which returns
+- [x] T023 [US2] In `services/reports.py`, add `own_reports(user)`, `own_report(user, report_id)`, which returns
   `None` when it isn't the user's, `delete_own(user, report_id)`, `has_reports(user)` and `user_view(copy)`
   (the allowlist of T021).
-- [ ] T024 [US2] Add `RHReportList`, `RHReportDetail` and `RHReportDelete` (all `RATE_LIMIT = "read"`) to
+- [x] T024 [US2] Add `RHReportList`, `RHReportDetail` and `RHReportDelete` (all `RATE_LIMIT = "read"`) to
   `controllers/reports.py`. Register the routes in `blueprint.py`. This makes T021 pass.
-- [ ] T025 [US2] Create `indico_assistant/views.py` with `WPReports(WPJinjaMixinPlugin, WPUser)`. Create
+- [x] T025 [US2] Create `indico_assistant/views.py` with `WPReports(WPJinjaMixinPlugin, WPUser)`. Create
   `indico_assistant/controllers/report_pages.py`:
   - `RHUserReports(RHUserBase)`, `RHUserReport(RHUserBase)` and `RHUserReportDelete(RHUserBase)`;
   - the delete refuses unless `self.user == session.user`;
   - its POST is protected by Indico's CSRF check by default.
-- [ ] T026 [P] [US2] Write the templates under `indico_assistant/templates/`: `reports.html`, `report.html` and
-  `report_delete.html`, each extending `users/base.html` in `block user_content`.
+- [x] T026 [P] [US2] Write the templates under `indico_assistant/templates/`: `reports.html` and `report.html`, each
+  extending `users/base.html` in `block user_content`. (Built without `report_delete.html`: Delete is Indico's own
+  `data-href` + `data-method="POST"` + `data-confirm` button, as `oauth/user_apps.html` does, so the delete route
+  is POST only.)
   - Messages show as escaped text with `white-space: pre-wrap`; answers are labelled "Assistant".
   - The status is a label (open / under review / closed), with the note and "updated <date>" under it.
   - An empty list says so.
-- [ ] T027 [US2] Register the page routes in `blueprint.py`, with `!`, in both forms Indico uses:
+- [x] T027 [US2] Register the page routes in `blueprint.py`, with `!`, in both forms Indico uses:
   `!/user/assistant-reports/` and `!/user/<int:user_id>/assistant-reports/`, plus `<int:report_id>/` and
   `<int:report_id>/delete`. Name the endpoints so `url_for_plugin('assistant.user_report', report_id=…)` works
   for T014. Connect the `user-profile-sidemenu` item in `plugin.py`. This makes T022 pass.
