@@ -15,6 +15,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 - [Demo](#-demo)
 - [Features](#features)
 - [Chat actions](#chat-actions)
+- [Issue reports](#issue-reports)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -157,6 +158,32 @@ both). Every answer records its route in its metadata.
 `indico assistant health` shows its commit and which gate decides.
 
 The design is in `specs/022-assistant-knowledge/`.
+
+## Issue reports
+
+Users tell the team about a bug, an idea, or a wrong or poor answer from inside the chat panel, and see what came of
+it in their Indico profile.
+
+**Sending one.** The ⚑ button in the panel's title bar opens a short form in the conversation: a kind of problem,
+what happened, and **Attach this conversation** (ticked). The chat also offers **Report a problem** after a thumbs
+down, under an answer that failed or was out of scope, and on a message that says no answer came. Nothing is sent
+until the user presses Send. A user can send 20 reports a day.
+
+**What the team reads.** A report carries a copy of the conversation, taken when it is sent: up to 50 messages
+ending at the reported answer, with how each answer was made (the query, its intent, row count, any rejection,
+correction or error). The team reads that copy, never the live chat, and it outlives the chat's retention. Unticked,
+the report has only the kind and the text.
+
+**Status.** Indico admins triage in **Administration → Integration → Assistant reports**, whose menu item counts the
+open reports. They set a status (open, under review, closed) and a note, which the user sees under **My profile →
+Assistant reports**. A save made from a page that someone else has saved since is refused, so nothing is overwritten
+silently. Users can delete their own reports.
+
+**Keeping reports.** A closed report is deleted **Keep closed issue reports** days after it closed (default 365).
+Open reports and reports under review are never deleted. Run `indico db --all-plugins upgrade` first: it adds
+`plugin_assistant.issue_reports` (migration 009).
+
+The design is in `specs/021-issue-reports/`.
 
 ## Requirements
 
@@ -386,6 +413,17 @@ Feedback on one of the caller's answers. A thumb is one vote, so switching betwe
 #### DELETE /api/assistant/feedback/{feedback_id}
 
 Take back a thumbs vote, together with its comment: `204`. A vote that isn't the caller's returns `404`.
+
+### Issue reports
+
+`POST /api/assistant/reports` sends one: `{"form_key", "category", "text", "attach", "session_id", "answer_id"}`,
+where `category` is `bug`, `feature` or `wrong_answer`. It returns `201` with `{"report_id", "url"}`, or `200` with
+the same report when that `form_key` was already sent. `GET /api/assistant/reports` lists the caller's own reports,
+and `GET` or `DELETE /api/assistant/reports/{id}` reads or deletes one. Admins have `GET /api/assistant/admin/reports`
+(`status`, `category`, `page`), `GET /api/assistant/admin/reports/{id}` and `PATCH` of the same with `{"status",
+"note", "seen"}`, where `seen` is the `updated_at` last read: `409 STALE` if it changed. Someone else's report and a
+missing one both return `404`. A write made with the Indico session cookie needs the `X-CSRF-Token` header. The full
+contract is `specs/021-issue-reports/contracts/api.md`.
 
 ### Vector Search
 

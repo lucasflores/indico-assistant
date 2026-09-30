@@ -400,9 +400,9 @@ without overwriting anyone.
 
 ## Phase 7: Polish and cross-cutting
 
-- [ ] T042 [P] Merged accounts (R12): in `plugin.py`, connect `signals.users.merged` to move `user_id` and
+- [x] T042 [P] Merged accounts (R12): in `plugin.py`, connect `signals.users.merged` to move `user_id` and
   `updated_by_id` from `source` to `target`. Test it in `tests/integration/reports/test_own.py`.
-- [ ] T043 Write `tests/browser/reports.mjs`, using `lib.mjs`'s `browserAs`:
+- [ ] T043 (written 2026-09-30; runs in the live window) Write `tests/browser/reports.mjs`, using `lib.mjs`'s `browserAs`:
   - **SC-001**: as user 6, send a report from an offer and one from ⚑. Each takes at most three choices besides
     typing, and each shows on `/user/assistant-reports/` right after. 10 runs;
   - **SC-002**: 10 thumbs down each give an offer, and 10 out-of-scope questions each carry one. A
@@ -412,7 +412,7 @@ without overwriting anyone.
   Add it to `tests/browser/README.md`.
 - [ ] T044 **Live**: run every existing browser check unchanged (SC-007): `walk` (as user 1), `sc003`, `us4`,
   `hover`, `feedback`, `tabs` and `sidebar`. Fix any regression.
-- [ ] T045 [P] Documentation:
+- [x] T045 [P] Documentation:
   - `README.md`: a short "Issue reports" section: the ⚑ button, offers, the profile page, the admin page,
     retention;
   - `docs/DEPLOYMENT.md`: migration 009 and the `retention_report_days` setting;
