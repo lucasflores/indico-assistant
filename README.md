@@ -128,6 +128,32 @@ without the room.
 
 The design is in `specs/019-chat-actions/`, and the local walkthrough is in its `quickstart.md`.
 
+## Knowledge answers
+
+"How do I give someone management rights?" and "Can you create meetings for me?" get their own answer: the steps,
+a link to the page in the user's own event, and the page of Indico's user guide it came from. It is one model call
+with three things in the prompt:
+
+- **Indico's user guide** ([learn.getindico.io](https://learn.getindico.io)): a copy pinned to one commit of
+  `indico/indico-user-docs` ships in the plugin (`indico_assistant/knowledge_guide/`) and is searched locally with
+  its own embedding model. Answering needs no internet access.
+- **What the assistant can do for this user**, built for each question from the chat actions, the admin's settings
+  and the user's permissions (each action's `available()`, which follows its own permission check).
+- **The pages this user can open**, from Indico's own menus for this user and event. Every link in an answer must
+  be one of them, or a real guide page: code checks each link after the model writes it.
+
+It offers the changes it can make ("Shall I?"; a yes becomes a plan), and hands off, with a link, what it never
+does: permissions and protection, deleting events, emailing people, registrations, payments, room booking.
+
+**Routing.** Jev (a decision model) picks out knowledge questions first, when a key is set; otherwise, or when it is
+slow, the classifier's `knowledge` category does. A change request the planner finds nothing in also gets the
+knowledge answer. Every answer records its route in its metadata.
+
+**The guide copy.** `indico assistant guide-build --commit <sha>` rebuilds it from a guide commit, for a release.
+`indico assistant health` shows its commit and which gate decides.
+
+The design is in `specs/022-assistant-knowledge/`.
+
 ## Requirements
 
 - **Indico 3.3+**
@@ -176,6 +202,9 @@ pip install git+https://github.com/lucasflores/indico-assistant.git
 | API Key | Authentication key: an `sk-ibis-` key for ibis (required) | None |
 | Timeout | Request timeout in seconds | 30 |
 | Max Tokens | Maximum response tokens | 4096 |
+| Knowledge gate key (Jev) | Optional OpenRouter key for Jev, which picks out "how do I" and "can you" questions; without it the classifier decides alone | None |
+| Knowledge gate cut-off | Jev's score (0–1) at or above which a message gets a knowledge answer | 0.2 |
+| Knowledge gate timeout | Seconds; a slower decision is ignored and the classifier decides | 1.5 |
 
 ### Chat Widget Settings
 
@@ -507,6 +536,9 @@ indico assistant config
 
 # Show configuration with secrets visible
 indico assistant config --show-secrets
+
+# Rebuild the user-guide copy the plugin ships, from a commit of indico/indico-user-docs
+indico assistant guide-build --commit <sha>
 ```
 
 **Health Check Output:**
@@ -515,6 +547,7 @@ indico assistant config --show-secrets
 - LLM provider and base URL
 - LLM connection status
 - Response latency (if connected)
+- Knowledge: the guide copy's commit and page count, and whether Jev or the classifier decides
 
 **Config Output:**
 - Enabled status
