@@ -41,11 +41,19 @@ Analyze the user's question and classify it into one of these intents:
 - **write_request**: An instruction to CREATE, CHANGE, MOVE, ADD, ATTACH, CANCEL or UNDO something in Indico
   (a meeting, its talks or speakers, a reminder, a Teams meeting, material): "Create a meeting tomorrow at
   2pm", "move it to 3pm", "attach this to my talk", "undo that". Not a question about existing data.
+- **knowledge**: How to do something in Indico, where to find a page or setting, or what the assistant itself can
+  do: "how do I add a timetable entry?", "where do I change the protection?", "can you create meetings?", "what can
+  you do?", "do you have access to my calendar?". A question about how, or whether, not an instruction with details.
 - **out_of_scope**: Questions not related to events/registrations/contributions/documents
 
 ## CLASSIFICATION HINTS
 
 ### Intent Selection Rules
+
+**PRIORITY -1 - knowledge**: "how do I / how can I / where do I …" about using Indico, and "can you / are you
+able to …" about the assistant's abilities in general, are knowledge, never write_request, even when they contain
+"create", "add" or "give". "Can you move it to 3pm?" or "could you create a meeting tomorrow at 10?" name a concrete
+change with its details: that is write_request. "How many…" and "how long…" ask about data: never knowledge.
 
 **PRIORITY 0 - write_request**: the user tells the assistant to make a change ("create", "schedule",
 "set up", "book a meeting", "add ... as a speaker", "move", "rename", "attach", "undo"). A question about

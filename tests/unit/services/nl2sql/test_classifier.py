@@ -643,3 +643,10 @@ def test_change_requests_have_their_own_intent():
     # Feature 019: routed to the chat-action planner instead of SQL
     from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
     assert '**write_request**' in CLASSIFICATION_PROMPT and 'PRIORITY 0 - write_request' in CLASSIFICATION_PROMPT
+
+
+def test_knowledge_questions_have_their_own_intent():
+    # Spec 022: "how do I" and "can you" questions get the knowledge answer, above write_request
+    from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
+    assert '**knowledge**' in CLASSIFICATION_PROMPT and 'PRIORITY -1 - knowledge' in CLASSIFICATION_PROMPT
+    assert CLASSIFICATION_PROMPT.index('PRIORITY -1 - knowledge') < CLASSIFICATION_PROMPT.index('PRIORITY 0 - write_request')

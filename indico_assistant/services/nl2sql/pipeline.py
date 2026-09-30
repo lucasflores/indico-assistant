@@ -421,6 +421,11 @@ class NL2SQLPipeline:
                 return PipelineResult(success=True, write_request=True,
                                       total_time_ms=int((time.time() - start_time) * 1000),
                                       classification_time_ms=classification_time)
+            # "How do I…" / "can you…": the knowledge answer (spec 022), no SQL either
+            if classification.intent == "knowledge":
+                return PipelineResult(success=True, knowledge_request=True,
+                                      total_time_ms=int((time.time() - start_time) * 1000),
+                                      classification_time_ms=classification_time)
 
             # Check for out-of-scope queries
             if self._classifier.is_out_of_scope(classification):
