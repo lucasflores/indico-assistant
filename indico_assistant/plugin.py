@@ -63,6 +63,7 @@ class AssistantPlugin(IndicoPlugin):
         # spec 021: the profile's "Assistant reports"
         self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
         self.connect(signals.menu.items, _admin_menu, sender='admin-sidemenu')
+        self.connect(signals.users.merged, _merge_reports)
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
@@ -248,3 +249,10 @@ def _profile_menu(sender, user, **kwargs):
 def _admin_menu(sender, **kwargs):
     from indico_assistant.controllers.report_pages import admin_menu_item
     return admin_menu_item()
+
+
+def _merge_reports(target, source, **kwargs):
+    """Merged accounts: the reports (and the team's saves) move to the account that remains (spec 021)."""
+    from indico_assistant.models import IssueReport
+    IssueReport.query.filter_by(user_id=source.id).update({IssueReport.user_id: target.id})
+    IssueReport.query.filter_by(updated_by_id=source.id).update({IssueReport.updated_by_id: target.id})

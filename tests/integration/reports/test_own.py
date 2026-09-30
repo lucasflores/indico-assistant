@@ -9,6 +9,7 @@ import indico_assistant.controllers.reports as reports_module
 import indico_assistant.services.reports as service
 from indico_assistant.controllers.reports import RHReportDelete, RHReportDetail, RHReportList
 from indico_assistant.models import IssueReport
+from indico_assistant.plugin import _merge_reports
 
 
 @pytest.fixture
@@ -80,3 +81,13 @@ def test_has_reports_follows_the_rows(db, users):
     assert not service.has_reports(users['makoto'])
     filed(db, users['makoto'])
     assert service.has_reports(users['makoto']) and not service.has_reports(users['lucas'])
+
+
+def test_merged_accounts_keep_their_reports(db, users, create_user):
+    old = create_user(22, first_name='Makoto (old account)')
+    theirs = filed(db, old)
+    saved = filed(db, users['makoto'], updated_by_id=old.id)
+    _merge_reports(users['makoto'], old)
+    db.session.expire_all()
+    assert db.session.get(IssueReport, theirs.id).user_id == users['makoto'].id
+    assert db.session.get(IssueReport, saved.id).updated_by_id == users['makoto'].id

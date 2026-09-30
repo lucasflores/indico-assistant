@@ -23,6 +23,7 @@ Checks, each against the running stack:
 | `WALK_USER=6 node hover.mjs` | Tooltips in the panel stay tooltip-sized (the Copilot-era widget.css blew them up to a blank 85vh box) |
 | `WALK_USER=6 node feedback.mjs` | Thumbs: a vote with a comment is kept after a reload, switched, taken back |
 | `WALK_USER=6 node tabs.mjs` | Two tabs keep their own conversation; a new tab starts on the last one |
+| `WALK_USER=6 RUNS=10 node reports.mjs` | Spec 021: reports from an offer and from ⚑ listed on the profile page (SC-001); offers after thumbs down and under out-of-scope answers, a double click is one report (SC-002). Resets user 6's report and chat limits in the dev Redis, and deletes the reports it made |
 | `node sidebar.mjs` | US3: Past Chats list, groups, paging, search, open, new chat (SC-006), two users (SC-005); seed first with `python seed_sc006.py`, then `python seed_sc006.py delete` |
 
 Run the Python helpers with the Indico env and `INDICO_CONFIG` set.

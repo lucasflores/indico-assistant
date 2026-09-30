@@ -6,7 +6,10 @@ conversations. Conversations live in Indico's database: Chainlit keeps none of i
 
 ## Prerequisites
 - The Indico Assistant plugin installed and enabled, with its migrations applied: `indico db --all-plugins upgrade`
-  (migration 008 adds conversation titles).
+  (migration 008 adds conversation titles, 009 the issue reports).
+- The plugin's non-Python files installed with it: `indico_assistant/static/` and, since spec 021, the page
+  templates in `indico_assistant/templates/`. An install from the source tree has them. Check that a wheel build
+  does too, since `pyproject.toml` declares no package data.
 - A Celery worker consuming the assistant's queues: `indico celery worker -Q celery,assistant,assistant_bulk,teams_notes`.
 - A Chainlit server reachable by browsers over HTTPS, **on the same site as Indico** (see "Hosting" below).
 - One shared HS256 secret, configured in both Indico and Chainlit.
@@ -40,6 +43,7 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
   - Chat Widget Enabled: ✓
   - Chainlit Server URL: `https://assistant.example.org`
   - Chainlit Auth Secret: the same as Chainlit's
+  - Keep closed issue reports (days): 365 by default, counted from closing (spec 021)
 - Restart Indico after changing the secret.
 - Knowledge answers (spec 022): the user-guide copy ships in the plugin. Searching it needs the embedding model
   `BAAI/bge-small-en-v1.5` in the worker's Hugging Face cache, the same model document search uses. The worker
