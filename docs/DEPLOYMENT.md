@@ -41,6 +41,12 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
   - Chainlit Server URL: `https://assistant.example.org`
   - Chainlit Auth Secret: the same as Chainlit's
 - Restart Indico after changing the secret.
+- Knowledge answers (spec 022) work without anything more: the user-guide copy ships in the plugin, and answering
+  needs no internet access beyond the LLM service.
+- Optional: **Knowledge gate key (Jev)**, an OpenRouter key. The Celery worker then needs outbound HTTPS to
+  `openrouter.ai` (the decisions endpoint). Without the key, or when it is unreachable, the classifier decides.
+- For a release, rebuild the guide copy from a pinned commit: `indico assistant guide-build --commit <sha>`
+  (needs GitHub access at build time only), and commit `indico_assistant/knowledge_guide/`.
 
 ### 3. Content Security Policy
 - Indico must allow the panel's frame: `frame-src 'self' https://assistant.example.org`.
