@@ -245,3 +245,82 @@ def _chat(db, user):
     db.session.add(chat)
     db.session.flush()
     return chat
+
+
+# spec 022: a Teams meeting and a reminder for a meeting that already exists (the capability list offers them)
+
+@pytest.fixture
+def existing(db, people, dummy_event):
+    """A meeting the manager did not make in this chat, two days ahead, with no Teams room yet."""
+    lucas = people['manager']
+    lucas.settings.set('timezone', 'UTC')
+    dummy_event.start_dt, dummy_event.end_dt = START, START + timedelta(hours=1)
+    chat = ChatSession(user_id=lucas.id)
+    db.session.add(chat)
+    db.session.flush()
+    return chat, dummy_event
+
+
+def test_a_teams_meeting_for_an_existing_meeting(people, existing, teams):
+    from indico.modules.vc.models.vc_rooms import VCRoomEventAssociation
+
+    lucas = people['manager']
+    chat, event = existing
+    plan = change(lucas, chat, meeting=f'#{event.id}', teams=True)
+    assert [s['action'] for s in plan.steps] == ['add_teams_room'] and plan.refusal is None
+    assert plan.steps[0]['args'] == {'event_id': event.id, 'name': event.title, 'coorganizer_ids': [lucas.id],
+                                     'description': ''}
+    run(lucas, chat, plan.steps)
+    assert [a.vc_room.type for a in VCRoomEventAssociation.find_for_event(event)] == ['teams']
+    again = change(lucas, chat, meeting=f'#{event.id}', teams=True)
+    assert again.steps == [] and 'already has a Microsoft Teams meeting' in again.refusal
+
+
+def test_no_teams_plugin_is_a_reason_not_nothing_to_change(people, existing, monkeypatch):
+    from indico_assistant.services.actions import teams as teams_module
+
+    monkeypatch.setattr(teams_module, 'teams_plugin', lambda: None)
+    chat, event = existing
+    plan = change(people['manager'], chat, meeting=f'#{event.id}', teams=True)
+    assert 'Microsoft Teams is not available' in plan.refusal and plan.refusal != resolve.NOTHING_TO_CHANGE
+
+
+def test_a_reminder_for_an_existing_meeting(people, existing):
+    from indico.modules.events.reminders.models.reminders import EventReminder
+
+    lucas = people['manager']
+    chat, event = existing
+    plan = change(lucas, chat, meeting=f'#{event.id}', reminder={'minutes_before': 1440, 'participants': True})
+    (step,) = plan.steps
+    assert step['action'] == 'add_reminder' and step['args'] == {
+        'event_id': event.id, 'minutes_before': 1440, 'recipients': [], 'send_to_speakers': False,
+        'send_to_participants': True}
+    assert 'the registered participants' in step['description']
+    run(lucas, chat, plan.steps)
+    (reminder,) = EventReminder.query.with_parent(event).all()
+    assert reminder.send_to_participants and not reminder.send_to_speakers
+    assert reminder.scheduled_dt == START - timedelta(days=1)
+
+
+def test_a_reminder_to_nobody_named_goes_to_speakers_and_participants(people, existing):
+    chat, event = existing
+    args = change(people['manager'], chat, meeting=f'#{event.id}', reminder={}).steps[0]['args']
+    assert (args['minutes_before'], args['send_to_speakers'], args['send_to_participants']) == (15, True, True)
+    named = change(people['manager'], chat, meeting=f'#{event.id}', reminder={'people': ['Makoto']}).steps[0]['args']
+    assert named['recipients'] == ['makoto@aithoth.com'] and not named['send_to_participants']
+
+
+def test_a_reminder_at_a_set_time(people, existing):
+    chat, event = existing
+    tomorrow_9 = (START - timedelta(days=1)).replace(hour=9)
+    args = change(people['manager'], chat, meeting=f'#{event.id}',
+                  reminder={'at': {'date': (START - timedelta(days=1)).date().isoformat(), 'time': '9am'}}
+                  ).steps[0]['args']
+    assert args['minutes_before'] == (START - tomorrow_9).total_seconds() // 60
+
+
+def test_a_reminder_too_late_to_send_is_refused_with_the_reason(people, existing):
+    chat, event = existing
+    event.start_dt, event.end_dt = now_utc() + timedelta(minutes=10), now_utc() + timedelta(hours=1)
+    plan = change(people['manager'], chat, meeting=f'#{event.id}', reminder={'minutes_before': 15})
+    assert plan.steps == [] and 'too late for that reminder' in plan.refusal

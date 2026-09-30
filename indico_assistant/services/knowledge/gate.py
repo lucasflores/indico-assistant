@@ -43,7 +43,8 @@ ROUTES = {
             "something the conversation mentions (a term, a result, a process), a request to rephrase, summarise, "
             "translate or reformat, drafting a text about the user's meetings, thanks or a greeting.",
     "out_of_scope": "Clearly unrelated to Indico, its content or this conversation: weather, sports, coding help, "
-                    "general trivia.",
+                    "general trivia. A question naming a project, topic, team or meeting, however unfamiliar the "
+                    "name, is never out of scope: it asks about what is stored in Indico.",
 }
 #: The classifier's data intents, in its own words (services/nl2sql/classifier.py; a test keeps them equal).
 INTENTS = {

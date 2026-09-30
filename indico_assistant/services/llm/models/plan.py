@@ -62,6 +62,15 @@ class SlotChange(BaseModel):
     move_to: When | None = None
 
 
+class ReminderDraft(BaseModel):
+    minutes_before: int | None = Field(None, description='How long before the start, in minutes, as the user said '
+                                                          'it ("1 day before" = 1440); null if not said')
+    at: When | None = Field(None, description='Only when the user gave the reminder its own time ("tomorrow 9am")')
+    participants: bool = Field(False, description='To the registered participants ("all participants")')
+    speakers: bool = Field(False, description='To the speakers')
+    people: list[PersonRef] = Field(default_factory=list, description='Other people to email, as the user named them')
+
+
 class ChangeMeeting(BaseModel):
     action: Literal['change_meeting']
     meeting: str = Field('it', description='"it" = the meeting made in this chat; otherwise its name')
@@ -70,6 +79,8 @@ class ChangeMeeting(BaseModel):
     description: str | None = None
     add_slots: list[Slot] = Field(default_factory=list)
     change_slots: list[SlotChange] = Field(default_factory=list)
+    teams: bool = Field(False, description='Add a Microsoft Teams meeting to it')
+    reminder: ReminderDraft | None = Field(None, description='Add an email reminder before it')
 
 
 class Attach(BaseModel):

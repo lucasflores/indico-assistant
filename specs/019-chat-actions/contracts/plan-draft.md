@@ -43,6 +43,8 @@ class ChangeMeeting(BaseModel):
     description: str | None = None
     add_slots: list[Slot] = []
     change_slot: dict | None = None  # {"which": "second", "speaker": PersonRef, ...}
+    teams: bool = False              # spec 022: add a Teams meeting to a meeting that already exists
+    reminder: ReminderDraft | None = None  # spec 022: {minutes_before | at, participants, speakers, people}
 
 class Attach(BaseModel):
     action: Literal["attach"]

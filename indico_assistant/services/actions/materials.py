@@ -27,6 +27,7 @@ class AddReminderArgs(ActionArgs):
     minutes_before: int
     recipients: list[str] = []
     send_to_speakers: bool = True
+    send_to_participants: bool = False  # the registered participants, as the reminders page's checkbox
 
 
 @register
@@ -44,7 +45,8 @@ class AddReminder(Action):
         return _manage_refusal(Event.get(args.event_id, is_deleted=False), user)
 
     def describe(self, args):
-        to = (['the speakers'] if args.send_to_speakers else []) + args.recipients
+        to = ((['the speakers'] if args.send_to_speakers else [])
+              + (['the registered participants'] if args.send_to_participants else []) + args.recipients)
         return (f'Send a reminder {args.minutes_before} minutes before the meeting to {", ".join(to)}',
                 [f'Reminder email to {", ".join(to)}'])
 
@@ -57,7 +59,8 @@ class AddReminder(Action):
         reminder = EventReminder(creator=user, event=event, reminder_type=ReminderType.standard,
                                  scheduled_dt=event.start_dt - delta, event_start_delta=delta,
                                  recipients=[r.lower() for r in args.recipients],
-                                 send_to_speakers=args.send_to_speakers, send_to_participants=False,
+                                 send_to_speakers=args.send_to_speakers,
+                                 send_to_participants=args.send_to_participants,
                                  include_summary=False, include_description=True, attach_ical=True,
                                  reply_to_address=user.email if user.email in senders else config.NO_REPLY_EMAIL)
         db.session.add(reminder)
