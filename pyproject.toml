@@ -56,6 +56,11 @@ assistant = "indico_assistant.plugin:AssistantPlugin"
 where = ["."]
 include = ["indico_assistant*"]
 
+[tool.setuptools.package-data]
+# non-Python files a built wheel must carry (the guide copy of spec 022; without this list a wheel also lost the
+# tables file and the widget's static files)
+indico_assistant = ["knowledge_guide/*", "config_modules/*.yaml", "static/**/*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

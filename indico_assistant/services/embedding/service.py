@@ -27,6 +27,21 @@ _models: dict[str, tuple["SentenceTransformer", int]] = {}
 _models_lock = threading.Lock()
 
 
+def load_model(name: str) -> tuple[SentenceTransformer, int]:
+    """The sentence-transformers model ``name`` and its dimensions, loaded once per process (the guide copy of spec
+    022 shares this cache: it pins its own model, whatever the ``embedding_model`` setting says)."""
+    with _models_lock:  # one load per process, even when threads ask at the same time
+        if name not in _models:
+            from sentence_transformers import SentenceTransformer
+
+            logger.info(f"Loading embedding model: {name}")
+            model = SentenceTransformer(name)
+            dims = model.encode(["test"], normalize_embeddings=True).shape[1]
+            _models[name] = (model, dims)
+            logger.info(f"Embedding model loaded: {name} ({dims} dimensions)")
+        return _models[name]
+
+
 class EmbeddingService:
     """Service for generating text embeddings using sentence-transformers.
     
@@ -94,16 +109,7 @@ class EmbeddingService:
             return self._model
         
         try:
-            with _models_lock:  # one load per process, even when threads ask at the same time
-                if self._model_name not in _models:
-                    from sentence_transformers import SentenceTransformer
-
-                    logger.info(f"Loading embedding model: {self._model_name}")
-                    model = SentenceTransformer(self._model_name)
-                    dims = model.encode(["test"], normalize_embeddings=True).shape[1]
-                    _models[self._model_name] = (model, dims)
-                    logger.info(f"Embedding model loaded: {self._model_name} ({dims} dimensions)")
-                self._model, actual_dims = _models[self._model_name]
+            self._model, actual_dims = load_model(self._model_name)
             if actual_dims != self._dimensions:
                 logger.warning(
                     f"Model dimensions ({actual_dims}) differ from configured "
