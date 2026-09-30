@@ -126,11 +126,11 @@ def _attach_available(user, event):
         return reason
     from indico_assistant.services.actions.contributions import _reachable_refusal
 
-    if (reason := _reachable_refusal(managed_meetings(user))) is None or any(
-            _own_talks(e, user) for e in map(Event.get, get_events_with_linked_contributions(
-                user, dt=now_utc() - timedelta(days=30))) if e is not None and not e.is_deleted):
+    if (reason := _reachable_refusal(managed_meetings(user))) is None:
         return None
-    return reason
+    ids = list(get_events_with_linked_contributions(user, dt=now_utc() - timedelta(days=30)))
+    events = Event.query.filter(Event.id.in_(ids), ~Event.is_deleted).all() if ids else []  # (one query, not N)
+    return None if any(_own_talks(e, user) for e in events) else reason
 
 
 def _own_talks(event, user):

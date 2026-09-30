@@ -957,6 +957,11 @@ def test_a_topic_search_routed_by_jev_is_broadened_too(pipeline):
            "AND e.start_dt BETWEEN '2026-09-01' AND '2026-09-30' ORDER BY e.start_dt")
     fixed = pipeline._fix_topic_search_sql(sql, SimpleNamespace(entities=[], time_range=None))
     assert "n.html ILIKE '%Catalyst%'" in fixed and "LEFT JOIN events.contributions c" in fixed
+    assert "GROUP BY e.id" in fixed  # (fresh review) one row per event once the joins are injected
+    counted = pipeline._fix_topic_search_sql(
+        "SELECT COUNT(*) FROM events.events e WHERE e.title ILIKE '%Catalyst%' LIMIT 1",
+        SimpleNamespace(entities=[], time_range=None))
+    assert "GROUP BY" not in counted  # (never around an aggregate)
     assert f"{LOCAL_EVENT_DATE} BETWEEN '2026-09-01' AND '2026-09-30'" in fixed
     days_only = "SELECT e.id FROM events.events e WHERE e.start_dt BETWEEN '2026-09-01' AND '2026-09-30'"
     assert LOCAL_EVENT_DATE in pipeline._fix_topic_search_sql(days_only, SimpleNamespace(entities=[], time_range=None))

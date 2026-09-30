@@ -14,7 +14,7 @@ from datetime import datetime
 from indico_assistant.services.actions import enabled_actions, executor, validate_plan
 from indico_assistant.services.actions.context import fence, user_timezone
 from indico_assistant.services.actions.resolve import IT, ME, PAGE_FROM_CHAT, TALK_TARGET_WORDS
-from indico_assistant.services.llm.models.plan import CreateMeeting, PlanDraft
+from indico_assistant.services.llm.models.plan import ChangeMeeting, CreateMeeting, PlanDraft
 from indico_assistant.services.llm.service import collect_calls
 
 
@@ -77,8 +77,10 @@ class PlanTurn:
 
 
 def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings,
-              page_event_id=PAGE_FROM_CHAT):
-    """Answer one message that asks for (or follows up on) a change."""
+              page_event_id=PAGE_FROM_CHAT, offer=None):
+    """Answer one message that asks for (or follows up on) a change. ``offer``: the change the last answer offered
+    (spec 022). A plain yes to it plans it: the offer is then the request, but the guards still read only the
+    user's own words, since the offer was written by a model (a link or an address in it is not the user's)."""
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE, cannot_plan=True)
@@ -86,11 +88,12 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
         draft, topic, remaining = short
         return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings, topic, suggestions=remaining,
                       page_event_id=page_event_id)
+    request = offer if offer and open_plan is None and AFFIRMATIVE.fullmatch(message) else message
     from indico_assistant.services.actions import suggestions as context_suggestions
-    context = context_suggestions.build_context(user, message, chat_session_id, history)
+    context = context_suggestions.build_context(user, request, chat_session_id, history)
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
-        response = llm.generate(_prompt(user, message, open_plan, enabled, chat_session_id, context), PlanDraft,
+        response = llm.generate(_prompt(user, request, open_plan, enabled, chat_session_id, context), PlanDraft,
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
@@ -102,10 +105,10 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
         draft.decision = 'revise'
     if not draft.steps and re.match(r'\s*(undo|revert|take (that|it) back)\b', message, re.IGNORECASE):
         draft = PlanDraft(decision='new_request', steps=[{'action': 'undo'}])  # seen in the eval: "unrelated"
-    draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), message, open_plan)
+    draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), request, open_plan)
     draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
-                                          open_plan)
-    draft = _the_meeting_the_user_meant(draft, message, _page_title(page_event_id))
+                                          open_plan, agreed_to=offer or '')
+    draft = _the_meeting_the_user_meant(draft, request, _page_title(page_event_id))
     # (seen live, PR #5: "What is this event about?" on another page also came back as a new request repeating
     # the waiting one)
     if open_plan is not None and (
@@ -113,7 +116,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
             or _changes_nothing(draft, open_plan)):
         draft.decision = 'unrelated'  # answered as a question; the waiting plan stays as it is
     offered = [*draft.suggestions, *context_suggestions.automatic(context, draft, user)]
-    turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, message,
+    turn = _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, request,
                   suggestions=context_suggestions.validate(offered, context), page_event_id=page_event_id)
     turn.llm_calls = calls
     return turn
@@ -186,7 +189,7 @@ RELATIVE_DAY = re.compile(r'\b(?:(?:next|this|on) )?(?:mon|tues|wednes|thurs|fri
 TALK_WORDS = ('slot', 'talk', 'contribut', 'present', 'speaker', 'speak')
 
 
-def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
+def _only_what_the_user_asked_for(draft, user_messages, open_plan=None, agreed_to=''):
     """Steps come from the user's own messages, never from context (FR-017): talks only if the user asked for
     talks, people only if the user named them. (Seen live: the model copied a past meeting's talks, which
     were in the context block, into a new meeting.) What context offers is shown as suggestions instead."""
@@ -194,6 +197,11 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
     earlier = ((open_plan.draft or {}).get('steps') or [{}])[0] if open_plan is not None else {}
     raw = ' '.join(user_messages) + ' ' + json.dumps(earlier, ensure_ascii=False)
     said = raw.lower()
+    # a Teams meeting or a reminder added to an existing meeting: only when this message, the offer it answers or
+    # the plan being revised asks for one, not a word from anywhere earlier in the chat (the model adds them to
+    # unrelated changes)
+    asked = ' '.join([user_messages[0] if user_messages else '', agreed_to,
+                      json.dumps(earlier, ensure_ascii=False)]).lower()
     for step in draft.steps:
         refs = [*getattr(step, 'people', ()), *(s.speaker for s in getattr(step, 'slots', ()) if s.speaker),
                 *getattr(getattr(step, 'reminder', None), 'people', ()),
@@ -208,13 +216,14 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
             step.description = None
         if getattr(step, 'url', None) and step.url.lower() not in said:
             step.url = None
-        if hasattr(step, 'teams'):
-            step.teams = step.teams and 'teams' in said
-        if getattr(step, 'reminder', None) and 'remind' not in said:
-            step.reminder = None  # (a change the user did not ask for: an email to everyone)
+        if isinstance(step, ChangeMeeting):
+            step.teams = step.teams and 'teams' in asked
+            if step.reminder and 'remind' not in asked:
+                step.reminder = None  # (a change the user did not ask for: an email to everyone)
         if not isinstance(step, CreateMeeting):
             continue
         step.links = [url for url in step.links if url.lower() in said]  # (accepted suggestions are in ``earlier``)
+        step.teams = step.teams and 'teams' in said
         if not any(word in said for word in TALK_WORDS):
             step.slots = []
         if step.category and not _category_named(step.category, said, raw):
@@ -334,7 +343,7 @@ def _only_what_the_user_said(draft, message, open_plan=None):
                ] if open_plan is not None else []
     for n, step in enumerate(draft.steps):
         if (reminder := getattr(step, 'reminder', None)) is not None and reminder.at is not None:
-            reminder.at.date = relative if relative is not None else (reminder.at.date if names_a_day else None)
+            reminder.at.date = _reminder_day(message, reminder.at.date)
         when = step.when if isinstance(step, CreateMeeting) else getattr(step, 'move_to', None)
         if when is None:
             continue
@@ -354,6 +363,17 @@ _MONTH = r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|a
 # a date the user wrote out: 2026-10-02, 2/10, "October 2", "2nd of October" (a bare "-" or "/" is not one)
 NAMED_DATE = re.compile(rf'\b\d{{4}}-\d{{1,2}}-\d{{1,2}}\b|\b\d{{1,2}}[/.]\d{{1,2}}\b|\b{_MONTH}\.? \d{{1,2}}\b|'
                         rf'\b\d{{1,2}}(?:st|nd|rd|th)?(?: of)? {_MONTH}\b', re.IGNORECASE)
+
+
+def _reminder_day(message, model_date):
+    """A reminder's own day, from the words after "remind" ("move it to Friday and remind them Thursday"): a day
+    named there, "the day before" (the resolver counts it from the meeting), a written-out date (the model's copy
+    of it), or none (the meeting's day)."""
+    at = message.lower().find('remind')
+    tail = message[at:] if at >= 0 else message
+    if re.search(r'\bday before\b', tail, re.IGNORECASE):
+        return 'the day before'
+    return _the_day(tail) or (model_date if NAMED_DATE.search(tail) else None)
 
 
 def _the_day(message):

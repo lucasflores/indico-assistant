@@ -187,11 +187,13 @@ class ChatService:
         from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 
         decision, fallback, planned, answer, open_for_change = None, None, None, None, waiting_plan
-        request, tried = message, False  # what the planner is asked; whether it was already asked
+        request, tried = message, False  # what the knowledge answer is asked; whether the planner was already asked
+        if offer and NEGATIVE.fullmatch(message):
+            waiting_plan = open_for_change = None  # it turns down the offer: nothing may cancel the waiting plan
         if offer and AFFIRMATIVE.fullmatch(message):
-            # the planner is asked for what was offered, as a new request (a bare yes has no plan to confirm)
+            # the planner plans what was offered, as a new request (a bare yes has no plan to confirm)
             route, request, open_for_change = "change", offer, None
-        elif exact_reply(waiting_plan, message) and not (offer and NEGATIVE.fullmatch(message)):
+        elif exact_reply(waiting_plan, message):
             route = "change"
         else:
             decision = self._decide(context, plan_waiting=waiting_plan is not None, offer=offer)
@@ -199,7 +201,7 @@ class ChatService:
             if decision.skipped:  # no key, slow, or an error: the classifier routes, as before the router
                 open_for_change = None  # (a change the classifier finds is a new request)
                 if waiting_plan or offer:
-                    planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
+                    planned = self._plan(user, session.id, message, context, waiting_plan, event_id, offer)
                     tried = waiting_plan is None  # (asked as a new request: asking again would give the same)
                     if planned is not None and waiting_plan is None and planned[1].get("cannot_plan"):
                         planned = None  # not a change after all: routed as if there had been no offer
@@ -211,14 +213,14 @@ class ChatService:
                 response_text, metadata = self._process_with_nl2sql(
                     message, context, event_id, user_id=viewer.id, auth_user=viewer,
                     intent=decision.intent if route == "data" else None,
-                    intent_confidence=decision.confidence if route == "data" else None,
+                    intent_confidence=decision.intent_confidence if route == "data" else None,
                 )
                 route = _route_of(metadata)
             elif route == "out_of_scope":
                 route, response_text, metadata = "refusal", OUT_OF_SCOPE_MESSAGE, {}
         if route == "change" and planned is None:
             if not tried:
-                planned = self._plan(user, session.id, request, context, open_for_change, event_id)
+                planned = self._plan(user, session.id, message, context, open_for_change, event_id, offer)
             if planned is None or (planned[1].get("cannot_plan") and open_for_change is None):
                 planned, route, fallback = None, "knowledge", ", ".join(filter(None, (fallback, "planner")))
         if route == "knowledge":  # (after an offer the planner could not plan: about the offer, not the "yes")
@@ -260,23 +262,29 @@ class ChatService:
         plugin = AssistantPlugin.instance
         settings = plugin.settings.get_all()
         event = Event.get(page_event_id, is_deleted=False) if page_event_id else None
-        with acting_as(user):
-            caps, pages = capability_list(user, event, settings), page_list(user, event)
+        try:
+            with acting_as(user):
+                caps, pages = capability_list(user, event, settings), page_list(user, event)
+        except Exception:  # (another plugin's menu, a query): a plain message, never no reply at all
+            logger.exception("Could not build the knowledge answer's lists")
+            db.session.rollback()
+            return knowledge.KnowledgeResult(knowledge.NOT_ANSWERED, failed=True)
         db.session.commit()  # plain lists now: no transaction stays open through the guide search and the model call
         return knowledge.answer(message, _history(context), llm=plugin.llm_service, caps=caps, pages=pages,
                                 guide=get_guide(), base_url=self._get_base_url(),  # (Indico's own address)
                                 event=event)
 
-    def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None):
-        """The chat-action planner's answer, or None when the message turns out to be a question."""
+    def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None, offer=None):
+        """The chat-action planner's answer, or None when the message turns out to be a question. ``offer``: the
+        change the last answer offered, which a plain yes plans."""
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.actions.context import acting_as
         from indico_assistant.services.actions.planner import plan_turn
 
         plugin = AssistantPlugin.instance
         with acting_as(user):  # resolving names and checking permissions reads Indico as the user
-            turn = plan_turn(user, session_id, message, _history(context), waiting_plan,
-                             llm=plugin.llm_service, settings=plugin.settings.get_all(), page_event_id=page_event_id)
+            turn = plan_turn(user, session_id, message, _history(context), waiting_plan, llm=plugin.llm_service,
+                             settings=plugin.settings.get_all(), page_event_id=page_event_id, offer=offer)
         if not turn.handled:
             return None
         return (turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None,
