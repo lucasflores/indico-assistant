@@ -39,9 +39,12 @@ fixtures, and a `call()` helper that runs an RH's `_process` with `request` mock
 
 ## Phase 1: Setup
 
-- [ ] T001 **Gate for live checks only**: choose R13's option with Lucas. Either (a) run the shared stack from this
+- [x] T001 **Gate for live checks only**: choose R13's option with Lucas. Either (a) run the shared stack from this
   branch for a short window, with the other sessions warned, or (b) run a second stack. Record the choice in
   quickstart.md. Nothing before T019 needs it; every "live" task needs it.
+  **Decided 2026-09-30 (Lucas): one swap window at the end.** All code and tests for US1–US4 are written first. Then
+  every live task (T019, T020, T028, T036, T041, T043, T044) runs in one window with the shared stack on this branch,
+  after warning the other local sessions.
 
 ---
 
@@ -51,17 +54,17 @@ fixtures, and a `call()` helper that runs an RH's `_process` with `request` mock
 
 ### Tests first
 
-- [ ] T002 [P] In `tests/integration/reports/test_model.py` (new package: add `__init__.py`), with real rows:
+- [x] T002 [P] In `tests/integration/reports/test_model.py` (new package: add `__init__.py`), with real rows:
   - a new report has `status == 'open'` and `created_at` set, and `note`, `updated_*`, `closed_at` and `copy`
     empty;
   - a `category` or `status` outside the allowed values is refused by the database (`IntegrityError`);
   - two rows with the same `(user_id, form_key)` are refused. The same `form_key` for two users is fine.
-- [ ] T003 [P] In `tests/unit/services/chat/test_rate_limiter.py`:
+- [x] T003 [P] In `tests/unit/services/chat/test_rate_limiter.py`:
   - `allowed(user, 'report')` is true until the limit and never counts;
   - `count(user, 'report')` counts;
   - after 20 counts, `allowed` is false;
   - `'report'` has `('5 per minute', '20 per day')`, and the `'chat'` and `'read'` entries are unchanged.
-- [ ] T004 [P] In `tests/integration/reports/test_create.py`, CSRF (R10), on a small RH derived from
+- [x] T004 [P] In `tests/integration/reports/test_create.py`, CSRF (R10), on a small RH derived from
   `RHReportsAPI`:
   - with `session.user` set and no `X-CSRF-Token`, a POST is refused (`BadRequest`);
   - with `session.csrf_token` in `X-CSRF-Token`, it passes;
@@ -70,19 +73,19 @@ fixtures, and a `call()` helper that runs an RH's `_process` with `request` mock
 
 ### Implementation
 
-- [ ] T005 Write `indico_assistant/models/report.py`, with `IssueReport` exactly as data-model.md:
+- [x] T005 Write `indico_assistant/models/report.py`, with `IssueReport` exactly as data-model.md:
   - in `__table_args__`: the `CheckConstraint`s, `UniqueConstraint('user_id', 'form_key')`, the
     `(status, created_at)` index, and `{'schema': 'plugin_assistant'}`;
   - the constants `CATEGORIES`, `STATUSES` and `TEXT_MAX = 5000` / `NOTE_MAX = 2000`.
 
   Export it from `indico_assistant/models/__init__.py`. This makes T002 pass.
-- [ ] T006 Write `indico_assistant/migrations/009_create_issue_reports.py` (`down_revision =
+- [x] T006 Write `indico_assistant/migrations/009_create_issue_reports.py` (`down_revision =
   '008_add_chat_session_title'`), creating the table, its constraints and indexes, with a downgrade that drops
   them. Apply it in T019, not before.
-- [ ] T007 In `indico_assistant/services/chat/rate_limiter.py`, add `'report': ('5 per minute', '20 per day')` to
+- [x] T007 In `indico_assistant/services/chat/rate_limiter.py`, add `'report': ('5 per minute', '20 per day')` to
   `RATE_LIMITS`. Add `RateLimiter.allowed(user_id, kind)`, which calls `RateLimit.test()` on each limit, and
   `count(user_id, kind)`, which calls `hit()` on each. This makes T003 pass.
-- [ ] T008 Create `indico_assistant/controllers/reports.py` with `RHReportsAPI(RHChatBase)`:
+- [x] T008 Create `indico_assistant/controllers/reports.py` with `RHReportsAPI(RHChatBase)`:
   - `CSRF_ENABLED = True`, and `_check_csrf` that calls `super()._check_csrf()` only when `session.user is not
     None` (R10);
   - `_not_found()`, which returns `404 NOT_FOUND` with one fixed message.
@@ -102,7 +105,7 @@ conversation they can untick.
 
 ### Tests first
 
-- [ ] T009 [P] [US1] In `tests/integration/reports/test_create.py`, `POST /reports` (`RHReportCreate`, with the
+- [x] T009 [P] [US1] In `tests/integration/reports/test_create.py`, `POST /reports` (`RHReportCreate`, with the
   limiter mocked to record calls):
   - **created**: returns `201` with `{report_id, url}`, and `count` was called once;
   - **resend**: the same `form_key` again returns `200` with the same id, and `count` was not called again
@@ -114,7 +117,7 @@ conversation they can untick.
   - **validation**: an unknown category, blank text, text over 5,000 characters, a malformed `form_key`, or
     `attach: true` without `session_id` each return `422`, and no row;
   - **unticked**: `attach: false` stores `copy = NULL` even when a `session_id` and `answer_id` are sent (FR-004).
-- [ ] T010 [P] [US1] In `tests/integration/reports/test_create.py`, the copy (R6, FR-003, FR-003a), on seeded
+- [x] T010 [P] [US1] In `tests/integration/reports/test_create.py`, the copy (R6, FR-003, FR-003a), on seeded
   sessions:
   - **ownership**: another user's session returns `404`, the same body as a session id that doesn't exist. An
     `answer_id` from a different session returns `404`, and so does one that is a user message. No row is added
@@ -131,14 +134,14 @@ conversation they can untick.
     leave the stored copy byte-identical (SC-004);
   - **no query log**: with a `query_audit_log` row for that session holding an email and an IP, neither
     string appears anywhere in the copy (SC-004).
-- [ ] T011 [P] [US1] In `tests/unit/test_answer_evidence.py` (R5):
+- [x] T011 [P] [US1] In `tests/unit/test_answer_evidence.py` (R5):
   - `NL2SQLPipeline.process` fills `intent` and `intent_confidence` after classification, and
     `validation_rejection` after a rejected query. Check both a successful result and a result returned
     early (out of scope, classification failed). Mock the LLM steps, as the existing pipeline unit tests do;
   - `ChatService._process_with_nl2sql` stores `metadata['evidence']` with the seven keys of data-model.md;
   - add to `tests/integration/chat/test_session_history.py`: `GET /sessions/<id>` returns no `evidence` key in
     any message's `metadata`, while `sql_generated` is still there.
-- [ ] T012 [P] [US1] In `chainlit_app/tests/test_reports.py` (new), against a fake Indico (`httpx.MockTransport`, as
+- [x] T012 [P] [US1] In `chainlit_app/tests/test_reports.py` (new), against a fake Indico (`httpx.MockTransport`, as
   in `test_resume.py`):
   - **the button's message**: `on_window_message({"source": "indico-assistant", "type": "report"})` sends one
     message with an `IssueReport` custom element. Its props are a new `form_key`, `answer_id: None`, no
@@ -155,7 +158,7 @@ conversation they can untick.
 
 ### Implementation
 
-- [ ] T013 [US1] Write `indico_assistant/services/reports.py` with `create_report(user, data) -> (report,
+- [x] T013 [US1] Write `indico_assistant/services/reports.py` with `create_report(user, data) -> (report,
   created)`:
   - it validates as data-model.md says, raising a `ReportError(status, code)`;
   - it follows R8 exactly: look up the form, then `RateLimiter.allowed`, then `insert(...).on_conflict_do_nothing(
@@ -163,12 +166,12 @@ conversation they can untick.
   - `build_copy(user, session_id, answer_id)` follows R6.
 
   Mark R8's known ceiling with a `ponytail:` comment. This makes T009 and T010 pass at the service level.
-- [ ] T014 [US1] Add `RHReportCreate(RHReportsAPI)` to `indico_assistant/controllers/reports.py`. It parses the
+- [x] T014 [US1] Add `RHReportCreate(RHReportsAPI)` to `indico_assistant/controllers/reports.py`. It parses the
   JSON body, calls `create_report`, maps `ReportError` to the error shape, and returns `report_url(report_id)`.
   That is a helper in `services/reports.py` returning `url_for_plugin('assistant.user_report', report_id=…,
   _external=True)`, the page route T027 registers. The US1 tests patch `report_url`. Register `POST /reports`
   in `indico_assistant/blueprint.py`. This makes T009 and T010 pass.
-- [ ] T015 [US1] Evidence (R5):
+- [x] T015 [US1] Evidence (R5):
   - add `intent`, `intent_confidence` and `validation_rejection` to `PipelineResult`
     (`services/nl2sql/models.py`);
   - in `services/nl2sql/pipeline.py`, `process` creates `trace = {}` and passes it into `_process`. `_process`
@@ -178,19 +181,19 @@ conversation they can untick.
   - in `controllers/sessions.py`, `RHSessionDetail` drops `evidence` from each message's metadata.
 
   This makes T011 pass.
-- [ ] T016 [P] [US1] Write `chainlit_app/public/elements/IssueReport.jsx` as contracts/panel.md says: the props, the
+- [x] T016 [P] [US1] Write `chainlit_app/public/elements/IssueReport.jsx` as contracts/panel.md says: the props, the
   four states, the test-hook ids, `role="radiogroup"` with a label, `aria-checked`, the `aria-live` result
   line, and the attach box shown only with `can_attach`. Send is disabled while sending. Start from the
   2026-09-29 prototype (scratchpad `proto/public/elements/IssueReport.jsx`, which is gone with the session:
   rewrite it).
-- [ ] T017 [US1] In `chainlit_app/app_chnlit.py`:
+- [x] T017 [US1] In `chainlit_app/app_chnlit.py`:
   - `_report_form(answer_id=None, category=None, text="", can_attach=True)` sends a message with the element;
   - `@cl.on_window_message` handles the `report` message (R2);
   - `@cl.action_callback("report_open")`, `("report_submit")` and `("report_cancel")`;
   - the submit calls Indico as `_plan_call` does (the session token, the shared client).
 
   None of these runs inside `on_message`, so no thumbs appear (FR-007a). This makes T012 pass.
-- [ ] T018 [P] [US1] In `indico_assistant/static/js/chat_widget.js`:
+- [x] T018 [P] [US1] In `indico_assistant/static/js/chat_widget.js`:
   - add `<button id="assistant-panel-report" type="button" aria-label="Report a problem" title="Report a problem"
     disabled>⚑</button>` before `#assistant-panel-close`;
   - enable it on `ready`, and disable it on `unavailable` or `login_failed`;

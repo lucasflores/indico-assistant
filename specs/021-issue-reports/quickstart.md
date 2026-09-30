@@ -17,7 +17,10 @@ borrowed from there.
 
 ## Live checks
 
-Pick one of R13's two options first, and tell the other sessions if it's (a).
+**Decided 2026-09-30**: one window at the end, with the shared stack switched to this branch (R13's option (a)).
+Warn the other local sessions first. Then run `~/indico-assistant/instance/env/bin/pip install -e
+~/indico-assistant/plugin-c`, and restart `indico run`, the worker and Chainlit (from `plugin-c/chainlit_app`). Afterwards,
+reinstall `~/indico-assistant/plugin`, restart, and tell the other sessions.
 
 1. **Migration**: `indico db --plugin assistant upgrade`, which creates `plugin_assistant.issue_reports`. To undo
    it: `printf 'YES\n' | indico db --plugin assistant downgrade 008_add_chat_session_title`.

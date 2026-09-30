@@ -199,6 +199,18 @@ def test_the_detail_names_the_waiting_plan_and_can_skip_the_messages(db, users, 
     assert status == 403  # (still the owner's only)
 
 
+def test_the_detail_never_shows_an_answers_evidence(db, users, monkeypatch):
+    # spec 021 R5: the evidence is for the team's triage; the owner already sees the query, not the checks
+    chat = session_of(db, users['lucas'], ('user', 'When is the Sync?'))
+    db.session.add(ChatMessage(session_id=chat.id, role='assistant', content='Tomorrow.',
+                               metadata_json={'sql_generated': 'SELECT 1',
+                                              'evidence': {'validation_rejection': 'forbidden keyword'}}))
+    db.session.flush()
+    _, body = call(RHSessionDetail, users['lucas'], sessions_module, monkeypatch, view_args={'session_id': str(chat.id)})
+    answer = body['messages'][-1]['metadata']
+    assert 'evidence' not in answer and answer['sql_generated'] == 'SELECT 1'
+
+
 def test_search_takes_percent_and_underscore_literally(db, users, monkeypatch):
     session_of(db, users['lucas'], ('user', 'Budget up 100% this year'))
     session_of(db, users['lucas'], ('user', 'Budget up 1000 this year'))

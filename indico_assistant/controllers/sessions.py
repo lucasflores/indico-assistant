@@ -189,7 +189,10 @@ class RHSessionDetail(RHChatBase):
                     role=msg.role,
                     content=msg.content,
                     created_at=msg.created_at.isoformat(),
-                    metadata=msg.metadata_json,  # (msg.metadata is SQLAlchemy's table MetaData)
+                    # (msg.metadata is SQLAlchemy's table MetaData.) An answer's evidence is for the team's triage of a
+                    # report only (spec 021 R5)
+                    metadata={k: v for k, v in msg.metadata_json.items() if k != "evidence"}
+                    if msg.metadata_json else msg.metadata_json,
                     feedback=feedback.get(msg.id),
                 ))
             # an answer still being written when the user left: its job is on the question (spec 020 R9). Only

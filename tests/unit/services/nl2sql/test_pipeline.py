@@ -975,3 +975,52 @@ def test_a_filter_with_real_times_is_left_alone(pipeline):
     classification = SimpleNamespace(entities=[SimpleNamespace(type="topic", value="x")], time_range=None)
     assert "BETWEEN '2026-10-02 09:00:00' AND '2026-10-02 17:00:00'" in pipeline._fix_topic_search_sql(
         sql, classification)
+
+
+class TestNL2SQLPipelineEvidence:
+    """Spec 021 R5: every result carries the intent, its confidence and the last rejection, which the answer
+    records as the evidence triage reads (the query log has no link to answers)."""
+
+    def test_a_good_answer_carries_its_intent(
+        self, pipeline, mock_classification, mock_classification_response, mock_sql_response, mock_format_response
+    ) -> None:
+        mock_classification.confidence = 0.87
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock(return_value=mock_sql_response)
+        pipeline._formatter.format = MagicMock(return_value=mock_format_response)
+
+        result = pipeline.process("How many events?", user_id=1)
+
+        assert (result.intent, result.intent_confidence, result.validation_rejection) == ("event_query", 0.87, None)
+
+    def test_an_early_return_carries_it_too(
+        self, pipeline, mock_classification, mock_classification_response
+    ) -> None:
+        mock_classification.intent, mock_classification.confidence = "out_of_scope", 0.99
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._classifier.is_out_of_scope = MagicMock(return_value=True)
+
+        result = pipeline.process("Make me coffee", user_id=1)
+
+        assert result.success is False and (result.intent, result.intent_confidence) == ("out_of_scope", 0.99)
+
+    def test_a_failed_classification_has_no_intent(self, pipeline) -> None:
+        failed = MagicMock(success=False, data=None, error="Classification error")
+        pipeline._classifier.classify = MagicMock(return_value=failed)
+
+        result = pipeline.process("?", user_id=1)
+
+        assert (result.intent, result.intent_confidence) == (None, None)
+
+    def test_a_rejected_query_carries_the_rejection(
+        self, pipeline, mock_classification, mock_classification_response, mock_sql_response
+    ) -> None:
+        mock_classification.confidence = 0.5
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock(return_value=mock_sql_response)
+        pipeline._validator.validate = MagicMock(return_value=MagicMock(valid=False, violations=["forbidden keyword"]))
+
+        result = pipeline.process("DROP TABLE events", user_id=1)
+
+        assert result.error.error_type == PipelineErrorType.VALIDATION_FAILED
+        assert "forbidden keyword" in result.validation_rejection
