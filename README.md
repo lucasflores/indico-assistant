@@ -142,12 +142,16 @@ with three things in the prompt:
 - **The pages this user can open**, from Indico's own menus for this user and event. Every link in an answer must
   be one of them, or a real guide page: code checks each link after the model writes it.
 
-It offers the changes it can make ("Shall I?"; a yes becomes a plan), and hands off, with a link, what it never
-does: permissions and protection, deleting events, emailing people, registrations, payments, room booking.
+It hands off, with a link, what it never does: permissions and protection, deleting events, emailing people,
+registrations, payments, room booking.
 
-**Routing.** Jev (a decision model) picks out knowledge questions first, when a key is set; otherwise, or when it is
-slow, the classifier's `knowledge` category does. A change request the planner finds nothing in also gets the
-knowledge answer. Every answer records its route in its metadata.
+**Routing.** One decision by Jev (a decision model) gives each message its route and, for a data question, its kind:
+a knowledge answer, a **chat answer** (from the conversation so far, informed by general knowledge; nothing looked
+up or changed), a data answer (the NL2SQL pipeline, with Jev's intent and no classifier call), a change (the
+planner), or a refusal. "Can you add a Teams meeting?" is a change: the plan card, which asks for confirmation, is the
+offer; anything the planner cannot plan gets the knowledge answer. A plain yes, or one of a waiting plan's own
+choices, goes straight to the planner. Without a Jev key, or when it is slow, the classifier routes instead (never
+both). Every answer records its route in its metadata.
 
 **The guide copy.** `indico assistant guide-build --commit <sha>` rebuilds it from a guide commit, for a release.
 `indico assistant health` shows its commit and which gate decides.
@@ -202,9 +206,8 @@ pip install git+https://github.com/lucasflores/indico-assistant.git
 | API Key | Authentication key: an `sk-ibis-` key for ibis (required) | None |
 | Timeout | Request timeout in seconds | 30 |
 | Max Tokens | Maximum response tokens | 4096 |
-| Knowledge gate key (Jev) | Optional OpenRouter key for Jev, which picks out "how do I" and "can you" questions; without it the classifier decides alone | None |
-| Knowledge gate cut-off | Jev's score (0–1) at or above which a message gets a knowledge answer | 0.2 |
-| Knowledge gate timeout | Seconds; a slower decision is ignored and the classifier decides | 1.5 |
+| Router key (Jev) | Optional OpenRouter key for Jev, which routes each message in one decision; without it the classifier routes | None |
+| Router timeout | Seconds; a slower decision is ignored and the classifier routes instead | 1.5 |
 
 ### Chat Widget Settings
 
@@ -547,7 +550,7 @@ indico assistant guide-build --commit <sha>
 - LLM provider and base URL
 - LLM connection status
 - Response latency (if connected)
-- Knowledge: the guide copy's commit and page count, and whether Jev or the classifier decides
+- Knowledge: the guide copy's commit and page count, and whether Jev or the classifier routes
 
 **Config Output:**
 - Enabled status

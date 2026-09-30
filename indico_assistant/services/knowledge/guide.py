@@ -102,4 +102,4 @@ def status(settings):
     from indico_assistant.services.knowledge.guide_build import OUT_DIR
 
     return {**Guide(OUT_DIR).describe(),
-            "gate": "jev" if settings.get("knowledge_jev_api_key") else "classifier only"}
+            "gate": "jev" if settings.get("jev_api_key") else "classifier only"}

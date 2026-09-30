@@ -158,18 +158,17 @@ def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
 
 
 
-def test_the_knowledge_gate_settings(monkeypatch):
-    """Spec 022 FR-021: Jev's key (a password field, never shown), its cut-off and its timeout."""
+def test_the_jev_settings(monkeypatch):
+    """Spec 022: the router's key (a password field, never shown) and its timeout."""
     from wtforms.fields import FloatField, PasswordField
     from wtforms.validators import NumberRange
 
     from indico_assistant.default_settings import DEFAULT_SETTINGS
     from indico_assistant.forms import SettingsForm
 
-    assert SettingsForm.knowledge_jev_api_key.field_class is PasswordField
-    assert DEFAULT_SETTINGS["knowledge_jev_api_key"] is None
-    for name, default, low, high in (("knowledge_jev_cutoff", 0.2, 0, 1), ("knowledge_jev_timeout_seconds", 1.5, 0.2, 10)):
-        field = getattr(SettingsForm, name)
-        (bounds,) = [v for v in field.kwargs["validators"] if isinstance(v, NumberRange)]
-        assert field.field_class is FloatField and (bounds.min, bounds.max) == (low, high)
-        assert DEFAULT_SETTINGS[name] == default
+    assert SettingsForm.jev_api_key.field_class is PasswordField and DEFAULT_SETTINGS["jev_api_key"] is None
+    field = SettingsForm.jev_timeout_seconds
+    (bounds,) = [v for v in field.kwargs["validators"] if isinstance(v, NumberRange)]
+    assert field.field_class is FloatField and (bounds.min, bounds.max) == (0.2, 10)
+    assert DEFAULT_SETTINGS["jev_timeout_seconds"] == 1.5
+    assert not any(k.startswith("knowledge_jev") for k in DEFAULT_SETTINGS)

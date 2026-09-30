@@ -2,8 +2,9 @@
 
 **Input**: [spec.md](spec.md), [plan.md](plan.md) · **Branch**: `022-assistant-knowledge`
 
-**Built** 2026-09-30 on this branch: T001–T037, T040, T041 done; T038, T039 wait for Lucas's go. The guide copy shares the
-embedding service's model cache (`load_model`) instead of the plan's "reuse when the models match" check: same effect.
+**Built** 2026-09-30 on this branch: T001–T037, T040–T041, and Phase 9 (the router redesign, Lucas 2026-09-30).
+T038 and T039 were not run: Lucas skipped the post-build sweep ("in principle things work"). The guide copy shares
+the embedding service's model cache (`load_model`) instead of the plan's "reuse when the models match" check.
 
 **Tests**: test-first (constitution VI). In each phase the tests come before the code they cover, and must fail
 before it is written. Run `pytest tests/unit tests/contract` after each phase (1207 pass on main at 2e52051; there is
@@ -179,16 +180,35 @@ no CI).
   - It checks links by code and routes from the route record.
   - It grades with the judge, given the reference pages.
   - It prints the estimated cost and asks before any paid call.
-- [ ] T038 **On Lucas's go only:** one full run on the default ibis dial (the estimate goes with the request).
+- [x] T038 **Run once, on the earlier design** (Jev gate, 2026-09-30): the knowledge set on the Balanced dial, $0.37:
+  25/53 fully right, 41 useful, 6 overclaims, 0 bad links, rights 4/8, routed 52/53. It led to Phase 9. Not re-run
+  after it (Lucas skipped the sweep).
   Compare against SC-001 to SC-007, and record the numbers in the PR.
-- [ ] T039 Existing data-question eval on this branch against main (SC-006). This is a paid run, on Lucas's go.
+- [ ] T039 Existing data-question eval on this branch against main (SC-006). **Skipped** (Lucas, 2026-09-30).
 
 ## Phase 8: Polish
 
 - [x] T040 [P] README settings table: the three Jev settings. `docs/DEPLOYMENT.md`: Jev needs outbound HTTPS to
   openrouter.ai (optional); the guide ships in the package; how to rebuild it for a release.
 - [x] T041 `ruff check`, and the full `pytest tests/unit tests/contract` + `tests/integration/knowledge`.
-- [ ] T042 Update the PR description with the numbers from T038 and T039, and anything left open.
+- [x] T042 Update the PR description with the numbers from T038 and the router probe, and anything left open.
+
+## Phase 9: The router (Lucas, 2026-09-30): Jev replaces the classifier's routing
+
+- [x] T043 `services/knowledge/gate.py` as the router: one decision, two `choice` questions (route, intent), the state
+  with a waiting-plan note, answers validated (`tests/unit/services/knowledge/test_gate.py`, including a test that the
+  intents are the classifier's).
+- [x] T044 `NL2SQLPipeline.process(intent=…)` skips the classifier; the classifier and the pipeline gain `chat`
+  (`test_pipeline.py`, `test_classifier.py`).
+- [x] T045 `PlanTurn.cannot_plan` (no step, nothing to change, not supported, switched off) and `planner.exact_reply`
+  (`test_planner_cannot_plan.py`).
+- [x] T046 `services/knowledge/chat.py` and `links.found_in` (`test_chat.py`).
+- [x] T047 `ChatService.answer`: the shortcut, `_decide`, the five routes, the classifier fallback with the offer,
+  the fall-through; `_route_of`; the new route record (`tests/unit/services/chat/test_routing.py`, mutation-checked).
+- [x] T048 Capability reasons in the third person, and the answer rule against sending the user to do what they
+  can't (run 1's overclaims).
+- [x] T049 Settings `jev_api_key`, `jev_timeout_seconds` (the cut-off is gone: the highest-probability route wins);
+  README, DEPLOYMENT, health, CLI.
 
 ## Dependencies and execution order
 

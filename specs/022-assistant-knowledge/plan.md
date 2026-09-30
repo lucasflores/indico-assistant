@@ -4,14 +4,19 @@
 
 ## Summary
 
-Add a knowledge route to the chat:
-- Jev picks out knowledge questions. The existing classifier gains a `knowledge` category as the fallback.
-- A "nothing to change" from the planner falls through to it.
-- The answer is one model call through ibis. It is given the rules, excerpts from a pinned local copy of Indico's
-  user guide, the pages this user can open (from Indico's menus), and what the assistant can do for them (from the
-  actions' own permission rules).
-- Code checks every link before the answer is saved.
-- An offer ("Shall I?") is remembered for one turn, so "yes" plans the change.
+Revised 2026-09-30 (Lucas): Jev replaces the classifier's routing instead of sitting in front of it.
+
+- **A plain yes, or one of a waiting plan's own choices,** goes straight to the planner.
+- **Anything else gets one Jev decision:** the route (knowledge, change, data, chat, out_of_scope) and, for data, the
+  kind of question. The classifier routes only when Jev is unavailable.
+- **The knowledge answer** is one model call through ibis, given the rules, excerpts from a pinned local copy of
+  Indico's user guide, the pages this user can open (from Indico's menus), and what the assistant can do for them
+  (from the actions' own permission rules).
+- **The chat answer** (new) is one call over the conversation, informed by general knowledge.
+- **Data questions** carry Jev's intent into NL2SQL: no classifier call.
+- **"Can you [change]?"** goes to the planner; the plan card is the offer. What the planner cannot plan gets the
+  knowledge answer.
+- **Code checks every link** before the answer is saved.
 
 ## Technical Context
 
@@ -42,27 +47,29 @@ Add a knowledge route to the chat:
 
 ### 1. Routing (`services/chat/service.py`, `services/nl2sql/`, `services/actions/planner.py`)
 
-Each message in `ChatService.answer()`, in order:
+Each message in `ChatService.answer()`, in order (revised 2026-09-30):
 
-1. **Gate.** `knowledge.gate.decide(messages)`:
-   - Returns `(score, skipped)`. It builds Jev's input from the session's messages, in the web-gate format: the last
-     two exchanges, each reply cut to 400 characters.
-   - Score ≥ cut-off → knowledge answer; the classifier and planner are not called.
-   - No key, a timeout, an error, or a score outside [0, 1] → `skipped`; continue.
-2. **Planner first** when a plan is waiting (today), **or** when the previous assistant message's metadata holds an
-   `offer`. The planner already gets the history, which contains the offer's text. `handled=False` → continue.
-3. **Classifier.** `CLASSIFICATION_PROMPT` gains the `knowledge` intent and the priority rule measured in the
-   research. `NL2SQLPipeline.process` returns `PipelineResult(knowledge_request=True)` for it, as it does
-   `write_request` today → knowledge answer.
-4. **Planner "nothing to change".** `PlanTurn` gains `nothing_to_change: bool`. It is set when the draft has no
-   steps, and when the resolver refuses with "I did not find anything to change". With no plan waiting,
-   `ChatService` then gives the knowledge answer instead of the planner's reply.
+1. **Shortcut.** `planner.exact_reply(waiting_plan, message)`: a plain yes (`AFFIRMATIVE`), or one of the plan's
+   own choices or suggestions → the planner, with no decision and no model call.
+2. **Jev.** `ChatService._decide()` → `knowledge.gate.decide(messages, settings, plan_waiting=…)` → `Decision(route,
+   intent, confidence, skipped, reason, …)`. One call, two `choice` questions (`route`, `intent`); the state is the
+   web-gate format plus a note when a plan is waiting.
+   - `knowledge` → `_knowledge()`; `chat` → `_chat()`; `out_of_scope` → `OUT_OF_SCOPE_MESSAGE`.
+   - `data` → `_process_with_nl2sql(intent=…, intent_confidence=…)` → `NL2SQLPipeline.process(intent=…)` builds the
+     `QueryClassification` itself; the classifier is not called; the generator reads dates and names.
+   - `change` → `_plan(…, waiting_plan)`.
+3. **Without Jev** (`decision.skipped`: no key, a timeout, an error, an invalid answer): the classifier routes,
+   as before the router. The last answer's offer (`session_manager.offer_before`) sends the message to the planner
+   first. The classifier gains a `chat` category; `_route_of(metadata)` reads its route.
+4. **Fall-through.** `PlanTurn.cannot_plan` (no step, `NOTHING_TO_CHANGE`, `NOT_SUPPORTED`, `NOT_AVAILABLE`), or a
+   planner that returns nothing: with no plan waiting, the knowledge answer, recorded as `fallback: planner`.
 
 ### 2. The knowledge package (`indico_assistant/services/knowledge/`)
 
 | Module | What it does |
 |---|---|
-| `gate.py` | The Jev client: `decide(messages, settings) -> GateResult(score, skipped, ms, cost)`. httpx, `POST https://openrouter.ai/api/alpha/decisions`, model pinned `typesafe/jev-1.13`, one `noul` question with the instruction measured in the research. Timeout from settings. |
+| `gate.py` | The router: `decide(messages, settings, plan_waiting=False) -> Decision`. httpx, `POST https://openrouter.ai/api/alpha/decisions`, model pinned `typesafe/jev-1.13`, two `choice` questions (`ROUTES`, `INTENTS`) with the criteria the router probe measured. Answers validated; timeout from settings. |
+| `chat.py` | `chat_answer(message, history, llm, base_url)`: one call over the conversation, general knowledge allowed, no lookups or changes; links only to pages already in the conversation (`links.found_in`). |
 | `capabilities.py` | `capability_list(user, event=None) -> CapabilityList`, from `ACTIONS`, `enabled_actions()`, and each action's `available()`. Instance-wide lines: the categories where the user may create or propose, and whether they manage any meeting. Event lines, when an event is given. Plus the fixed never-does list (FR-010). `render()` gives the prompt text. |
 | `pages.py` | `page_list(user, event=None) -> list[Page(title, section, path)]`, from `build_menu_structure()` for `event-management-sidemenu` (with an event), `user-profile-sidemenu` and `top-menu`, plus a room-booking line from `config.ENABLE_ROOMBOOKING`. Runs inside `acting_as(user)`, which already exists. |
 | `guide.py` | Loads the guide copy once per process. Checks the manifest's model and dimensions. `excerpts(question, k=6)` does a numpy cosine search. `page_urls()` gives the real guide pages. If the pinned model matches the `embedding_model` setting, it reuses the plugin's embedding service; otherwise it loads the pinned model itself. |
@@ -98,9 +105,8 @@ Each message in `ChatService.answer()`, in order:
 
 | Setting | Default | Form field |
 |---|---|---|
-| `knowledge_jev_api_key` | None | PasswordField, never displayed, like `llm_api_key` |
-| `knowledge_jev_cutoff` | 0.20 | number, 0–1 |
-| `knowledge_jev_timeout_seconds` | 1.5 | number, > 0 |
+| `jev_api_key` | None | PasswordField, never displayed, like `llm_api_key` |
+| `jev_timeout_seconds` | 1.5 | number, 0.2–10 |
 
 ### 6. Health (`controllers/health.py`, `cli.py health`)
 
@@ -110,13 +116,14 @@ mismatched index makes the overall status `degraded`, never `unhealthy`.
 ### 7. The route record (answer metadata)
 
 ```json
-"route": {"route": "knowledge", "gate": "jev", "gate_score": 0.41, "gate_skipped": false,
-          "fallback": null, "offer": "add a Microsoft Teams meeting to “Sync with Makoto”",
-          "guide_commit": "e7e0016"}
+"route": {"route": "knowledge", "shortcut": false, "fallback": null,
+          "jev": {"route": "knowledge", "intent": "general_info", "confidence": 0.97, "skipped": false,
+                  "reason": "score", "ms": 480, "model": "typesafe/jev-1.13"},
+          "offer": null, "guide_commit": "e7e0016…", "failed": false}
 ```
 
-- `route` is one of `knowledge`, `data` or `change`.
-- `fallback` records why the answer came by another road: `classifier`, `planner_nothing_to_change`, or null.
+- `route` is one of `knowledge`, `chat`, `data`, `change` or `refusal`.
+- `fallback` records another road: `classifier` (Jev skipped), `planner` (it could not plan it), or both.
 - Data and change answers get a record too, with their route and the gate fields, so routing can be audited on real
   traffic.
 
@@ -145,7 +152,7 @@ indico_assistant/
 ├── services/actions/*.py        # + available() per action
 ├── services/chat/service.py     # routing order (Design 1)
 ├── services/nl2sql/classifier.py, pipeline.py   # + knowledge intent / result
-├── services/actions/planner.py  # + PlanTurn.nothing_to_change
+├── services/actions/planner.py  # + PlanTurn.cannot_plan, exact_reply()
 ├── default_settings.py, forms.py, cli.py, controllers/health.py
 tests/unit/services/knowledge/            # new: one test file per module + the consistency test
 tests/integration/knowledge/     # new: page lists and capability lists against the dev DB, as users 1 and 6

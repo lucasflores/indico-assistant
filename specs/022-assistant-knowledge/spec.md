@@ -2,7 +2,8 @@
 
 **Feature Branch**: `022-assistant-knowledge`
 **Created**: 2026-09-30
-**Status**: Draft
+**Status**: Draft · **Revised**: 2026-09-30, after Lucas's routing decisions (Jev routes instead of the classifier;
+a chat route; the plan card is the offer)
 **Input**: Lucas, 2026-09-29: "Full self knowledge (what the assistant capabilities are), and Indico platform
 knowledge (deep knowledge of how to use Indico, and what it can do). The assistant should be able to guide the user
 to complete any action on Indico and also know what it can do itself for the user."
@@ -24,9 +25,12 @@ Decided before this spec (Lucas, 2026-09-29):
 - **Two lists are generated for each question:**
   - what the assistant can do for this user;
   - the pages this user can open.
-- **Routing:** the decision model Jev picks out knowledge questions, and the existing classifier is the fallback.
+- **Routing (revised 2026-09-30):** one decision by Jev gives each message its route and, for data, its kind. It
+  replaces the classifier's routing; the classifier routes only when Jev is unavailable, never as well as Jev.
   - Jev is called directly; every other model call goes through ibis.
-- **"Can you do X?"**, when the assistant can: offer first ("Yes, shall I?").
+  - A fifth route, **chat**: answerable from the conversation so far, informed by general knowledge.
+- **"Can you do X?" (revised 2026-09-30):** a request. The planner plans it, and the plan card, which asks for
+  confirmation, is the offer. What the planner cannot plan gets the knowledge answer.
 - **Some things are always handed off with a link, never done:**
   - permission and protection changes;
   - deleting events;
@@ -77,8 +81,8 @@ assistant lacks for that user. Every ability it has is offered when asked about.
 
 1. **Given** any user, **When** they ask "What can you do?", **Then** the answer lists the kinds of questions it
    answers, and the changes it can make for this user here.
-2. **Given** a change the assistant can make for this user, **When** they ask "Can you…?", **Then** it says yes
-   and offers to ("Shall I?"). It doesn't start a plan yet.
+2. **Given** a change the assistant can make for this user, **When** they ask "Can you…?", **Then** it plans it:
+   the plan card is the offer, and nothing changes until they confirm.
 3. **Given** a change it can't make for this user (not a manager, action switched off by the admin, plugin not
    installed), **Then** it says no, gives the reason, and says who can.
 4. **Given** something it never does (register people, take payments, send an email of its own, change
@@ -90,11 +94,11 @@ assistant lacks for that user. Every ability it has is offered when asked about.
 
 ### User Story 3 - Follow-ups go where they belong (Priority: P2)
 
-After "Yes, I can add a Teams meeting to this meeting. Shall I?", the user types "yes please". The assistant starts
-the plan, exactly as if they had asked for the change. If they type "how would I do it myself?" instead, they get
-the steps.
+After "I can also add the talk for you", the user types "yes please", and the assistant plans it. If they type "how
+would I do it myself?" instead, they get the steps. After a list of meetings, "which of those is earliest?" is
+answered from the conversation, with nothing looked up.
 
-**Why this priority**: The offer in User Story 2 is only useful if a one-word "yes" works.
+**Why this priority**: Conversations are mostly follow-ups; each needs the route the conversation implies.
 
 **Independent Test**: Run the follow-up set (Success Criteria). Each goes to the route its label
 says.
@@ -103,10 +107,16 @@ says.
 
 1. **Given** the assistant just offered a change, **When** the user agrees ("yes", "do it"), **Then** the request
    they agreed to goes to the planner, which shows a plan to confirm.
-2. **Given** any earlier exchange, **When** the latest message is a how-to or can-you question, **Then** it gets a
-   knowledge answer. Data questions and change requests keep today's routes.
-3. **Given** the planner finds nothing to change in a message, **Then** the message gets a knowledge answer instead
-   of "I could not work out what to change".
+2. **Given** any earlier exchange, **When** the latest message is a how-to question, **Then** it gets a knowledge
+   answer. Data questions and change requests keep their routes.
+3. **Given** the planner cannot plan a message (nothing to change, not a change after all, an action it doesn't have,
+   changes switched off), **Then** with no plan waiting it gets a knowledge answer instead of "I could not work out
+   what to change".
+4. **Given** a message answerable from the conversation (a follow-up about the last answer, "summarise that",
+   "thanks"), **Then** it gets a chat answer from the conversation, informed by general knowledge (it may explain a
+   particle decay the conversation mentions), with nothing looked up or changed.
+5. **Given** a plan is waiting, **When** the user sends a plain yes or one of the plan's own choices, **Then** the
+   planner takes it with no routing decision at all.
 
 ---
 
@@ -122,8 +132,8 @@ With the guide index present, no question needs the internet beyond the instance
 
 **Acceptance Scenarios**:
 
-1. **Given** no Jev key, or Jev slower than its time budget, **Then** routing uses the classifier's knowledge
-   category, and the answer still comes.
+1. **Given** no Jev key, or Jev slower than its time budget, **Then** the classifier routes instead (the same routes,
+   chat included), and the answer still comes.
 2. **Given** a new plugin release, **Then** the guide copy and its index come with it. The admin runs nothing.
 
 ### Edge Cases
@@ -142,28 +152,27 @@ With the guide index present, no question needs the internet beyond the instance
 
 ### Functional Requirements
 
-**Routing** (each message, in this order)
-- **FR-001**: **The knowledge gate.** When a Jev key is set, Jev is asked whether the latest message is a knowledge
-  question: how to do something in Indico, where a page is, or what the assistant can do.
-  - At or above the cut-off, the message MUST get the knowledge answer.
-  - Below it, the message MUST continue to FR-002.
-- **FR-002**: **Today's routing, with one more category:**
-  - If a plan is waiting, or the previous answer offered a change (FR-005), the planner goes first, as today.
-  - Otherwise the classifier decides. It MUST gain a `knowledge` category, which gets the knowledge answer.
-  - `write_request` goes to the planner, `out_of_scope` gets today's refusal, and every other category is answered
-    from event data, as today.
-- **FR-003**: When the planner finds nothing to change, the message MUST get the knowledge answer instead of "I
-  could not work out what to change".
-- **FR-004**: Without a Jev key, and on a Jev timeout or error, FR-001 MUST be skipped: routing starts at FR-002.
-  The chat MUST never fail because of the gate. A Jev score that isn't a number between 0 and 1 counts as an error.
-- **FR-005**: **An offer is remembered for one turn.** When a knowledge answer offers a change, it MUST record the
-  request it offered.
-  - The next message goes to the planner first, with the offer in the history, so "yes" plans the offered change.
-  - If the planner finds no change in that message ("thanks", a new question), routing continues as if there had
-    been no offer.
+**Routing** (each message, in this order; revised 2026-09-30)
+- **FR-001**: **The shortcut.** When a plan is waiting and the message is a plain yes, or one of the plan's own choices
+  or suggestions (a button, or typed), the planner MUST take it with no routing decision and no model call.
+- **FR-002**: **One Jev decision.** Otherwise, when a Jev key is set, one call to Jev MUST answer two `choice`
+  questions about the latest message: its route (knowledge, change, data, chat, out_of_scope) and, for data, its kind
+  (the classifier's 11 data intents). The highest-probability route wins.
+  - knowledge → the knowledge answer; chat → the chat answer; out_of_scope → the fixed refusal.
+  - data → the NL2SQL pipeline with Jev's intent: the classifier MUST NOT be called, and the SQL generator reads the
+    dates and names from the question itself.
+  - change → the planner, given the waiting plan if there is one.
+- **FR-003**: **The planner's fall-through.** When the planner cannot plan the message (no step, nothing to change,
+  not a change after all, an action it doesn't have, changes switched off) and no plan is waiting, the message MUST
+  get the knowledge answer. With a plan waiting, the planner's reply stands.
+- **FR-004**: **Without Jev.** Without a Jev key, on a timeout, an error, or an answer that isn't one of the routes,
+  the classifier MUST route instead, with the same routes (it gains a `chat` category), never in addition to Jev.
+  Without Jev's reading of the conversation, the last answer's offer sends the next message to the planner first.
+- **FR-005**: The chat MUST never fail because of Jev. An unknown intent is dropped (the classifier then picks it).
 - **FR-006**: Jev MUST be sent the latest message plus the last two exchanges, in the format ibis's web gate uses
-  (each earlier reply cut to 400 characters).
-- **FR-007**: Data questions and change requests MUST keep today's routes.
+  (each earlier reply cut to 400 characters), and a note when a plan is waiting.
+- **FR-007**: The route criteria and intents MUST be the ones the router probe measured (thread E study), with the
+  chat route as decided on 2026-09-30.
 
 **What the assistant can do (generated, never hand-written)**
 - **FR-008**: For each knowledge question, the assistant MUST build the list of what it can do for this user. The
@@ -220,16 +229,18 @@ With the guide index present, no question needs the internet beyond the instance
   - say plainly when the material doesn't cover the question.
 - **FR-019**: A knowledge answer MUST be stored and shown like any other answer: Past Chats, feedback thumbs, and
   across page navigation.
-- **FR-020**: Each answer MUST record for auditing:
-  - its route (knowledge, data or change);
-  - the gate's score, and whether the gate was skipped;
-  - any offered request (FR-005).
+- **FR-020**: Each answer MUST record for auditing its route (knowledge, chat, data, change, refusal); Jev's decision
+  (route, intent, confidence, and whether and why it was skipped); whether the shortcut was used; any fallback
+  (classifier, planner); and any change the answer offered.
 
 **Settings**
-- **FR-021**: New admin settings:
-  - the Jev key (optional; stored like the other keys, never displayed);
-  - the gate's cut-off (default 0.20);
-  - the gate's timeout (default 1.5 s).
+- **FR-021**: New admin settings: the router's Jev key (optional; stored like the other keys, never displayed) and
+  its timeout (default 1.5 s).
+
+**The chat answer** (revised 2026-09-30)
+- **FR-023**: A chat answer MUST be one model call through ibis, given the conversation so far. It may use general
+  knowledge to explain what the conversation contains; it MUST NOT look anything up in Indico, make changes, or invent
+  facts about the user's events. It may link only to pages already linked in the conversation.
 
 **The test sets**
 - **FR-022**: Before the build is judged, the four sets below MUST be added to the eval repository with their labels.
@@ -262,10 +273,12 @@ a user who can't manage it or create events), a page, and the expected behaviour
 - **SC-002**: At most 2 of the 53 answers offer or claim something the assistant can't do for that user.
 - **SC-003**: No answer links a page the user can't open, or a guide page that doesn't exist.
 - **SC-004**: At least 6 of the 8 rights-dependent questions are right.
-- **SC-005**: **Routing:**
-  - at least 44 of the 53 knowledge questions get the knowledge answer;
-  - none of the 24 routing negatives do;
-  - at least 23 of the 24 follow-ups go to the right route.
+- **SC-005**: **Routing** (revised 2026-09-30):
+  - at least 44 of the 53 knowledge questions get the knowledge answer, or for "Can you [change]?" the planner;
+  - none of the 24 routing negatives get the knowledge or chat answer;
+  - at least 23 of the 24 follow-ups go to the right route, and at least 15 of 17 chat cases get the chat answer.
+  - Measured offline by the router probe (Jev alone, $0.01). The live sweep was not run: Lucas chose to skip it after
+    the build (2026-09-30).
 - **SC-006**: The existing data-question eval scores no lower than on main.
 - **SC-007**: A knowledge answer costs under $0.002 on the default ibis dial, and its median answer time is under
   10 s.

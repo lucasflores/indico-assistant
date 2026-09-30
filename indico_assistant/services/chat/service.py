@@ -177,42 +177,50 @@ class ChatService:
 
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
-        # Spec 022, in order: the knowledge gate (Jev); the planner first when a plan waits or the last answer
-        # offered a change; the classifier (knowledge, a change, or data); and a planner that finds nothing to
-        # change hands over to the knowledge answer.
-        gate, gate_says_knowledge = self._gate(context)
-        route, knowledge, fallback, planned = "change", None, None, None
-        if gate_says_knowledge:
-            route, knowledge = "knowledge", self._knowledge(user, message, context, event_id)
+        # Spec 022 (Lucas, 2026-09-30), in order: a plain yes, or one of the plan's own choices, to a waiting plan goes
+        # straight to the planner; otherwise one Jev decision gives the route and a data question's kind; without
+        # Jev the classifier routes, with the planner first after an offer. A change the planner cannot plan gets
+        # the knowledge answer.
+        from indico_assistant.services.actions.planner import exact_reply
+        from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
+
+        decision, fallback, planned, answer, open_for_change = None, None, None, None, waiting_plan
+        if exact_reply(waiting_plan, message):
+            route = "change"
         else:
-            offer = None if waiting_plan else self._session_manager.offer_before(session.id, message_id)
-            if waiting_plan or offer:
-                planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
-                if planned is not None and not waiting_plan and planned[1].get("nothing_to_change"):
-                    planned = None  # no change in the reply to an offer: routed as if there had been no offer
-            if planned is None:
+            decision = self._decide(context, plan_waiting=waiting_plan is not None)
+            route = decision.route
+            if decision.skipped:  # no key, slow, or an error: the classifier routes, as before the router
+                fallback, open_for_change = "classifier", None  # (a change it finds is a new request)
+                offer = None if waiting_plan else self._session_manager.offer_before(session.id, message_id)
+                if waiting_plan or offer:
+                    planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
+                    if planned is not None and waiting_plan is None and planned[1].get("cannot_plan"):
+                        planned = None  # not a change after all: routed as if there had been no offer
+                route = "change" if planned is not None else None
+            if route in (None, "data"):
                 response_text, metadata = self._process_with_nl2sql(
-                    message, context, event_id, user_id=viewer.id, auth_user=viewer
+                    message, context, event_id, user_id=viewer.id, auth_user=viewer,
+                    intent=decision.intent if route == "data" else None,
+                    intent_confidence=decision.confidence if route == "data" else None,
                 )
-                route = "data"
-                if metadata.get("knowledge_request"):
-                    route, fallback = "knowledge", "classifier"
-                    knowledge = self._knowledge(user, message, context, event_id)
-                elif metadata.get("write_request"):
-                    route = "change"
-                    planned = self._plan(user, session.id, message, context, None, event_id)
-                    if planned is None:  # the planner found no change in it after all: never an empty reply
-                        from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
-                        response_text = response_text or NOT_UNDERSTOOD
-                    elif planned[1].get("nothing_to_change"):
-                        planned, route, fallback = None, "knowledge", "planner_nothing_to_change"
-                        knowledge = self._knowledge(user, message, context, event_id)
+                route = _route_of(metadata)
+            elif route == "out_of_scope":
+                route, response_text, metadata = "refusal", OUT_OF_SCOPE_MESSAGE, {}
+        if route == "change" and planned is None:
+            planned = self._plan(user, session.id, message, context, open_for_change, event_id)
+            if planned is None or (planned[1].get("cannot_plan") and open_for_change is None):
+                planned, route, fallback = None, "knowledge", ", ".join(filter(None, (fallback, "planner")))
+        if route == "knowledge":
+            answer = self._knowledge(user, message, context, event_id)
+        elif route == "chat":
+            answer = self._chat(message, context)
         plan = None
-        if knowledge is not None:
-            response_text, metadata = knowledge.text, {}
+        if answer is not None:
+            response_text, metadata = answer.text, {}
         elif planned is not None:
             response_text, metadata, plan = planned
-        metadata = {**(metadata or {}), "route": _route_record(route, knowledge, gate=gate, fallback=fallback)}
+        metadata = {**(metadata or {}), "route": _route_record(route, answer, decision=decision, fallback=fallback)}
 
         assistant_msg = self._session_manager.add_assistant_message(
             self._session_manager.get_session(session_id), response_text, metadata,
@@ -262,19 +270,26 @@ class ChatService:
         if not turn.handled:
             return None
         return (turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None,
-                             "nothing_to_change": turn.nothing_to_change}, turn.plan)
+                             "cannot_plan": turn.cannot_plan}, turn.plan)
 
-    def _gate(self, context):
-        """(Jev's decision, whether it says knowledge): skipped, and the classifier decides, without a key."""
+    def _decide(self, context, plan_waiting=False):
+        """Jev's route for the latest message; skipped (the classifier routes) without a key, slow, or on an error."""
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.knowledge import gate
 
         try:
             settings = AssistantPlugin.instance.settings.get_all()
-        except RuntimeError:  # the plugin is not active (tests, scripts): no key, so the classifier decides
+        except RuntimeError:  # the plugin is not active (tests, scripts): no key, so the classifier routes
             settings = {}
-        result = gate.decide(context, settings)
-        return result, gate.is_knowledge(result, settings)
+        return gate.decide(context, settings, plan_waiting=plan_waiting)
+
+    def _chat(self, message, context):
+        """The chat answer (spec 022): from the conversation, informed by general knowledge."""
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.knowledge.chat import chat_answer
+
+        history = context[:-1] if context and context[-1].get("content") == message else context
+        return chat_answer(message, history, llm=AssistantPlugin.instance.llm_service, base_url=self._get_base_url())
 
     def _get_or_create_session(
         self,
@@ -479,8 +494,12 @@ class ChatService:
         event_id: Optional[int],
         user_id: Optional[int] = None,
         auth_user: Any = None,
+        intent: str | None = None,
+        intent_confidence: float | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Process message through NL2SQL pipeline with RAG enhancement.
+
+        ``intent``: the kind of data question when the router (Jev) decided it; the classifier is then skipped.
         
         Args:
             message: User's message
@@ -517,6 +536,7 @@ class ChatService:
                 user=auth_user,  # decides visibility (row-level security context)
                 event_ids=[event_id] if event_id else None,
                 conversation_history=context,  # Feature 012: T006
+                **({"intent": intent, "intent_confidence": intent_confidence} if intent else {}),  # (routed by Jev)
             )
 
             response_text = result.answer or ""
@@ -566,6 +586,7 @@ class ChatService:
                 "suggested_followups": getattr(result, 'suggested_followups', []),
                 "write_request": getattr(result, 'write_request', False),
                 "knowledge_request": getattr(result, 'knowledge_request', False),
+                "chat_request": getattr(result, 'chat_request', False),
             })
 
             return response_text, metadata
@@ -605,17 +626,30 @@ def get_chat_service() -> ChatService:
     return _chat_service
 
 
-def _route_record(route, knowledge=None, *, gate=None, fallback=None):
+def _route_of(metadata):
+    """The route an NL2SQL pipeline result stands for (with the classifier, it routes as well as answers)."""
+    if metadata.get("knowledge_request"):
+        return "knowledge"
+    if metadata.get("chat_request"):
+        return "chat"
+    if metadata.get("write_request"):
+        return "change"
+    error = metadata.get("pipeline_error") or {}
+    return "refusal" if isinstance(error, dict) and error.get("error_type") == "out_of_scope" else "data"
+
+
+def _route_record(route, answer=None, *, decision=None, fallback=None):
     """How this answer was reached (spec 022, FR-020): kept in its metadata, so routing can be audited on real
-    traffic. ``gate``: the knowledge gate's decision, when it ran."""
+    traffic. ``decision`` is Jev's (None for the shortcut, when neither Jev nor the classifier was asked)."""
     return {
-        "route": route,
-        "gate": gate.name if gate is not None and gate.reason != "no key" else None,
-        "gate_score": getattr(gate, "score", None),
-        "gate_skipped": gate is None or bool(gate.skipped),
-        "gate_reason": getattr(gate, "reason", None),
-        "fallback": fallback,
-        "offer": knowledge.offer if knowledge else None,
-        "guide_commit": knowledge.guide_commit if knowledge else None,
-        "failed": bool(knowledge.failed) if knowledge else False,
+        "route": route,  # knowledge | chat | data | change | refusal
+        "jev": None if decision is None else {
+            "route": decision.route, "intent": decision.intent, "confidence": decision.confidence,
+            "skipped": decision.skipped, "reason": decision.reason, "ms": decision.ms, "model": decision.name,
+        },
+        "shortcut": decision is None,
+        "fallback": fallback,  # classifier | planner | "classifier, planner"
+        "offer": answer.offer if answer else None,
+        "guide_commit": answer.guide_commit if answer else None,
+        "failed": bool(answer.failed) if answer else False,
     }

@@ -73,23 +73,18 @@ class SettingsForm(IndicoForm):
         description="Maximum response tokens (100-32000)",
     )
 
-    knowledge_jev_api_key = PasswordField(
-        "Knowledge gate key (Jev)",
+    jev_api_key = PasswordField(
+        "Router key (Jev)",
         validators=[Optional()],
-        description='An OpenRouter key for Jev, which picks out "how do I" and "can you" questions. Optional: '
-                    "without it the classifier decides alone. Stored securely, not displayed.",
+        description="An OpenRouter key for Jev, which routes each message (a question about Indico, a change, a data "
+                    "question, the conversation) in one decision. Optional: without it the classifier routes. "
+                    "Stored securely, not displayed.",
     )
 
-    knowledge_jev_cutoff = FloatField(
-        "Knowledge gate cut-off",
-        validators=[InputRequired(), NumberRange(min=0, max=1)],
-        description="Jev's score at or above which a message gets a knowledge answer (0-1).",
-    )
-
-    knowledge_jev_timeout_seconds = FloatField(
-        "Knowledge gate timeout (seconds)",
+    jev_timeout_seconds = FloatField(
+        "Router timeout (seconds)",
         validators=[InputRequired(), NumberRange(min=0.2, max=10)],
-        description="A slower decision is ignored and the classifier decides (0.2-10 seconds).",
+        description="A slower decision is ignored and the classifier routes instead (0.2-10 seconds).",
     )
 
     # NL2SQL Pipeline Settings (003-nl2sql-pipeline)

@@ -92,6 +92,7 @@ class SchemaContext:
         "general_info": ["events.events"],
         "out_of_scope": [],
         "knowledge": [],  # spec 022: answered from the user guide, never with SQL
+        "chat": [],  # spec 022: answered from the conversation
     }
 
     # JOIN hints for multi-table queries (T042)

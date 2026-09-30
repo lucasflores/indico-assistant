@@ -367,6 +367,37 @@ class TestNL2SQLPipelineKnowledge:
         pipeline._generator.generate.assert_not_called()
 
 
+class TestNL2SQLPipelineRoutedByJev:
+    """Spec 022: Jev decided the route and the kind of question; the classifier is not called."""
+
+    def test_a_given_intent_skips_the_classifier(self, pipeline: NL2SQLPipeline) -> None:
+        pipeline._classifier.classify = MagicMock()
+        pipeline._generator.generate = MagicMock(return_value=MagicMock(success=False, data=None, error="stop here"))
+
+        pipeline.process("Who speaks at Q3 planning?", user_id=1, intent="speaker_query", intent_confidence=0.97)
+
+        pipeline._classifier.classify.assert_not_called()
+        classification = pipeline._generator.generate.call_args.args[1]
+        assert classification.intent == "speaker_query" and classification.confidence == 0.97
+        assert classification.entities == [] and classification.time_range is None  # the generator reads them
+
+    def test_the_chat_intent_stops_after_classification(
+        self,
+        pipeline: NL2SQLPipeline,
+        mock_classification: MagicMock,
+        mock_classification_response: MagicMock,
+    ) -> None:
+        mock_classification.intent = "chat"
+        mock_classification_response.data = mock_classification
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock()
+
+        result = pipeline.process("thanks!", user_id=1)
+
+        assert result.success is True and result.chat_request is True and result.generated_sql is None
+        pipeline._generator.generate.assert_not_called()
+
+
 class TestNL2SQLPipelineOutOfScope:
     """Test handling of out-of-scope queries."""
 

@@ -5,6 +5,7 @@ Never hand-written: the registered actions, the admin's enabled actions, the ins
 one, the ones the chat can reach (the meetings it finds by name, the categories it offers).
 """
 
+import re
 from dataclasses import dataclass
 
 #: What the chat answers from Indico's data (the NL2SQL route), in the user's words.
@@ -54,11 +55,17 @@ class CapabilityList:
             by_reason = {}
             for what, why in self.cannot:
                 by_reason.setdefault(why, []).append(what)
-            lines += [f"Changes I cannot make for them ({why}): " + "; ".join(whats) + "."
+            lines += [f"Changes I cannot make for them ({_about_them(why)}): " + "; ".join(whats) + "."
                       for why, whats in by_reason.items()]
         lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It has no connection to anything outside Indico "
                      "(GitHub, email, calendars).")
         return "\n".join(lines)
+
+
+def _about_them(reason):
+    """A reason written to the user ("You cannot manage…") as one about them: the model read "you" as itself."""
+    reason = re.sub(r"\b[Yy]ou\b", "they", reason)
+    return re.sub(r"\b[Yy]our\b", "their", reason)
 
 
 def capability_list(user, event=None, settings=None):

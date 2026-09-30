@@ -13,6 +13,21 @@ KEPT_HOSTS = {"docs.getindico.io"}  # Indico's admin documentation: linked as it
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)|( ?)(https?://[^\s)\]<>]+)")
 
 
+def found_in(texts, base_url):
+    """(paths of this Indico, guide pages) linked in ``texts``: what a chat answer may link again."""
+    host = urlsplit(base_url).netloc
+    paths, guide = set(), set()
+    for text in texts:
+        for match in _LINK.finditer(text or ""):
+            url = (match.group(2) or match.group(4)).rstrip(".,;:!?")
+            parts = urlsplit(url)
+            if parts.netloc == GUIDE_HOST:
+                guide.add(f"https://{GUIDE_HOST}{_key(parts.path) if _key(parts.path) != '/' else ''}/")
+            elif parts.path.startswith("/") and parts.netloc in ("", host):
+                paths.add(parts.path)
+    return paths, guide
+
+
 def _key(path):
     return path.rstrip("/") or "/"
 

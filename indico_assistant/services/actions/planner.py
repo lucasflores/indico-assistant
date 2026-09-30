@@ -65,7 +65,9 @@ class PlanTurn:
     reply: str
     plan: dict | None = None  # PlanView for the client, with the confirm token
     handled: bool = True  # False: not about changes after all, answer it as a question
-    nothing_to_change: bool = False  # no step, or nothing to change: the chat gives the knowledge answer (spec 022)
+    # it cannot plan this (no step, nothing to change, an action it does not have, changes switched off): with no
+    # plan waiting, the chat gives the knowledge answer instead (spec 022)
+    cannot_plan: bool = False
     llm_calls: list = field(default_factory=list)
 
 
@@ -74,7 +76,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     """Answer one message that asks for (or follows up on) a change."""
     enabled = enabled_actions(settings)
     if not enabled:
-        return PlanTurn(NOT_AVAILABLE)
+        return PlanTurn(NOT_AVAILABLE, cannot_plan=True)
     if open_plan is not None:
         if AFFIRMATIVE.fullmatch(message):
             return _apply(PlanDraft(decision='confirm'), user, chat_session_id, open_plan, enabled, [], settings,
@@ -141,15 +143,15 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
     elif draft.decision in ('unrelated', 'confirm', 'cancel'):
         return PlanTurn('', handled=False)
     if not draft.steps:
-        return PlanTurn(draft.reply or NOT_UNDERSTOOD, nothing_to_change=True)
+        return PlanTurn(draft.reply or NOT_UNDERSTOOD, cannot_plan=True)
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
                                          settings=settings, topic=topic, page_event_id=page_event_id)
     except NotImplementedError:
-        return PlanTurn(NOT_SUPPORTED)
+        return PlanTurn(NOT_SUPPORTED, cannot_plan=True)
     if resolved.refusal:
-        return PlanTurn(resolved.refusal, nothing_to_change=resolved.refusal == resolve.NOTHING_TO_CHANGE)
+        return PlanTurn(resolved.refusal, cannot_plan=resolved.refusal == resolve.NOTHING_TO_CHANGE)
     if errors := validate_plan(resolved.steps, enabled):
         return PlanTurn('I cannot plan that: ' + '; '.join(errors))
     try:
@@ -358,6 +360,13 @@ def _the_day(message):
     after = [m for m in days if re.search(r'\b(to|on|for|until|till)\s+$', message[:m.start()], re.IGNORECASE)]
     chosen = (after or days or [None])[0]
     return chosen.group(0).lower() if chosen else None
+
+
+def exact_reply(open_plan, message):
+    """A reply to a waiting plan that needs no model to read (spec 022's shortcut, before the router): a plain yes,
+    or one of the plan's own choices or suggestions, as a button sends it or the user types it."""
+    return open_plan is not None and bool(AFFIRMATIVE.fullmatch(message) or answered_draft(open_plan, message) is not None
+                                          or accepted_suggestion(open_plan, message) is not None)
 
 
 def accepted_suggestion(open_plan, message):

@@ -99,5 +99,5 @@ def test_describe_reads_the_files_without_loading_the_model(copy_dir, monkeypatc
     assert Guide(copy_dir).describe() == {"ok": True, "guide_commit": "abc1234", "pages": 4, "model": "fake/model"}
     assert not Guide(copy_dir.parent / "missing").describe()["ok"]
     monkeypatch.setattr("indico_assistant.services.knowledge.guide_build.OUT_DIR", copy_dir)
-    assert status({"knowledge_jev_api_key": "k"})["gate"] == "jev"
+    assert status({"jev_api_key": "k"})["gate"] == "jev"
     assert status({})["gate"] == "classifier only"

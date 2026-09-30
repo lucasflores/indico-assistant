@@ -58,6 +58,10 @@ logger = logging.getLogger(__name__)
 LOCAL_EVENT_DATE = "((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone)::date"
 
 
+#: The reply to a message unrelated to Indico and the conversation (also the router's out_of_scope, spec 022)
+OUT_OF_SCOPE_MESSAGE = ("I can only help with questions about events, registrations, and contributions. "
+                        "Please ask about something I can help with.")
+
 class NL2SQLPipeline:
     """
     Main orchestrator for the NL2SQL pipeline.
@@ -314,9 +318,14 @@ class NL2SQLPipeline:
         session_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         conversation_history: list[dict[str, str]] | None = None,
+        intent: str | None = None,
+        intent_confidence: float | None = None,
     ) -> PipelineResult:
         """
         Process a natural language question through the pipeline.
+
+        ``intent``: the kind of question when the router (Jev, spec 022) already decided it; the classifier is then
+        not called, and the SQL generator reads dates and names from the question itself.
 
         This is the main entry point for the NL2SQL pipeline. It:
         1. Creates audit log entry (T050)
@@ -370,41 +379,48 @@ class NL2SQLPipeline:
                                           is_admin=bool(user.is_admin))
                              if user is not None else None)
 
-            # Step 2: Classify the question (T025)
-            classify_start = time.time()
-            with self._span("query_classification") as classify_span:
-                classification_response = self._classifier.classify(question)
-                classification_time = int((time.time() - classify_start) * 1000)
+            if intent is not None:  # routed by Jev (spec 022): no classifier call
+                from indico_assistant.services.llm.models import QueryClassification
+
+                classification = QueryClassification(
+                    intent=intent, confidence=intent_confidence if intent_confidence is not None else 0.9)
+                classification_time = 0
+            else:
+                # Step 2: Classify the question (T025)
+                classify_start = time.time()
+                with self._span("query_classification") as classify_span:
+                    classification_response = self._classifier.classify(question)
+                    classification_time = int((time.time() - classify_start) * 1000)
                 
-                # Update span with result (T030)
-                if classify_span is not None:
-                    if classification_response.success and classification_response.data:
-                        classify_span.update(
-                            output=f"intent={classification_response.data.intent}, "
-                                   f"confidence={classification_response.data.confidence}",
-                            status="success",
-                            metadata={"latency_ms": classification_time}
-                        )
-                    else:
-                        classify_span.error(
-                            Exception(classification_response.error or "Classification failed"),
-                            include_trace=False
-                        )
+                    # Update span with result (T030)
+                    if classify_span is not None:
+                        if classification_response.success and classification_response.data:
+                            classify_span.update(
+                                output=f"intent={classification_response.data.intent}, "
+                                       f"confidence={classification_response.data.confidence}",
+                                status="success",
+                                metadata={"latency_ms": classification_time}
+                            )
+                        else:
+                            classify_span.error(
+                                Exception(classification_response.error or "Classification failed"),
+                                include_trace=False
+                            )
 
-            if not classification_response.success or not classification_response.data:
-                log_error(
-                    audit_log,
-                    classification_response.error or "Classification failed",
-                )
-                return self._error_result(
-                    PipelineErrorType.CLASSIFICATION_FAILED,
-                    classification_response.error or "Classification failed",
-                    "I couldn't understand your question. Please try rephrasing it.",
-                    total_time_ms=int((time.time() - start_time) * 1000),
-                    classification_time_ms=classification_time,
-                )
+                if not classification_response.success or not classification_response.data:
+                    log_error(
+                        audit_log,
+                        classification_response.error or "Classification failed",
+                    )
+                    return self._error_result(
+                        PipelineErrorType.CLASSIFICATION_FAILED,
+                        classification_response.error or "Classification failed",
+                        "I couldn't understand your question. Please try rephrasing it.",
+                        total_time_ms=int((time.time() - start_time) * 1000),
+                        classification_time_ms=classification_time,
+                    )
 
-            classification = classification_response.data
+                classification = classification_response.data
             
             # DEBUG: Print classification result
             logger.debug(f"[DEBUG] Classification: intent={classification.intent}, entities={classification.entities}, time_range={classification.time_range}")
@@ -426,6 +442,11 @@ class NL2SQLPipeline:
                 return PipelineResult(success=True, knowledge_request=True,
                                       total_time_ms=int((time.time() - start_time) * 1000),
                                       classification_time_ms=classification_time)
+            # Answerable from the conversation: the chat answer (spec 022)
+            if classification.intent == "chat":
+                return PipelineResult(success=True, chat_request=True,
+                                      total_time_ms=int((time.time() - start_time) * 1000),
+                                      classification_time_ms=classification_time)
 
             # Check for out-of-scope queries
             if self._classifier.is_out_of_scope(classification):
@@ -433,8 +454,7 @@ class NL2SQLPipeline:
                 return self._error_result(
                     PipelineErrorType.OUT_OF_SCOPE,
                     f"Query classified as out of scope: {classification.intent}",
-                    "I can only help with questions about events, registrations, "
-                    "and contributions. Please ask about something I can help with.",
+                    OUT_OF_SCOPE_MESSAGE,
                     total_time_ms=int((time.time() - start_time) * 1000),
                     classification_time_ms=classification_time,
                 )

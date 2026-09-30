@@ -117,7 +117,7 @@ class TestChatService:
         user = MagicMock(id=123, is_admin=True)
         calls = []
 
-        def pipeline(message, context, event_id, user_id=None, auth_user=None):
+        def pipeline(message, context, event_id, user_id=None, auth_user=None, **routed):
             calls.append('pipeline')
             assert (auth_user.id, auth_user.is_admin, event_id, user_id) == (123, True, 456, 123)
             return "Answer", {"confidence": 0.9}
@@ -231,13 +231,14 @@ class TestChatService:
         result = run()
         assert result.plan == {"id": "p1"} and plan.call_args.args[-1] is None  # no open plan
 
-    def test_a_change_request_the_planner_turns_down_still_gets_a_reply(self, routed):
-        # (code review, PR #3) NL2SQL said write_request, the planner said "unrelated": never a blank bubble
-        from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
+    def test_a_change_request_the_planner_turns_down_gets_the_knowledge_answer(self, routed, chat_service):
+        # (code review, PR #3) never a blank bubble; spec 022: the knowledge answer says what it can and can't do
+        from indico_assistant.services.knowledge.answer import KnowledgeResult
         run, plan, nl2sql = routed
         nl2sql.return_value = ("", {"write_request": True})
         plan.return_value = None
-        assert run().response == NOT_UNDERSTOOD
+        with patch.object(chat_service, '_knowledge', return_value=KnowledgeResult("I can't do that; here's how.")):
+            assert run().response == "I can't do that; here's how."
 
     def test_questions_never_reach_the_planner(self, routed):
         run, plan, nl2sql = routed
