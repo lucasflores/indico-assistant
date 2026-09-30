@@ -15,7 +15,7 @@ from indico.util.date_time import now_utc
 
 from indico_assistant.services.actions import register
 from indico_assistant.services.actions.base import Action, ActionArgs, on_rollback, refuse_if_locked
-from indico_assistant.services.actions.contributions import _manage_refusal
+from indico_assistant.services.actions.contributions import _manage_available, _manage_refusal
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,10 @@ class AddReminder(Action):
 
     name = 'add_reminder'
     Args = AddReminderArgs
+    summary = 'add an email reminder before a meeting'
+
+    def available(self, user, event=None, category=None):
+        return _manage_available(user, event)
 
     def check(self, user, args):
         return _manage_refusal(Event.get(args.event_id, is_deleted=False), user)
@@ -97,6 +101,33 @@ def _attach_refusal(obj, user):
     return None
 
 
+def _attach_available(user, event):
+    """``available`` for material: on ``event`` its managers and submitters, or a speaker with submission rights on
+    one of its talks; without an event page, the same over the meetings the chat can find by name."""
+    from indico.modules.events.contributions.util import get_events_with_linked_contributions
+
+    from indico_assistant.services.actions.resolve import managed_meetings
+
+    if event is not None:
+        if (reason := _attach_refusal(event, user)) is None or _own_talks(event, user):
+            return None
+        return reason
+    if managed_meetings(user) or any(_own_talks(e, user) for e in map(Event.get, get_events_with_linked_contributions(
+            user, dt=now_utc() - timedelta(days=30))) if e is not None and not e.is_deleted):
+        return None
+    return 'You do not manage any meeting'
+
+
+def _own_talks(event, user):
+    """Whether ``user`` may add material to a talk of ``event`` as its speaker (can_manage_attachments's submit
+    rule for contributions)."""
+    from indico.modules.attachments.settings import attachments_settings
+    from indico.modules.events.contributions.util import has_contributions_with_user_as_submitter
+
+    return (refuse_if_locked(event) is None and not attachments_settings.get(event, 'managers_only')
+            and has_contributions_with_user_as_submitter(event, user))
+
+
 def _new_attachment(obj, user, **fields):
     from indico.core.db.sqlalchemy.protection import ProtectionMode
     from indico.modules.attachments.models.attachments import Attachment
@@ -126,6 +157,10 @@ class AttachLink(Action):
 
     name = 'attach_link'
     Args = AttachLinkArgs
+    summary = 'attach a link to a meeting or talk'
+
+    def available(self, user, event=None, category=None):
+        return _attach_available(user, event)
 
     def check(self, user, args):
         return _attach_refusal(_target(args), user)
@@ -157,6 +192,10 @@ class AttachFile(Action):
 
     name = 'attach_file'
     Args = AttachFileArgs
+    summary = 'attach a file you send in the chat to a meeting or talk'
+
+    def available(self, user, event=None, category=None):
+        return _attach_available(user, event)
 
     def check(self, user, args):
         from indico_assistant.services.actions.uploads import usable_upload

@@ -43,6 +43,18 @@ class AddTeamsRoom(Action):
     name = 'add_teams_room'
     Args = AddTeamsRoomArgs
     external = True
+    summary = 'add a Microsoft Teams meeting to a meeting'
+
+    def available(self, user, event=None, category=None):
+        from indico_assistant.services.actions.contributions import _manage_available
+
+        if (plugin := teams_plugin()) is None:
+            return 'Microsoft Teams is not available on this Indico'
+        if reason := _manage_available(user, event):
+            return reason
+        if not plugin.can_manage_vc_rooms(user, event):  # the plugin's own list; it does not depend on the event
+            return 'You are not allowed to create Teams meetings'
+        return None
 
     def check(self, user, args):
         if (plugin := teams_plugin()) is None:

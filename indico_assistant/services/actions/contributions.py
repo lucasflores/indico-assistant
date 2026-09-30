@@ -56,6 +56,16 @@ def _manage_refusal(event, user):
     return None
 
 
+def _manage_available(user, event):
+    """``available`` for a change that needs full management of the meeting: on ``event``, or (no event page) on
+    some meeting the chat can find by name."""
+    from indico_assistant.services.actions.resolve import managed_meetings
+
+    if event is not None:
+        return _manage_refusal(event, user)
+    return None if managed_meetings(user) else 'You do not manage any meeting'
+
+
 def _link(contribution, person, **fields):
     """A person link for ``person``: their existing one on ``contribution`` if any, updated (as Indico's form
     does: a second link for the same person breaks the unique key), else a new one."""
@@ -89,6 +99,10 @@ class AddContribution(Action):
 
     name = 'add_contribution'
     Args = AddContributionArgs
+    summary = 'add talks (contributions) with speakers and durations to a meeting'
+
+    def available(self, user, event=None, category=None):
+        return _manage_available(user, event)
 
     def check(self, user, args):
         return _manage_refusal(Event.get(args.event_id, is_deleted=False), user)
@@ -147,6 +161,10 @@ class UpdateContribution(Action):
 
     name = 'update_contribution'
     Args = UpdateContributionArgs
+    summary = 'change a talk: its title, speaker, duration or time'
+
+    def available(self, user, event=None, category=None):
+        return _manage_available(user, event)
 
     def check(self, user, args):
         contribution = Contribution.get(args.contribution_id, is_deleted=False)

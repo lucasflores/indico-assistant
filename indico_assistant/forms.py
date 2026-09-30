@@ -4,7 +4,7 @@ This module defines WTForms form classes for plugin configuration,
 including global settings and per-event settings.
 """
 
-from wtforms.fields import BooleanField, IntegerField, PasswordField, SelectField, StringField, TextAreaField
+from wtforms.fields import BooleanField, FloatField, IntegerField, PasswordField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, InputRequired, NumberRange, Optional, URL, ValidationError
 
 from indico.web.forms.base import IndicoForm
@@ -71,6 +71,25 @@ class SettingsForm(IndicoForm):
         "Max Tokens",
         validators=[DataRequired(), NumberRange(min=100, max=32000)],
         description="Maximum response tokens (100-32000)",
+    )
+
+    knowledge_jev_api_key = PasswordField(
+        "Knowledge gate key (Jev)",
+        validators=[Optional()],
+        description='An OpenRouter key for Jev, which picks out "how do I" and "can you" questions. Optional: '
+                    "without it the classifier decides alone. Stored securely, not displayed.",
+    )
+
+    knowledge_jev_cutoff = FloatField(
+        "Knowledge gate cut-off",
+        validators=[InputRequired(), NumberRange(min=0, max=1)],
+        description="Jev's score at or above which a message gets a knowledge answer (0-1).",
+    )
+
+    knowledge_jev_timeout_seconds = FloatField(
+        "Knowledge gate timeout (seconds)",
+        validators=[InputRequired(), NumberRange(min=0.2, max=10)],
+        description="A slower decision is ignored and the classifier decides (0.2-10 seconds).",
     )
 
     # NL2SQL Pipeline Settings (003-nl2sql-pipeline)
