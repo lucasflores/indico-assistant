@@ -28,9 +28,11 @@ IBIS_MODE_CHOICES = (
 
 DEFAULT_SETTINGS = {
     "enabled": True,
-    "llm_provider": "ollama",
-    "llm_model": "llama3.2",
-    "llm_base_url": "http://localhost:11434",
+    # The ibis router (labs.aithoth.com): an sk-ibis- key is the only thing an install must add.
+    # ibis/<dial> routes (Frugal, Economy, Balanced, High, Max); a concrete model id bypasses the router.
+    "llm_provider": "ibis",
+    "llm_model": "ibis/Balanced",
+    "llm_base_url": "https://labs.aithoth.com/ibis-api",
     "llm_api_key": None,
     # How the ibis provider asks for structured output (IBIS_MODE_CHOICES). md_json, the prompt-JSON
     # form, is what every install used before this setting existed; the default moves to tools only
