@@ -46,6 +46,19 @@ def _token() -> str | None:
     return CURRENT_TOKEN.get() or _websocket_token()
 
 
+def _chainlit_session():
+    try:
+        from chainlit.context import context
+        return context.session
+    except Exception:
+        return None
+
+
+# Chainlit also starts a thread on a new chat's first *action*, named after it (server.py call_action). The report
+# form's Send and Cancel can be that first action (spec 021): they are no conversation, so none is created or named.
+NOT_CONVERSATIONS = frozenset({"report_submit", "report_cancel"})
+
+
 def _identifier(token: str) -> str:
     """Who the token belongs to (it was signed by Indico or Chainlit with the shared secret)."""
     claims = jwt.decode(token, os.environ.get("CHAINLIT_AUTH_SECRET", ""), algorithms=["HS256"])
@@ -204,6 +217,10 @@ class IndicoDataLayer(BaseDataLayer):
                             metadata: dict | None = None, tags: list[str] | None = None):
         if name is None:
             return  # metadata (Chainlit's session state) and tags are not kept
+        if user_id is not _RENAME and name in NOT_CONVERSATIONS:
+            if session := _chainlit_session():
+                session.has_first_interaction = False  # the chat's first real message still starts the conversation
+            return
         if user_id is not _RENAME:
             # Chainlit's own naming of a new thread by its first message (emitter.flush_thread_queues passes
             # user_id; the sidebar's rename does not). Not a rename: the title stays the question's start. It

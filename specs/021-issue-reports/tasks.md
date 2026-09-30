@@ -202,11 +202,11 @@ conversation they can untick.
 
   Style it like `#assistant-panel-close` in `static/css/chat_widget.css`. Check that `_widget_version()` changes
   (the `?v=` hash covers both files).
-- [ ] T019 [US1] **Live** (needs T001):
+- [x] T019 [US1] **Live** (needs T001):
   - apply migration 009 (`indico db --plugin assistant upgrade`) and check `\d plugin_assistant.issue_reports`;
   - check the downgrade, then upgrade again;
   - restart the worker and Chainlit.
-- [ ] T020 [US1] **Live**: quickstart §2 as user 6 (Makoto):
+- [x] T020 [US1] **Live**: quickstart §2 as user 6 (Makoto):
   - the form from ⚑ in a new chat: no attach box, and no new Past Chats entry after sending (AS8);
   - during a slow answer: the form opens at once, with the box ticked (AS9);
   - a double-clicked Send makes one row;
@@ -273,7 +273,7 @@ messages as the chat showed them, and the user can delete it.
   `!/user/assistant-reports/` and `!/user/<int:user_id>/assistant-reports/`, plus `<int:report_id>/` and
   `<int:report_id>/delete`. Name the endpoints so `url_for_plugin('assistant.user_report', report_id=…)` works
   for T014. Connect the `user-profile-sidemenu` item in `plugin.py`. This makes T022 pass.
-- [ ] T028 [US2] **Live**: quickstart §4 as user 6:
+- [x] T028 [US2] **Live**: quickstart §4 as user 6:
   - the menu item appears after the first report;
   - the list and one report, with no SQL or intent;
   - delete with the confirmation;
@@ -342,7 +342,7 @@ without overwriting anyone.
   - add the row to `tasks/cleanup.py`'s `RETENTION`.
 
   This makes T030 pass.
-- [ ] T036 [US3] **Live**: quickstart §5 and §6:
+- [x] T036 [US3] **Live**: quickstart §5 and §6:
   - as user 1: the badge, the filters, the evidence on a wrong-answer report, and a save;
   - two tabs: the second save is refused;
   - user 6 is refused;
@@ -389,7 +389,7 @@ without overwriting anyone.
   - the offers go in `_show_answer`'s and `_after_resume`'s branches as T038 lists.
 
   This makes T038 pass.
-- [ ] T041 [US4] **Live**: quickstart §3:
+- [x] T041 [US4] **Live**: quickstart §3:
   - a thumbs down with a comment gives one offer, and the comment is in its form;
   - an out-of-scope question gets the offer;
   - with the worker stopped, the timeout message gets the offer, and its report has no answer.
@@ -402,7 +402,7 @@ without overwriting anyone.
 
 - [x] T042 [P] Merged accounts (R12): in `plugin.py`, connect `signals.users.merged` to move `user_id` and
   `updated_by_id` from `source` to `target`. Test it in `tests/integration/reports/test_own.py`.
-- [ ] T043 (written 2026-09-30; runs in the live window) Write `tests/browser/reports.mjs`, using `lib.mjs`'s `browserAs`:
+- [x] T043 Write `tests/browser/reports.mjs`, using `lib.mjs`'s `browserAs`:
   - **SC-001**: as user 6, send a report from an offer and one from ⚑. Each takes at most three choices besides
     typing, and each shows on `/user/assistant-reports/` right after. 10 runs;
   - **SC-002**: 10 thumbs down each give an offer, and 10 out-of-scope questions each carry one. A
@@ -410,7 +410,7 @@ without overwriting anyone.
   - at the end, count and then delete the reports and chats the run made as user 6.
 
   Add it to `tests/browser/README.md`.
-- [ ] T044 **Live**: run every existing browser check unchanged (SC-007): `walk` (as user 1), `sc003`, `us4`,
+- [x] T044 **Live**: run every existing browser check unchanged (SC-007): `walk` (as user 1), `sc003`, `us4`,
   `hover`, `feedback`, `tabs` and `sidebar`. Fix any regression.
 - [x] T045 [P] Documentation:
   - `README.md`: a short "Issue reports" section: the ⚑ button, offers, the profile page, the admin page,

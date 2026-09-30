@@ -25,7 +25,7 @@ async function until(pred, ms = 10000) {
 
 function resetLimits() {  // this user's counters only; the dev Redis cache is db 1 (indico.conf REDIS_CACHE_URL)
   const keys = execFileSync("redis-cli", ["-n", "1", "--scan", "--pattern", "LIMITS:LIMITER/assistant-*"]).toString().split("\n")
-    .filter((k) => /assistant-(report|chat)-/.test(k) && k.includes(`/${USER}/`));
+    .filter((k) => new RegExp(`assistant-(report|chat)-\\d+/${USER}/`).test(k));  // (…-chat-1/<user>/200/1/day)
   console.log(`     (resetting ${keys.length} limit counters of user ${USER})`);
   for (const key of keys) execFileSync("redis-cli", ["-n", "1", "del", key]);
 }
@@ -84,10 +84,11 @@ async function thumbsDownLastAnswer(comment) {
   await inFrame(() => document.getElementById("submit-feedback").click());
 }
 
-const before = new Set(await myReportIds().catch(() => []));
+let before = null;  // the user's reports before the run: read once a page is loaded (fetch needs its origin)
 const sent = [];
 try {
   await page.goto(`${INDICO}/event/351/`, { waitUntil: "load" });
+  before = new Set(await myReportIds());
   if (await page.$("#assistant-toggle[aria-expanded=false]")) await page.click("#assistant-toggle");
   check("the panel is ready and ⚑ is enabled",
         await until(async () => (await page.evaluate(() => document.documentElement.dataset.assistantPanel)) === "ready"
@@ -141,7 +142,8 @@ try {
   check("SC-002 no report exists that the run did not send", unexpected.length === 0, JSON.stringify(unexpected));
 } finally {
   await page.screenshot({ path: new URL("./reports-last.png", import.meta.url).pathname });
-  const mine = (await myReportIds().catch(() => [])).filter((r) => !before.has(r));
+  // only what this run made; nothing at all if the reports before it could not be read
+  const mine = before ? (await myReportIds().catch(() => [])).filter((r) => !before.has(r)) : [];
   console.log(`     (deleting the ${mine.length} reports this run made)`);
   for (const id of mine) await api(`/api/assistant/reports/${id}`, { method: "DELETE" });
   await browser.close();

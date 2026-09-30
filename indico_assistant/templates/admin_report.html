@@ -38,7 +38,7 @@
                 <dt>What they wrote</dt>
                 <dd class="assistant-report-text">{{ report.text }}</dd>
             </dl>
-            <form method="post">
+            <form method="post" id="assistant-report-form">
                 <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
                 <input type="hidden" name="seen" value="{{ seen }}">
                 <p>
@@ -52,7 +52,7 @@
                 </p>
                 <p>
                     <label>Note for the reporter<br>
-                        <textarea name="note" rows="4" cols="80" maxlength="2000">{{ report.note or '' }}</textarea>
+                        <textarea name="note" rows="4" maxlength="2000" style="width: 100%; box-sizing: border-box;">{{ report.note or '' }}</textarea>
                     </label>
                 </p>
                 <button class="i-button highlight" type="submit">Save</button>

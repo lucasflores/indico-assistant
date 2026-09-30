@@ -4,6 +4,8 @@ import json
 import os
 from datetime import datetime, UTC
 
+from types import SimpleNamespace
+
 import httpx
 import jwt
 import pytest
@@ -128,6 +130,19 @@ async def test_a_rename_is_a_rename_and_chainlits_own_naming_is_not(layer, indic
     await layer.update_thread(thread_id="new-thread", name="Who speaks?", user_id="20", tags=None)
     assert indico.calls[-1][:2] == ("PUT", "/api/assistant/sessions/new-thread")
     assert indico.calls[-1][3] == {"first_message": "Who speaks?"}
+
+
+async def test_a_report_form_action_starts_no_conversation(layer, indico, as_lucas, monkeypatch):
+    # spec 021: Chainlit starts a thread on a new chat's first action too, named after it (server.py call_action).
+    # The report form's Send or Cancel is no conversation: nothing is created or named, and the chat's first real
+    # message still starts the conversation (found live: a session titled "report_submit")
+    import indico_data_layer
+    session = SimpleNamespace(has_first_interaction=True)
+    monkeypatch.setattr(indico_data_layer, "_chainlit_session", lambda: session)
+    for action in ("report_submit", "report_cancel"):
+        session.has_first_interaction = True
+        await layer.update_thread(thread_id="new-thread", name=action, user_id="20", tags=None)
+        assert indico.calls == [] and session.has_first_interaction is False
 
 
 async def test_the_author_check_does_not_read_the_messages(layer, indico, as_lucas):
