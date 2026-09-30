@@ -292,7 +292,7 @@ without overwriting anyone.
 
 ### Tests first
 
-- [ ] T029 [P] [US3] In `tests/integration/reports/test_admin.py`, the admin endpoints:
+- [x] T029 [P] [US3] In `tests/integration/reports/test_admin.py`, the admin endpoints:
   - **list**: newest first, 50 a page, `page` and `pages` right for 120 rows, filters by `status` and by
     `category` (and both), and `open` counts the open reports;
   - **one report**: returns the full copy, evidence included, plus `user: {id, name, email}` from Indico and
@@ -304,13 +304,13 @@ without overwriting anyone.
     and the row is unchanged. `seen` empty on a report never updated passes;
   - **validation**: a bad status, or a note over 2,000 characters, returns `422`;
   - **access**: every admin endpoint refuses user 6's equivalent (a non-admin), with `403` (SC-003).
-- [ ] T030 [P] [US3] In `tests/unit/tasks/test_retention.py`:
+- [x] T030 [P] [US3] In `tests/unit/tasks/test_retention.py`:
   - the reports row is in `RETENTION`;
   - with `retention_report_days = 30`, a report closed 31 days ago is deleted;
   - an open and an under-review report created 400 days ago stay;
   - a report closed 400 days ago and then reopened stays, because `closed_at` was cleared (SC-005);
   - `0` keeps everything.
-- [ ] T031 [P] [US3] In `tests/integration/reports/test_pages.py`, the admin pages:
+- [x] T031 [P] [US3] In `tests/integration/reports/test_pages.py`, the admin pages:
   - a non-admin is refused by `RHAdminBase`;
   - the detail POST with a stale `seen` re-renders with the current status and note and a message, and
     changes nothing;
@@ -320,15 +320,15 @@ without overwriting anyone.
 
 ### Implementation
 
-- [ ] T032 [US3] In `services/reports.py`, add `admin_list(status, category, page)`, `admin_report(report_id)`,
+- [x] T032 [US3] In `services/reports.py`, add `admin_list(status, category, page)`, `admin_report(report_id)`,
   `admin_update(admin, report_id, status, note, seen)` (the R11 check, the `closed_at` rules; it raises
   `ReportError(409, 'STALE')`), and `open_count()`.
-- [ ] T033 [US3] Add `RHAdminReportList`, `RHAdminReportDetail` and `RHAdminReportUpdate` to
+- [x] T033 [US3] Add `RHAdminReportList`, `RHAdminReportDetail` and `RHAdminReportUpdate` to
   `controllers/reports.py`, on `RHReportsAPI` with `ADMIN_ONLY = True`. Register them in `blueprint.py`. This
   makes T029 pass.
-- [ ] T034 [US3] In `views.py`, add `WPReportsAdmin(WPJinjaMixinPlugin, WPAdmin)`. In `report_pages.py`, add
+- [x] T034 [US3] In `views.py`, add `WPReportsAdmin(WPJinjaMixinPlugin, WPAdmin)`. In `report_pages.py`, add
   `RHAdminReports(RHAdminBase)` and `RHAdminReport(RHAdminBase)`, whose GET shows the report and whose POST
-  saves it. Add `admin_reports.html` and `admin_report.html` (extending `admin/base.html`):
+  saves it. Add `admin_reports.html` and `admin_report.html` (extending `layout/admin_page.html`):
   - the filters are a GET form;
   - the pager;
   - the copy with the reported answer highlighted, and each answer's evidence as a definition list;
@@ -336,7 +336,7 @@ without overwriting anyone.
 
   Register `!/admin/assistant-reports/` and `<int:report_id>/`. Connect the `admin-sidemenu` item in
   `plugin.py`. This makes T031 pass.
-- [ ] T035 [P] [US3] Retention:
+- [x] T035 [P] [US3] Retention:
   - add `"retention_report_days": 365` to `default_settings.py`;
   - add an `IntegerField` in `forms.py` next to `retention_chat_days` (0 = keep forever, as its neighbours);
   - add the row to `tasks/cleanup.py`'s `RETENTION`.

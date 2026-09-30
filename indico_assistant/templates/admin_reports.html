@@ -1,0 +1,54 @@
+{% extends 'layout/admin_page.html' %}
+{# Triage (spec 021 US3, FR-015): every report, newest first, 50 a page, filtered by status and kind. #}
+
+{% block title %}Assistant reports{% endblock %}
+
+{% block content %}
+    <form method="get" class="flexrow f-a-center" style="gap: 0.8em; margin-bottom: 1em;">
+        <label>Status
+            <select name="status">
+                <option value="">Any</option>
+                {% for key, label in labels.status.items() %}
+                    <option value="{{ key }}" {% if filters.status == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Kind
+            <select name="category">
+                <option value="">Any</option>
+                {% for key, label in labels.category.items() %}
+                    <option value="{{ key }}" {% if filters.category == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="i-button" type="submit">Filter</button>
+        <span class="text-superfluous">{{ open }} open</span>
+    </form>
+    <table class="i-table">
+        <thead>
+            <tr><th>Report</th><th>Sent</th><th>From</th><th>Kind</th><th>What they wrote</th><th>Status</th><th>Updated</th></tr>
+        </thead>
+        <tbody>
+            {% for report in reports %}
+                <tr>
+                    <td><a href="{{ report_url(report) }}">#{{ report.id }}</a></td>
+                    <td>{{ report.created_at|format_datetime('short') }}</td>
+                    <td>{{ people[report.user_id].full_name if report.user_id in people else report.user_id }}</td>
+                    <td>{{ labels.category[report.category] }}</td>
+                    <td>{{ report.text|truncate(120) }}</td>
+                    <td><span class="ui label">{{ labels.status[report.status] }}</span></td>
+                    <td>{{ report.updated_at|format_date if report.updated_at else '' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="italic">No reports.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if pages > 1 %}
+        <p class="flexrow f-a-center" style="gap: 0.8em;">
+            {% if page > 1 %}<a class="i-button" href="{{ page_url(page - 1) }}">Newer</a>{% endif %}
+            <span>Page {{ page }} of {{ pages }}</span>
+            {% if page < pages %}<a class="i-button" href="{{ page_url(page + 1) }}">Older</a>{% endif %}
+        </p>
+    {% endif %}
+{% endblock %}

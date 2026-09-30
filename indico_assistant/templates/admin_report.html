@@ -1,0 +1,103 @@
+{% extends 'layout/admin_page.html' %}
+{# One report for triage (spec 021 FR-016, FR-017): the copy with the reported answer marked and each answer's
+   evidence, and the status and note. #}
+
+{% block title %}Report #{{ report.id }} · {{ labels.category[report.category] }}{% endblock %}
+
+{% block content %}
+    <style>
+        .assistant-report-text { white-space: pre-wrap; }
+        .assistant-report-message { border-left: 3px solid #ddd; padding: 0.4em 0.8em; margin: 0.6em 0; }
+        .assistant-report-message.assistant { border-left-color: #007cac; }
+        .assistant-report-message.reported { background: #fff8e1; }
+        .assistant-report-evidence { font-size: 0.9em; margin: 0.4em 0 0; }
+        .assistant-report-evidence dt { font-weight: bold; }
+        .assistant-report-evidence pre { white-space: pre-wrap; margin: 0; }
+    </style>
+    <p><a href="{{ list_url }}">All reports</a></p>
+    {% if stale %}
+        <div class="warning-message-box"><div class="message-text">
+            Another admin changed this report after you opened it. This is its current status and note: save again to change them.
+        </div></div>
+    {% endif %}
+    <div class="i-box">
+        <div class="i-box-content">
+            <dl class="i-data-list">
+                <dt>From</dt>
+                <dd>{{ reporter.full_name if reporter else report.user_id }}{% if reporter %} ({{ reporter.email }}){% endif %}</dd>
+                <dt>Sent</dt>
+                <dd>{{ report.created_at|format_datetime('short') }}</dd>
+                {% if report.updated_at %}
+                    <dt>Last saved</dt>
+                    <dd>{{ report.updated_at|format_datetime('short') }}{% if updated_by %} by {{ updated_by.full_name }}{% endif %}</dd>
+                {% endif %}
+                {% if report.closed_at %}
+                    <dt>Closed</dt>
+                    <dd>{{ report.closed_at|format_datetime('short') }}</dd>
+                {% endif %}
+                <dt>What they wrote</dt>
+                <dd class="assistant-report-text">{{ report.text }}</dd>
+            </dl>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+                <input type="hidden" name="seen" value="{{ seen }}">
+                <p>
+                    <label>Status
+                        <select name="status">
+                            {% for key, label in labels.status.items() %}
+                                <option value="{{ key }}" {% if report.status == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                </p>
+                <p>
+                    <label>Note for the reporter<br>
+                        <textarea name="note" rows="4" cols="80" maxlength="2000">{{ report.note or '' }}</textarea>
+                    </label>
+                </p>
+                <button class="i-button highlight" type="submit">Save</button>
+            </form>
+        </div>
+    </div>
+    {% if copy %}
+        <div class="i-box">
+            <div class="i-box-header"><div class="i-box-title">The conversation, as it was when the report was sent</div></div>
+            <div class="i-box-content">
+                {% if copy.truncated %}<p class="italic">Earlier messages were left out.</p>{% endif %}
+                {% for message in copy.messages %}
+                    {% set reported = message.id == copy.reported_answer_id %}
+                    <div class="assistant-report-message {{ message.role }}{% if reported %} reported{% endif %}">
+                        <strong>{{ 'User' if message.role == 'user' else 'Assistant' }}</strong>
+                        · <span class="text-superfluous">{{ message_time(message.created_at) }}</span>
+                        {% if message.event_id %}· <span class="text-superfluous">sent from event {{ message.event_id }}</span>{% endif %}
+                        {% if reported %}<span class="ui small label">Reported</span>{% endif %}
+                        <div class="assistant-report-text">{{ message.content }}</div>
+                        {% for upload in message.uploads or [] %}<div>📎 {{ upload.filename }}</div>{% endfor %}
+                        {% if message.plan %}
+                            <div>Plan: {{ message.plan.summary }}</div>
+                            <ol>{% for step in message.plan.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+                        {% endif %}
+                        {% if message.role == 'assistant' %}
+                            {% set evidence = message.evidence or {} %}
+                            <dl class="assistant-report-evidence">
+                                {% if message.problem %}<dt>Problem</dt><dd>{{ message.problem }}</dd>{% endif %}
+                                {% if evidence.intent %}<dt>Intent</dt><dd>{{ evidence.intent }} ({{ evidence.intent_confidence }})</dd>{% endif %}
+                                {% if message.sql_generated %}<dt>Query</dt><dd><pre>{{ message.sql_generated }}</pre></dd>{% endif %}
+                                {% if message.confidence is not none %}<dt>Answer confidence</dt><dd>{{ message.confidence }}</dd>{% endif %}
+                                {% if evidence.row_count is defined %}<dt>Rows</dt><dd>{{ evidence.row_count }}</dd>{% endif %}
+                                {% if evidence.validation_rejection %}<dt>Rejected by a check</dt><dd>{{ evidence.validation_rejection }}</dd>{% endif %}
+                                {% if evidence.correction_attempts %}<dt>Corrections</dt><dd>{{ evidence.correction_attempts }}{% if evidence.corrected %}, corrected{% endif %}</dd>{% endif %}
+                                {% if evidence.cached %}<dt>Cached</dt><dd>yes</dd>{% endif %}
+                                {% if message.pipeline_error %}<dt>Error</dt><dd>{{ message.pipeline_error.error_type }}: {{ message.pipeline_error.message }}</dd>{% endif %}
+                                {% if message.data_sources %}
+                                    <dt>Sources</dt>
+                                    <dd>{% for source in message.data_sources %}{{ source.description or source.url or source if source is mapping else source }}{% if not loop.last %}; {% endif %}{% endfor %}</dd>
+                                {% endif %}
+                            </dl>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

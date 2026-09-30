@@ -1,4 +1,4 @@
-"""The report pages (spec 021): the user's "Assistant reports" in their profile (US2).
+"""The report pages (spec 021): the user's "Assistant reports" in their profile (US2), and the admins' triage (US3).
 
 Feature: 021-issue-reports
 
@@ -11,15 +11,18 @@ from __future__ import annotations
 from datetime import datetime
 
 from flask import flash, redirect, request, session
+from indico.core.db import db
 from indico.core.plugins import url_for_plugin
+from indico.modules.admin import RHAdminBase
 from indico.modules.users.controllers import RHUserBase
 from indico.util.date_time import format_datetime
 from indico.web.menu import SideMenuItem
 from werkzeug.exceptions import Forbidden, NotFound
 
+from indico_assistant.models import IssueReport
 from indico_assistant.models.report import LABELS
 from indico_assistant.services import reports
-from indico_assistant.views import WPReports
+from indico_assistant.views import WPReports, WPReportsAdmin
 
 MENU_ITEM = 'assistant_reports'
 
@@ -85,3 +88,70 @@ class RHUserReportDelete(RHUserReportBase):
         reports.delete_own(self.user, self.report.id)
         flash('The report was deleted.', 'success')
         return redirect(_profile_url('assistant.user_reports', self.user))
+
+
+# --- triage (US3) ------------------------------------------------------------------------------------------
+
+
+def admin_menu_item() -> SideMenuItem | None:
+    """The admin menu's "Assistant reports", with the number of open reports (FR-015)."""
+    if session.user is None or not session.user.is_admin:
+        return None
+    return SideMenuItem(MENU_ITEM, 'Assistant reports', url_for_plugin('assistant.admin_reports'),
+                        section='integration', badge=reports.open_count() or None)
+
+
+class RHAdminReports(RHAdminBase):
+    """Every report, newest first, a page at a time, filtered by status and category."""
+
+    def _process(self):
+        filters = {'status': request.args.get('status') or None, 'category': request.args.get('category') or None}
+        try:
+            rows, page, pages = reports.admin_list(filters['status'], filters['category'],
+                                                   request.args.get('page', 1, type=int))
+        except reports.ReportError:  # an unknown filter value: show everything instead
+            filters = {'status': None, 'category': None}
+            rows, page, pages = reports.admin_list(page=request.args.get('page', 1, type=int))
+        return WPReportsAdmin.render_template(
+            'admin_reports.html', MENU_ITEM, reports=rows, page=page, pages=pages, filters=filters, labels=LABELS,
+            open=reports.open_count(), people={p.id: p for p in _people(rows)},
+            page_url=lambda n: url_for_plugin('assistant.admin_reports', page=n, **{k: v for k, v in filters.items() if v}),
+            report_url=lambda report: url_for_plugin('assistant.admin_report', report_id=report.id))
+
+
+def _people(rows):
+    from indico.modules.users import User
+    ids = {row.user_id for row in rows} | {row.updated_by_id for row in rows if row.updated_by_id}
+    return User.query.filter(User.id.in_(ids)).all() if ids else []
+
+
+class RHAdminReport(RHAdminBase):
+    """One report with its whole copy and evidence (FR-016); POST saves the status and the note (FR-017)."""
+
+    def _process_args(self):
+        RHAdminBase._process_args(self)
+        self.report = db.session.get(IssueReport, request.view_args['report_id'])
+        if self.report is None:
+            raise NotFound
+
+    def _process(self):
+        stale = False
+        if request.method == 'POST':
+            try:
+                reports.admin_update(session.user, self.report.id, request.form.get('status'),
+                                     request.form.get('note'), request.form.get('seen'))
+            except reports.ReportError as error:
+                if error.code != 'STALE':
+                    flash(error.message, 'error')
+                else:
+                    stale = True  # shown with the current status and note, which the admin can save again
+            else:
+                flash('Saved.', 'success')
+                return redirect(url_for_plugin('assistant.admin_report', report_id=self.report.id))
+        report = self.report
+        people = {p.id: p for p in _people([report])}
+        return WPReportsAdmin.render_template(
+            'admin_report.html', MENU_ITEM, report=report, copy=report.copy, labels=LABELS, stale=stale,
+            reporter=people.get(report.user_id), updated_by=people.get(report.updated_by_id),
+            seen=report.updated_at.isoformat() if report.updated_at else '', message_time=message_time,
+            list_url=url_for_plugin('assistant.admin_reports'))

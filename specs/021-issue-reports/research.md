@@ -230,7 +230,7 @@ no JavaScript. The template bases and wiring:
 | Page | RH base | WP | Template extends | Route |
 |---|---|---|---|---|
 | My reports (list, detail, delete) | `RHUserBase` | `WPReports(WPJinjaMixinPlugin, WPUser)` | `users/base.html`, `block user_content` | `!/user/assistant-reports/`, `!/user/<int:user_id>/assistant-reports/` (+ `<int:report_id>/`, `…/delete`) |
-| Triage (list, detail, save) | `RHAdminBase` | `WPReportsAdmin(WPJinjaMixinPlugin, WPAdmin)` | `admin/base.html` | `!/admin/assistant-reports/` (+ `<int:report_id>/`) |
+| Triage (list, detail, save) | `RHAdminBase` | `WPReportsAdmin(WPJinjaMixinPlugin, WPAdmin)` | `layout/admin_page.html` | `!/admin/assistant-reports/` (+ `<int:report_id>/`) |
 
 - **The profile menu**: `signals.menu.items.connect_via('user-profile-sidemenu')`. It yields
   `SideMenuItem('assistant_reports', 'Assistant reports', url, …)` only when the profile's user has a report

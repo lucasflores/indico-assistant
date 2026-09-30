@@ -152,6 +152,11 @@ class SettingsForm(IndicoForm):
         description="What the assistant planned and did, for audit. Undo only reaches back 24 hours. "
                     "0 keeps them forever.",
     )
+    retention_report_days = IntegerField(
+        "Keep closed issue reports (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="Counted from when a report was closed; open reports and reports under review are never "
+                    "deleted. A report holds the conversation its user attached. 0 keeps them forever.",
+    )
 
     # Chat actions (Feature 019)
     actions_enabled = BooleanField(
