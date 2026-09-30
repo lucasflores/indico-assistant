@@ -57,8 +57,8 @@ class CapabilityList:
                 by_reason.setdefault(why, []).append(what)
             lines += [f"Changes I cannot make for them ({_about_them(why)}): " + "; ".join(whats) + "."
                       for why, whats in by_reason.items()]
-        lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It has no connection to anything outside Indico "
-                     "(GitHub, email, calendars).")
+        lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It has no access to GitHub, email inboxes or "
+                     "calendars outside Indico.")
         return "\n".join(lines)
 
 

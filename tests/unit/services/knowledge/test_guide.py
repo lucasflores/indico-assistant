@@ -101,3 +101,13 @@ def test_describe_reads_the_files_without_loading_the_model(copy_dir, monkeypatc
     monkeypatch.setattr("indico_assistant.services.knowledge.guide_build.OUT_DIR", copy_dir)
     assert status({"jev_api_key": "k"})["gate"] == "jev"
     assert status({})["gate"] == "classifier only"
+
+
+def test_a_search_that_fails_is_unavailable_not_an_error(copy_dir, monkeypatch):
+    """(Copilot, PR #15) the model loads, then encoding fails (out of memory, say): no excerpts, no crash"""
+    class Broken(FakeModel):
+        def encode(self, texts, **kwargs):
+            raise RuntimeError("out of memory")
+    monkeypatch.setattr(embedding, "load_model", lambda name: (Broken(), len(WORDS) + 1))
+    guide = Guide(copy_dir)
+    assert guide.excerpts("timetable") == [] and "out of memory" in guide.problem

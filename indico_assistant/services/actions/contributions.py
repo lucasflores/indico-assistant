@@ -63,7 +63,14 @@ def _manage_available(user, event):
 
     if event is not None:
         return _manage_refusal(event, user)
-    return None if managed_meetings(user) else 'You do not manage any meeting'
+    return _reachable_refusal(managed_meetings(user))
+
+
+def _reachable_refusal(meetings):
+    """Why none of the meetings the chat can reach can be changed, or None (the checks refuse a locked one)."""
+    if not meetings:
+        return 'You do not manage any meeting'
+    return None if any(refuse_if_locked(e) is None for e in meetings) else 'The meetings you manage are locked'
 
 
 def _link(contribution, person, **fields):
