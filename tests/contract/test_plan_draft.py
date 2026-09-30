@@ -32,6 +32,17 @@ def test_the_example_request_parses():
     assert [s.speaker.name for s in step.slots] == ['me', 'Makoto']
 
 
+def test_a_teams_meeting_and_a_reminder_for_an_existing_meeting_parse():
+    """(spec 022) "Can you add a Teams meeting to this event?", then "1 day before, to all participants"."""
+    step = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'change_meeting', 'meeting': 'this meeting', 'teams': True,
+         'reminder': {'minutes_before': 1440, 'participants': True, 'people': ['Makoto']}}]}).steps[0]
+    assert isinstance(step, ChangeMeeting) and step.teams and step.reminder.minutes_before == 1440
+    assert step.reminder.participants and step.reminder.people[0].name == 'Makoto'
+    assert PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'change_meeting', 'meeting': 'it'}]}).steps[0].reminder is None
+
+
 def test_follow_ups_parse():
     draft = PlanDraft.model_validate({'decision': 'revise', 'reply': 'Moved.',
                                       'steps': [{'action': 'change_meeting', 'move_to': {'time': '15:00'}}]})

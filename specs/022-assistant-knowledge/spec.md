@@ -188,7 +188,10 @@ With the guide index present, no question needs the internet beyond the instance
     or not; Teams is available or not).
 
   It is built from the registered actions, the admin's enabled actions, the installed plugins, and the user's
-  permissions. It MUST work with no event page.
+  permissions. It MUST work with no event page. Every change it lists MUST be one the planner can plan: the live
+  run of 2026-09-30 found a Teams meeting and a reminder listed for an existing meeting that the planner could only
+  add to a new one, so "yes" to the offer looped. The planner now adds both to an existing meeting (a reminder goes
+  to the speakers and registered participants unless the user names who, as on the reminders page).
 - **FR-009**: Each action MUST say whether it is available, for a user and optionally an event or category, and why
   not. It MUST use the same permission rules as the check it makes before it runs. A test MUST assert that for every
   registered action, "not available" implies the check refuses.

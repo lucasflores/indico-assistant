@@ -309,8 +309,30 @@ def resolve_time(text):
 # --- a new meeting -----------------------------------------------------------------------------------
 
 
-def _create_meeting(step, user, settings, topic):
+def _teams_args(title, everyone, notes):
+    """add_teams_room's args for a meeting whose co-organizers are ``everyone`` with a Microsoft 365 account, or
+    None when Teams is not installed or cannot be reached (``notes`` then says so: graceful degradation)."""
     from indico_assistant.services.actions.teams import teams_plugin, tenant_email
+
+    if teams_plugin() is None:
+        notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')
+        return None
+    from indico_vc_teams.graph import GraphError
+
+    try:
+        with_account = [u for u in everyone if u.id is not None and tenant_email(u)]
+    except GraphError as exc:
+        notes.append(f'Microsoft Teams cannot be reached right now ({exc.message}), so the meeting has no '
+                     f'Teams room; you can add one later.')
+        return None
+    if without := [u.full_name for u in everyone if u not in with_account]:
+        notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '
+                     f'the reminder and the event page have the link.')
+    return {'name': title, 'coorganizer_ids': [u.id for u in with_account]}
+
+
+def _create_meeting(step, user, settings, topic):
+    from indico_assistant.services.actions.teams import teams_plugin
 
     options = category_options(user, topic)
     if not options:
@@ -428,26 +450,8 @@ def _create_meeting(step, user, settings, topic):
     for url in step.links:  # material from a past meeting (an accepted suggestion)
         steps.append(_step(len(steps) + 1, 'attach_link', {'target_type': 'event', 'url': url},
                            refs={'target_id': '$1.event_id'}))
-    if step.teams:
-        if teams_plugin() is None:
-            notes.append('Microsoft Teams is not available on this Indico, so the meeting has no Teams room.')
-        else:
-            from indico_vc_teams.graph import GraphError
-
-            everyone = [user, *others]
-            try:
-                with_account = [u for u in everyone if u.id is not None and tenant_email(u)]
-            except GraphError as exc:  # Teams unreachable: plan the rest, say so (graceful degradation)
-                notes.append(f'Microsoft Teams cannot be reached right now ({exc.message}), so the meeting has no '
-                             f'Teams room; you can add one later.')
-                with_account = None
-            if with_account is not None:
-                if without := [u.full_name for u in everyone if u not in with_account]:
-                    notes.append(f'{", ".join(without)} will not get a Teams invitation (no Microsoft 365 account); '
-                                 f'the reminder and the event page have the link.')
-                steps.append(_step(len(steps) + 1, 'add_teams_room', {
-                    'name': title, 'coorganizer_ids': [u.id for u in with_account],
-                }, refs={'event_id': '$1'}))
+    if step.teams and (teams := _teams_args(title, [user, *others], notes)):
+        steps.append(_step(len(steps) + 1, 'add_teams_room', teams, refs={'event_id': '$1'}))
 
     if start:
         notes.extend(_clashes(user, [user, *(p for p in others if p.id is not None)], start,
@@ -740,13 +744,63 @@ def _change_meeting(step, user, settings, chat_session_id, page_event_id=PAGE_FR
     if after > end:
         notes.append(f'The meeting is extended to end at {after.astimezone(tz):%H:%M} to fit the new talks.')
 
+    cannot = []  # asked for, but not possible: the reason, as the refusal when nothing else is planned
+    if step.teams:
+        if _has_teams_room(event):
+            cannot.append(f'“{event.title}” already has a Microsoft Teams meeting.')
+        elif teams := _teams_args(step.title or event.title, [user], cannot):
+            steps.append(_step(len(steps) + 1, 'add_teams_room', {'event_id': event.id, **teams}))
+    if step.reminder:
+        reminder = _reminder_args(step.reminder, event, start, user, settings, person, questions, cannot)
+        if reminder:
+            steps.append(_step(len(steps) + 1, 'add_reminder', {'event_id': event.id, **reminder}))
+    notes += cannot
+
     if not steps and not questions:
-        return Resolved(refusal=NOTHING_TO_CHANGE)
+        return Resolved(refusal=' '.join(cannot) or NOTHING_TO_CHANGE)
     if change.get('start_dt'):
         notes.extend(_clashes(user, [user], start, end))
     _describe(steps)
     return Resolved(steps=steps, questions=questions,
                     summary=' '.join([f'Change the meeting “{event.title}” ({format_dt(event.start_dt, tz)}).', *notes]))
+
+
+def _has_teams_room(event):
+    from indico.modules.vc.models.vc_rooms import VCRoomEventAssociation, VCRoomStatus
+
+    from indico_assistant.services.actions.teams import teams_plugin
+
+    plugin = teams_plugin()
+    return plugin is not None and any(
+        a.vc_room.type == plugin.service_name and a.vc_room.status == VCRoomStatus.created
+        for a in VCRoomEventAssociation.find_for_event(event, include_hidden=True))
+
+
+def _reminder_args(draft, event, start, user, settings, person, questions, cannot):
+    """add_reminder's args for an existing meeting (``start``: its start, after any move in the same plan), or
+    None with a question or a reason. Nobody named: the speakers and the registered participants, as the
+    reminders page offers them; the plan shows who gets it before anything is sent."""
+    tz = user_timezone(user)
+    if draft.at is not None:
+        day = resolve_date(draft.at.date, local_today(user)) if draft.at.date else start.astimezone(tz).date()
+        at = resolve_time(draft.at.time)
+        if day is None or at is None:
+            questions.append({'id': 'reminder_time', 'kind': 'text',
+                              'text': 'When should the reminder be sent (day and time)?'})
+            return None
+        minutes = int((start - tz.localize(datetime.combine(day, at))).total_seconds() // 60)
+    else:
+        minutes = draft.minutes_before or settings['actions_reminder_minutes']
+    if minutes <= 0:
+        cannot.append('A reminder must go out before the meeting starts.')
+        return None
+    if start - timedelta(minutes=minutes) <= now_utc():
+        cannot.append(f'It is too late for that reminder: “{event.title}” starts before it would be sent.')
+        return None
+    people = [who for who in map(person, draft.people) if who is not None]
+    nobody = not (draft.participants or draft.speakers or people)
+    return {'minutes_before': minutes, 'recipients': sorted({p.email for p in people if p.email}),
+            'send_to_speakers': draft.speakers or nobody, 'send_to_participants': draft.participants or nobody}
 
 
 # --- attaching material (US9) --------------------------------------------------------------------------

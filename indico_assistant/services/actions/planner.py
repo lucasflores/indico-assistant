@@ -59,6 +59,8 @@ Rules:
   material, duration), ONLY from the items in <context> (source_ref = the item's id, e.g. "event:12") or
   from earlier messages of this chat (source_ref "chat"). Nothing useful there: no suggestions.
 - "Undo that", "revert it", "take that back": decision "new_request" with an undo step.
+- Adding a Teams meeting or a reminder to a meeting that already exists is a change_meeting (teams,
+  reminder); create_meeting is only for a new meeting.
 - reply: one or two plain sentences to the user.
 """
 
@@ -194,6 +196,7 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
     said = raw.lower()
     for step in draft.steps:
         refs = [*getattr(step, 'people', ()), *(s.speaker for s in getattr(step, 'slots', ()) if s.speaker),
+                *getattr(getattr(step, 'reminder', None), 'people', ()),
                 *(c.speaker for c in getattr(step, 'change_slots', ()) if c.speaker),
                 *(s.speaker for s in getattr(step, 'add_slots', ()) if s.speaker)]
         for ref in refs:
@@ -205,10 +208,13 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None):
             step.description = None
         if getattr(step, 'url', None) and step.url.lower() not in said:
             step.url = None
+        if hasattr(step, 'teams'):
+            step.teams = step.teams and 'teams' in said
+        if getattr(step, 'reminder', None) and 'remind' not in said:
+            step.reminder = None  # (a change the user did not ask for: an email to everyone)
         if not isinstance(step, CreateMeeting):
             continue
         step.links = [url for url in step.links if url.lower() in said]  # (accepted suggestions are in ``earlier``)
-        step.teams = step.teams and 'teams' in said
         if not any(word in said for word in TALK_WORDS):
             step.slots = []
         if step.category and not _category_named(step.category, said, raw):
@@ -327,6 +333,8 @@ def _only_what_the_user_said(draft, message, open_plan=None):
     earlier = [s.get('when') or s.get('move_to') or {} for s in ((open_plan.draft or {}).get('steps') or [])
                ] if open_plan is not None else []
     for n, step in enumerate(draft.steps):
+        if (reminder := getattr(step, 'reminder', None)) is not None and reminder.at is not None:
+            reminder.at.date = relative if relative is not None else (reminder.at.date if names_a_day else None)
         when = step.when if isinstance(step, CreateMeeting) else getattr(step, 'move_to', None)
         if when is None:
             continue

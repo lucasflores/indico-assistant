@@ -96,3 +96,23 @@ def test_a_plan_too_big_is_the_planners_to_explain(dummy_user, chat, monkeypatch
     draft = {"decision": "new_request", "steps": [{"action": "change_meeting", "meeting": "it"}]}
     result = _turn(dummy_user, chat, llm_returning(**draft))
     assert not result.cannot_plan and "at most 25 steps" in result.reply
+
+
+def test_teams_and_a_reminder_only_when_the_user_asked_for_them():
+    """(spec 022) the model may add them to a change: kept only when the user's words ask for them"""
+    def draft():
+        return PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+            {'action': 'change_meeting', 'meeting': 'it', 'title': 'Sync', 'teams': True,
+             'reminder': {'minutes_before': 15}}]})
+    kept = planner._only_what_the_user_asked_for(draft(), ['Add a Teams meeting and a reminder to it'], None)
+    assert kept.steps[0].teams and kept.steps[0].reminder is not None
+    dropped = planner._only_what_the_user_asked_for(draft(), ['Rename it to Sync'], None)
+    assert not dropped.steps[0].teams and dropped.steps[0].reminder is None
+
+
+def test_a_reminders_day_is_the_one_the_user_said():
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'change_meeting', 'reminder': {'at': {'date': '2026-10-06', 'time': '9am'}}}]})
+    assert planner._only_what_the_user_said(draft, 'remind them tomorrow at 9am').steps[0].reminder.at.date == 'tomorrow'
+    draft.steps[0].reminder.at.date = '2026-10-06'
+    assert planner._only_what_the_user_said(draft, 'remind them at 9am').steps[0].reminder.at.date is None
