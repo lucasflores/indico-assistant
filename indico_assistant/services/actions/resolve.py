@@ -746,7 +746,9 @@ def _change_meeting(step, user, settings, chat_session_id, page_event_id=PAGE_FR
 
     cannot = []  # asked for, but not possible: the reason, as the refusal when nothing else is planned
     if step.teams:
-        if _has_teams_room(event):
+        from indico_assistant.services.actions.teams import has_teams_room
+
+        if has_teams_room(event):
             cannot.append(f'“{event.title}” already has a Microsoft Teams meeting.')
         elif teams := _teams_args(step.title or event.title, [user], cannot):
             steps.append(_step(len(steps) + 1, 'add_teams_room', {'event_id': event.id, **teams}))
@@ -763,17 +765,6 @@ def _change_meeting(step, user, settings, chat_session_id, page_event_id=PAGE_FR
     _describe(steps)
     return Resolved(steps=steps, questions=questions,
                     summary=' '.join([f'Change the meeting “{event.title}” ({format_dt(event.start_dt, tz)}).', *notes]))
-
-
-def _has_teams_room(event):
-    from indico.modules.vc.models.vc_rooms import VCRoomEventAssociation, VCRoomStatus
-
-    from indico_assistant.services.actions.teams import teams_plugin
-
-    plugin = teams_plugin()
-    return plugin is not None and any(
-        a.vc_room.type == plugin.service_name and a.vc_room.status == VCRoomStatus.created
-        for a in VCRoomEventAssociation.find_for_event(event, include_hidden=True))
 
 
 def _reminder_args(draft, event, start, user, settings, person, questions, cannot):

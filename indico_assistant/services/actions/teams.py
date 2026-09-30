@@ -31,6 +31,14 @@ def tenant_email(user):
     return find_tenant_email(user)
 
 
+def has_teams_room(event):
+    """Whether ``event`` already has a Microsoft Teams meeting (the assistant adds one, never a second)."""
+    plugin = teams_plugin()
+    return plugin is not None and any(
+        a.vc_room.type == plugin.service_name and a.vc_room.status == VCRoomStatus.created
+        for a in VCRoomEventAssociation.find_for_event(event, include_hidden=True))
+
+
 class AddTeamsRoomArgs(ActionArgs):
     event_id: int
     name: str
@@ -54,6 +62,8 @@ class AddTeamsRoom(Action):
             return reason
         if not plugin.can_manage_vc_rooms(user, event):  # the plugin's own list; it does not depend on the event
             return 'You are not allowed to create Teams meetings'
+        if event is not None and has_teams_room(event):  # (spec 022: the planner refuses a second one)
+            return 'This meeting already has a Microsoft Teams meeting'
         return None
 
     def check(self, user, args):

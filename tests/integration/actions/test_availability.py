@@ -1,7 +1,9 @@
 """What the assistant says it can do matches what it will do (spec 022, FR-009).
 
 For every action: when ``available()`` gives a reason, the action's own ``check()`` refuses too. On an event page the
-two agree exactly; without one, a reason means no event or category the chat can reach allows it.
+two agree exactly; without one, a reason means no event or category the chat can reach allows it. Two exceptions,
+where the check follows Indico's page and the resolver refuses: a reminder for a meeting that has started, and a
+second Teams meeting.
 """
 
 from datetime import timedelta
@@ -45,6 +47,7 @@ def test_every_action_has_a_summary_and_availability():
 def test_on_an_event_it_agrees_with_the_check(action_allows, people, dummy_event, dummy_contribution, teams, name,
                                               role, locked):
     dummy_event.is_locked = locked
+    dummy_event.start_dt, dummy_event.end_dt = LATER, LATER + timedelta(hours=1)  # (rights, not timing)
     user = people[role]
     reason = _available(name, user, event=dummy_event)
     allowed = action_allows(ACTIONS[name], user, **ON_THE_EVENT[name](dummy_event, dummy_contribution))
@@ -114,3 +117,19 @@ def test_without_an_event_page_a_locked_meeting_does_not_count(people, dummy_eve
     """(Copilot, PR #15) the checks refuse every change to a locked meeting"""
     dummy_event.is_locked = True
     assert _available(name, people['manager']) == 'The meetings you manage are locked'
+
+
+def test_what_the_resolver_refuses_is_not_offered(people, dummy_event, teams):
+    """(live run, 2026-09-30) the meeting had started and already had a Teams room: the answer offered both, the
+    planner refused both"""
+    from indico.modules.vc.models.vc_rooms import VCRoom, VCRoomEventAssociation, VCRoomStatus
+
+    manager = people['manager']
+    dummy_event.start_dt, dummy_event.end_dt = now_utc() - timedelta(hours=1), now_utc()
+    assert 'already started' in _available('add_reminder', manager, event=dummy_event)
+    dummy_event.start_dt, dummy_event.end_dt = LATER, LATER + timedelta(hours=1)
+    assert _available('add_reminder', manager, event=dummy_event) is None
+    assert _available('add_teams_room', manager, event=dummy_event) is None
+    room = VCRoom(name='Sync', type='teams', status=VCRoomStatus.created, created_by_user=manager, data={})
+    VCRoomEventAssociation(vc_room=room, linked_event=dummy_event, data={})
+    assert 'already has a Microsoft Teams meeting' in _available('add_teams_room', manager, event=dummy_event)
