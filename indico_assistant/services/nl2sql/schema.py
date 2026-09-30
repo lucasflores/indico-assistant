@@ -91,6 +91,7 @@ class SchemaContext:
         # Fallback for general queries
         "general_info": ["events.events"],
         "out_of_scope": [],
+        "knowledge": [],  # spec 022: answered from the user guide, never with SQL
     }
 
     # JOIN hints for multi-table queries (T042)

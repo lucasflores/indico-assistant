@@ -74,3 +74,19 @@ def test_without_the_guide_the_answer_still_comes():
 def test_a_failed_call_gives_a_plain_message():
     result = _answer(FakeLLM(success=False))
     assert result.failed and result.text == knowledge.NOT_ANSWERED and result.offer is None
+
+
+def test_the_prompt_carries_the_never_list_and_each_reason():
+    """Spec 022 US2: the model is told what it can't do for this user, and why, every time."""
+    from dataclasses import replace
+
+    from indico_assistant.services.knowledge.capabilities import NEVER
+
+    caps = replace(CAPS, can=[], cannot=[("add a Microsoft Teams meeting to a meeting",
+                                          "You cannot manage the event “Sync”")])
+    llm = FakeLLM(reply="No.")
+    knowledge.answer("Can you add a Teams meeting?", [], llm=llm, caps=caps, pages=PAGES, guide=FakeGuide(),
+                     base_url=BASE)
+    prompt = llm.asked[0]["prompt"]
+    assert "You cannot manage the event “Sync”" in prompt and all(item in prompt for item in NEVER)
+    assert prompt.index("## What I can do") > prompt.index("## Indico's user guide")  # nearest the question

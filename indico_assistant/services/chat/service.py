@@ -178,11 +178,17 @@ class ChatService:
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
         planned = self._plan(user, session.id, message, context, waiting_plan, event_id) if waiting_plan else None
+        route, knowledge = "change", None
         if planned is None:
             response_text, metadata = self._process_with_nl2sql(
                 message, context, event_id, user_id=viewer.id, auth_user=viewer
             )
-            if metadata.get("write_request"):
+            route = "data"
+            if metadata.get("knowledge_request"):  # spec 022: "how do I…" / "can you…"
+                knowledge = self._knowledge(user, message, context, event_id)
+                response_text, metadata, route = knowledge.text, {}, "knowledge"
+            elif metadata.get("write_request"):
+                route = "change"
                 planned = self._plan(user, session.id, message, context, None, event_id)
                 if planned is None:  # the planner found no change in it after all: never an empty reply
                     from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
@@ -190,6 +196,8 @@ class ChatService:
         plan = None
         if planned is not None:
             response_text, metadata, plan = planned
+        metadata = {**(metadata or {}), "route": _route_record(route, knowledge,
+                                                               fallback="classifier" if knowledge else None)}
 
         assistant_msg = self._session_manager.add_assistant_message(
             self._session_manager.get_session(session_id), response_text, metadata,
@@ -203,6 +211,27 @@ class ChatService:
             metadata=metadata or {},
             plan=plan,
         )
+
+    def _knowledge(self, user, message, context, page_event_id=None):
+        """The knowledge answer (spec 022): the capability and page lists are built as the user, like the planner's
+        permission checks; the model call itself needs no Indico state."""
+        from indico.modules.events import Event
+
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.actions.context import acting_as
+        from indico_assistant.services.knowledge import answer as knowledge
+        from indico_assistant.services.knowledge.capabilities import capability_list
+        from indico_assistant.services.knowledge.guide import get_guide
+        from indico_assistant.services.knowledge.pages import page_list
+
+        plugin = AssistantPlugin.instance
+        settings = plugin.settings.get_all()
+        event = Event.get(page_event_id, is_deleted=False) if page_event_id else None
+        history = context[:-1] if context and context[-1].get("content") == message else context
+        with acting_as(user):
+            caps, pages = capability_list(user, event, settings), page_list(user, event)
+        return knowledge.answer(message, history, llm=plugin.llm_service, caps=caps, pages=pages, guide=get_guide(),
+                                base_url=settings.get("base_url") or "", event=event)
 
     def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None):
         """The chat-action planner's answer, or None when the message turns out to be a question."""
@@ -508,6 +537,7 @@ class ChatService:
                 "pipeline_error": error_payload,
                 "suggested_followups": getattr(result, 'suggested_followups', []),
                 "write_request": getattr(result, 'write_request', False),
+                "knowledge_request": getattr(result, 'knowledge_request', False),
             })
 
             return response_text, metadata
@@ -545,3 +575,18 @@ def get_chat_service() -> ChatService:
     if _chat_service is None:
         _chat_service = ChatService()
     return _chat_service
+
+
+def _route_record(route, knowledge=None, *, gate=None, fallback=None):
+    """How this answer was reached (spec 022, FR-020): kept in its metadata, so routing can be audited on real
+    traffic. ``gate``: the knowledge gate's decision, when it ran."""
+    return {
+        "route": route,
+        "gate": getattr(gate, "name", None),
+        "gate_score": getattr(gate, "score", None),
+        "gate_skipped": gate is None or bool(gate.skipped),
+        "fallback": fallback,
+        "offer": knowledge.offer if knowledge else None,
+        "guide_commit": knowledge.guide_commit if knowledge else None,
+        "failed": bool(knowledge.failed) if knowledge else False,
+    }

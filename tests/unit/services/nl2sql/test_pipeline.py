@@ -346,6 +346,27 @@ class TestNL2SQLPipelineWriteRequest:
         pipeline._generator.generate.assert_not_called()
 
 
+class TestNL2SQLPipelineKnowledge:
+    """Spec 022: a knowledge question gets the knowledge answer, with no SQL at all."""
+
+    def test_knowledge_stops_after_classification(
+        self,
+        pipeline: NL2SQLPipeline,
+        mock_classification: MagicMock,
+        mock_classification_response: MagicMock,
+    ) -> None:
+        mock_classification.intent = "knowledge"
+        mock_classification_response.data = mock_classification
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock()
+
+        result = pipeline.process("How do I lock my event?", user_id=1)
+
+        assert result.success is True and result.knowledge_request is True and result.generated_sql is None
+        assert result.write_request is False
+        pipeline._generator.generate.assert_not_called()
+
+
 class TestNL2SQLPipelineOutOfScope:
     """Test handling of out-of-scope queries."""
 
