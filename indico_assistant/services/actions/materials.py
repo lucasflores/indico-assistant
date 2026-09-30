@@ -39,7 +39,9 @@ class AddReminder(Action):
     summary = 'add an email reminder before a meeting'
 
     def available(self, user, event=None, category=None):
-        return _manage_available(user, event)
+        # (a started meeting: the check allows it, as the reminders page does; the resolver refuses it, so the
+        # capability list does not offer it)
+        return _manage_available(user, event) or (_started(event) if event is not None else None)
 
     def check(self, user, args):
         return _manage_refusal(Event.get(args.event_id, is_deleted=False), user)
@@ -76,6 +78,11 @@ class AddReminder(Action):
         reminder = EventReminder.get(result['created']['reminder_id'])
         if reminder is not None and not reminder.is_sent:
             db.session.delete(reminder)
+
+
+def _started(event):
+    """(spec 022) a reminder is for a meeting still to come: the capability list offers what the planner plans"""
+    return 'The meeting has already started, so it is too late for a reminder' if event.start_dt <= now_utc() else None
 
 
 class _AttachArgs(ActionArgs):
