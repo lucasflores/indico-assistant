@@ -40,6 +40,14 @@ class CreateEvent(Action):
 
     name = 'create_event'
     Args = CreateEventArgs
+    summary = 'create a meeting (title, time, category, invited people, talks with speakers)'
+
+    def available(self, user, event=None, category=None):
+        from indico_assistant.services.actions.resolve import creatable_categories
+
+        if category is not None:
+            return None if category.can_create_events(user) else f'You cannot create events in {category_path(category)}'
+        return None if creatable_categories(user) else 'You cannot create events in any category on this Indico'
 
     def check(self, user, args):
         category = Category.get(args.category_id, is_deleted=False)
@@ -90,6 +98,20 @@ class ProposeEvent(Action):
 
     name = 'propose_event'
     Args = ProposeEventArgs
+    summary = 'propose a meeting in a moderated category, for its managers to approve'
+
+    def available(self, user, event=None, category=None):
+        from indico_assistant.services.actions.resolve import creatable_categories, proposable_categories
+
+        if not can_create_unlisted_events(user):
+            return 'Proposing events needs unlisted events, which are not enabled for you on this Indico'
+        if category is not None:
+            if category.can_create_events(user) or category.can_propose_events(user):
+                return None
+            return f'You cannot propose events in {category_path(category)}'
+        if proposable_categories(user) or creatable_categories(user):
+            return None
+        return 'There is no category where you may propose events'
 
     def check(self, user, args):
         category = Category.get(args.category_id, is_deleted=False)
@@ -154,6 +176,12 @@ class UpdateEvent(Action):
 
     name = 'update_event'
     Args = UpdateEventArgs
+    summary = 'change a meeting: move it, rename it, change its description'
+
+    def available(self, user, event=None, category=None):
+        from indico_assistant.services.actions.contributions import _manage_available
+
+        return _manage_available(user, event)
 
     def check(self, user, args):
         from indico_assistant.services.actions.contributions import _manage_refusal
@@ -226,6 +254,10 @@ class DeleteCreated(Action):
 
     name = 'delete_created'
     Args = DeleteCreatedArgs
+    summary = 'undo what it made or changed in this chat'
+
+    def available(self, user, event=None, category=None):
+        return None  # it only ever undoes its own changes from this chat; check() looks at the one asked for
 
     def check(self, user, args):
         from indico_assistant.services.actions.contributions import _manage_refusal

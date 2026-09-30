@@ -27,12 +27,23 @@ class ActionArgs(BaseModel):
 class Action:
     name: ClassVar[str]
     Args: ClassVar[type[ActionArgs]]
+    #: What it does, as one plain phrase for the capability list (spec 022): "create a meeting (...)".
+    summary: ClassVar[str]
     # Runs after every Indico step (it talks to another system, e.g. Teams); it undoes itself through
     # on_rollback if the plan fails later.
     external: ClassVar[bool] = False
 
     def check(self, user, args):
         """Why ``user`` may not do this (the Indico page's reason), or None."""
+        raise NotImplementedError
+
+    def available(self, user, event=None, category=None):
+        """Why ``user`` cannot do this at all here, or None (the capability list, spec 022 FR-009).
+
+        ``event``: on that event's page; ``category``: in that category; neither: anywhere the chat can reach, i.e.
+        the meetings it finds by name (from a month ago on) and the categories it offers. Built from the helpers
+        ``check`` uses, so a reason here means ``check`` refuses too (tests/integration/actions/test_availability.py).
+        """
         raise NotImplementedError
 
     def describe(self, args):
