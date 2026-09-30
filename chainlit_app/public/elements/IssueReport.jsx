@@ -14,8 +14,10 @@ export default function IssueReport() {
   const [kind, setKind] = useState(props.category || "")
   const [text, setText] = useState(props.text || "")
   const [attach, setAttach] = useState(!!props.can_attach)
-  const [state, setState] = useState("draft") // draft | sending | sent | error
-  const [result, setResult] = useState(null)
+  // "sent" is kept in the element's props (updateElement): Chainlit redraws the messages after a new chat's first
+  // action, and local state alone came back as an empty draft (found live)
+  const [state, setState] = useState(props.sent ? "sent" : "draft") // draft | sending | sent | error
+  const [result, setResult] = useState(props.sent || null)
   const busy = state === "sending"
 
   async function send() {
@@ -28,8 +30,15 @@ export default function IssueReport() {
                    answer_id: props.answer_id },
       }))?.response
     } catch (e) { /* said below */ }
-    setResult(res && res.ok ? res : { message: (res && res.message) || FAILED })
-    setState(res && res.ok ? "sent" : "error") // on an error the text stays, to send again
+    if (res && res.ok) {
+      const sent = { report_id: res.report_id, url: res.url }
+      updateElement({ ...props, sent })
+      setResult(sent)
+      setState("sent")
+    } else {
+      setResult({ message: (res && res.message) || FAILED })
+      setState("error") // the text stays, to send again
+    }
   }
 
   if (state === "sent") {
