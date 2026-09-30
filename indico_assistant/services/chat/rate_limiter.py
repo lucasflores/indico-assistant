@@ -31,6 +31,7 @@ class RateLimitResult:
 RATE_LIMITS = {
     'chat': ('10 per minute', '200 per day'),
     'read': ('200 per minute',),
+    'report': ('5 per minute', '20 per day'),  # spec 021: counted only once a report is stored (allowed + count)
 }
 
 
@@ -51,6 +52,20 @@ class RateLimiter:
                 retry_after = int(limiter.get_reset_delay(user_id).total_seconds())
                 return RateLimitResult(allowed=False, remaining=0, retry_after=max(1, retry_after))
         return RateLimitResult(allowed=True, remaining=-1, retry_after=0)
+
+    def allowed(self, user_id: int, endpoint_type: str) -> bool:
+        """Whether every limit of ``endpoint_type`` has room left, counting nothing."""
+        return all(limiter.test(user_id) for limiter in self._limiters[endpoint_type])
+
+    def count(self, user_id: int, endpoint_type: str) -> None:
+        """Count one use against every limit of ``endpoint_type``."""
+        for limiter in self._limiters[endpoint_type]:
+            limiter.hit(user_id)
+
+    def retry_after(self, user_id: int, endpoint_type: str) -> int:
+        """Seconds until the longest-refusing limit of ``endpoint_type`` lets a request through again."""
+        return max([1] + [int(limiter.get_reset_delay(user_id).total_seconds())
+                          for limiter in self._limiters[endpoint_type] if not limiter.test(user_id)])
 
 _rate_limiter: RateLimiter | None = None
 
