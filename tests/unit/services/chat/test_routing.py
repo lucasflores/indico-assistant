@@ -295,3 +295,46 @@ def test_a_failure_building_the_knowledge_lists_is_a_plain_message():
         assistant.instance = plugin
         result = service._knowledge(MagicMock(), "How do I lock it?", [])
     assert result.failed and result.text == knowledge.NOT_ANSWERED
+
+
+# --- spec 021 R4: which answers carry the report offer (the problem flag) ----------------------------------
+
+def stored(s):
+    return s.manager.add_assistant_message.call_args.args[2]
+
+
+def test_the_routers_refusal_carries_the_offer(routed):
+    run, s = routed
+    s.decide.return_value = jev("out_of_scope")
+    run("What's the weather in Geneva?")
+    assert stored(s)["problem"] == "out_of_scope"
+
+
+@pytest.mark.parametrize("where", ["knowledge", "chat"])
+def test_a_failed_answer_carries_the_offer_and_a_good_one_does_not(routed, where):
+    run, s = routed
+    s.decide.return_value = jev(where)
+    run("How do I lock my event?")
+    assert "problem" not in stored(s)
+    getattr(s, where).return_value = KnowledgeResult("I could not answer that.", failed=True)
+    run("How do I lock my event?")
+    assert stored(s)["problem"] == "failed"
+
+
+def test_the_knowledge_answer_after_the_planner_gave_up_carries_no_offer(routed):
+    # the planner's not_understood is dropped with its reply: the user gets the knowledge answer instead
+    run, s = routed
+    s.decide.return_value = jev("change")
+    s.plan.return_value = ("I could not work out what to change.",
+                           {"plan_id": None, "cannot_plan": True, "problem": "not_understood"}, None)
+    result, _ = run("Can you register me for this event?")
+    assert result.response == KNOWLEDGE.text and "problem" not in stored(s)
+
+
+def test_with_a_waiting_plan_the_planners_problem_stands(routed):
+    run, s = routed
+    s.decide.return_value = jev("change")
+    s.plan.return_value = ("I could not work out what to change.",
+                           {"plan_id": None, "cannot_plan": True, "problem": "not_understood"}, None)
+    run("hmm, make it better", waiting_plan=MagicMock())
+    assert stored(s)["problem"] == "not_understood"
