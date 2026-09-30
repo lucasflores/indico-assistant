@@ -275,7 +275,9 @@ No report exists until Send is pressed.
 - **SC-002**: After a thumbs down, the offer appears in 10 of 10 tries. It appears under 10 of 10 answers that failed
   or were refused. In the same runs, zero reports exist that the user did not send.
 - **SC-003**: Automated tests show that a non-admin can neither read another user's report nor reach the admin page
-  or its API, by page or by API, and that the refusal is the same for a report that does not exist.
+  or its API, by page or by API, and that the refusal is the same for a report that does not exist. They also
+  show that a report naming another user's conversation, or an answer from a different conversation, is refused
+  and stores nothing (FR-003a).
 - **SC-004**: Automated tests show that the copy stays unchanged when the conversation is continued, deleted or
   purged. They also show that an unticked report stores nothing from the conversation, and that no copy holds an
   email or IP address from the query log.
