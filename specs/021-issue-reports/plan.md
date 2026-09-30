@@ -36,8 +36,9 @@ no build step) for the page script. JSX for the custom element, which Chainlit c
 gains the `problem` and `evidence` keys, with no migration.
 **Testing**:
 
-- pytest with Indico fixtures, run as `python -m pytest` from the worktree (R13). The baseline there is 1207
-  passed, 1 skipped;
+- pytest with Indico fixtures, run as `python -m pytest` from the worktree (R13). The baseline there, over
+  `tests/unit tests/contract tests/integration`, is 1688 passed, 16 skipped, and 7 failed: the 7 are all in
+  `tests/integration/test_chat_citations.py`, and were failing before this feature;
 - the Chainlit app's pytest suite (22 passed), run with the main checkout's Chainlit venv;
 - puppeteer, with a new `tests/browser/reports.mjs`, plus the seven existing checks.
 
@@ -126,12 +127,17 @@ chainlit_app/
 └── public/elements/IssueReport.jsx          # NEW the form (contracts/panel.md)
 
 tests/
-├── unit/test_reports_service.py             # NEW the copy, idempotency, transitions, retention, merge
-├── unit/test_answer_evidence.py             # NEW problem and evidence on answers; PlanTurn.problem
-├── contract/test_reports_api.py             # NEW every endpoint × owner, other user, admin, missing; CSRF
-├── unit/test_report_pages.py                # NEW the pages render; menus; stale save; delete
+├── integration/reports/                     # NEW real rows (Indico's temporary test database), like tests/integration/chat/
+│   ├── test_model.py                        #   constraints, defaults
+│   ├── test_create.py                       #   POST /reports: the copy, idempotency, ownership, limits, CSRF
+│   ├── test_own.py                          #   the user's list, view, delete
+│   ├── test_admin.py                        #   triage: list, filters, save, stale, transitions
+│   └── test_pages.py                        #   page access, menus, delete confirmation, stale save
+├── unit/test_answer_evidence.py             # NEW trace fields, evidence and problem on answers; PlanTurn.problem
+├── unit/tasks/test_retention.py             # + the reports row
+├── unit/services/chat/test_rate_limiter.py  # + allowed() / count()
 └── browser/reports.mjs                      # NEW SC-001, SC-002
-chainlit_app/tests/test_reports.py           # NEW the window message, the feedback hook, offers, submit
+chainlit_app/tests/test_reports.py           # NEW the window message, the form callbacks, the feedback hook, offers
 ```
 
 **Structure Decision**: the existing single plugin layout. The JSON RHs and the page RHs are separate modules
