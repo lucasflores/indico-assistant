@@ -180,3 +180,11 @@ def test_the_planners_answer_carries_its_cannot_plan_flag():
         reply, metadata, plan = service._plan(MagicMock(), uuid4(), "Can you book a room?", [], None)
     assert (reply, metadata, plan) == ("I cannot do that from the chat yet.", {"plan_id": None, "cannot_plan": True}, None)
 
+
+
+def test_an_unknown_data_intent_is_recorded_as_the_classifiers(routed):
+    run, s = routed
+    s.decide.return_value = jev("data", None)
+    result, route = run("Who speaks at Q3 planning?")
+    assert result.response == "An answer" and route["route"] == "data" and route["fallback"] == "classifier"
+    assert s.nl2sql.call_args.kwargs["intent"] is None

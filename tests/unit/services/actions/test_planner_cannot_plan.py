@@ -77,3 +77,19 @@ def test_exact_replies_to_a_waiting_plan(dummy_user, chat, monkeypatch):
     assert not planner.exact_reply(plan, "yes, but make it 3pm") and not planner.exact_reply(plan, "who is coming?")
     assert not planner.exact_reply(None, "yes")
 
+
+
+def test_an_action_the_admin_switched_off(dummy_user, chat, monkeypatch):
+    step = {"n": 1, "action": "update_event", "args": {}, "refs": {}}  # ON allows create_event only
+    monkeypatch.setattr(resolve, "draft_to_plan", lambda *a, **kw: resolve.Resolved(steps=[step]))
+    draft = {"decision": "new_request", "steps": [{"action": "change_meeting", "meeting": "it"}]}
+    result = _turn(dummy_user, chat, llm_returning(**draft))
+    assert result.cannot_plan and "update_event is not available" in result.reply
+
+
+def test_a_plan_too_big_is_the_planners_to_explain(dummy_user, chat, monkeypatch):
+    steps = [{"n": n, "action": "create_event", "args": {}, "refs": {}} for n in range(1, 27)]
+    monkeypatch.setattr(resolve, "draft_to_plan", lambda *a, **kw: resolve.Resolved(steps=steps))
+    draft = {"decision": "new_request", "steps": [{"action": "change_meeting", "meeting": "it"}]}
+    result = _turn(dummy_user, chat, llm_returning(**draft))
+    assert not result.cannot_plan and "at most 25 steps" in result.reply
