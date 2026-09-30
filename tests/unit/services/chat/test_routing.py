@@ -18,7 +18,7 @@ CANNOT = ("I could not work out what to change.", {"plan_id": None, "cannot_plan
 
 
 def jev(route, intent=None):
-    return Decision(route, intent, False, "score", confidence=0.93)
+    return Decision(route, intent, False, "score", confidence=0.93, intent_confidence=0.71 if intent else None)
 
 
 SKIPPED = Decision(None, None, True, "no key")
@@ -81,7 +81,8 @@ def test_a_data_question_carries_its_intent_and_skips_the_classifier(routed):
     s.decide.return_value = jev("data", "speaker_query")
     result, route = run("Who speaks at Q3 planning?")
     assert result.response == "An answer" and route["route"] == "data" and route["jev"]["intent"] == "speaker_query"
-    assert s.nl2sql.call_args.kwargs["intent"] == "speaker_query" and s.nl2sql.call_args.kwargs["intent_confidence"] == 0.93
+    assert s.nl2sql.call_args.kwargs["intent"] == "speaker_query"
+    assert s.nl2sql.call_args.kwargs["intent_confidence"] == 0.71  # the intent's own confidence, not the route's
 
 
 def test_a_change_goes_to_the_planner_with_the_waiting_plan(routed):
@@ -161,7 +162,9 @@ def test_a_plain_yes_to_an_offer_plans_what_was_offered(routed):
     result, route = run("yes please", waiting_plan=MagicMock(questions=[], suggestions=[], draft={}))
     assert result.plan == {"id": "p1"} and route["route"] == "change" and route["shortcut"] is True
     s.decide.assert_not_called() and s.nl2sql.assert_not_called()
-    assert s.plan.call_args.args[2] == OFFER and s.plan.call_args.args[4] is None
+    # the user's own "yes" and the offer: the planner plans the offer but guards with the user's words
+    assert s.plan.call_args.args[2] == "yes please" and s.plan.call_args.args[6] == OFFER
+    assert s.plan.call_args.args[4] is None
 
 
 def test_any_other_reply_to_an_offer_goes_to_jev_with_both_notes(routed):
@@ -267,3 +270,28 @@ def test_an_unknown_data_intent_is_recorded_as_the_classifiers(routed):
     result, route = run("Who speaks at Q3 planning?")
     assert result.response == "An answer" and route["route"] == "data" and route["fallback"] == "classifier"
     assert s.nl2sql.call_args.kwargs["intent"] is None
+
+
+@pytest.mark.parametrize("jev_says", [SKIPPED, jev("change")])
+def test_a_plain_no_to_an_offer_never_reaches_the_waiting_plan(routed, jev_says):
+    """(fresh review, PR #15) without Jev, or with Jev saying "change", the planner got the no and the plan"""
+    run, s = routed
+    s.manager.offer_before.return_value = OFFER
+    s.decide.return_value = jev_says
+    run("no", waiting_plan=MagicMock(questions=[], suggestions=[], draft={}))
+    assert all(call.args[4] is None for call in s.plan.call_args_list)
+
+
+def test_a_failure_building_the_knowledge_lists_is_a_plain_message():
+    """(fresh review, PR #15) another plugin's menu raising must not leave the user with no reply"""
+    from indico_assistant.services.knowledge import answer as knowledge
+
+    service = ChatService(session_manager=MagicMock(), context_builder=MagicMock())
+    plugin = MagicMock(settings=MagicMock(get_all=MagicMock(return_value={})))
+    with patch("indico_assistant.plugin.AssistantPlugin") as assistant, \
+            patch("indico_assistant.services.actions.context.acting_as"), \
+            patch("indico_assistant.services.knowledge.capabilities.capability_list", side_effect=RuntimeError("menu")), \
+            patch("indico_assistant.services.chat.service.db"):
+        assistant.instance = plugin
+        result = service._knowledge(MagicMock(), "How do I lock it?", [])
+    assert result.failed and result.text == knowledge.NOT_ANSWERED

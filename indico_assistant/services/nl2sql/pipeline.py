@@ -262,8 +262,11 @@ class NL2SQLPipeline:
                 sql = sql.replace(old_pattern, new_pattern)
                 logger.debug(f"[DEBUG] Replaced search term: '{original_keyword}' -> '{keyword}' for broader matching")
         
-        # Add GROUP BY if we have JOINs
-        if ("LEFT JOIN" in sql_upper or "JOIN" in sql_upper) and "GROUP BY" not in sql_upper:
+        # Add GROUP BY if we have JOINs, the ones injected above included (one row per event, not per note or
+        # talk); never around an aggregate, whose meaning it would change
+        sql_upper = sql.upper()
+        aggregate = re.search(r'\b(COUNT|SUM|AVG|MIN|MAX|STRING_AGG|ARRAY_AGG)\s*\(', sql_upper.split(' FROM ')[0])
+        if "JOIN" in sql_upper and "GROUP BY" not in sql_upper and not aggregate:
             order_match = re.search(r'\bORDER\s+BY\b', sql, re.IGNORECASE)
             limit_match = re.search(r'\bLIMIT\b', sql, re.IGNORECASE)
             

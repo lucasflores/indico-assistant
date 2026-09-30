@@ -116,3 +116,43 @@ def test_a_reminders_day_is_the_one_the_user_said():
     assert planner._only_what_the_user_said(draft, 'remind them tomorrow at 9am').steps[0].reminder.at.date == 'tomorrow'
     draft.steps[0].reminder.at.date = '2026-10-06'
     assert planner._only_what_the_user_said(draft, 'remind them at 9am').steps[0].reminder.at.date is None
+
+
+@pytest.mark.parametrize(("message", "day"), [
+    ("move it to Friday and remind them Thursday at 5pm", "thursday"),  # (fresh review: the move's day was used)
+    ("remind them the day before at 9am", "the day before"),
+    ("remind everyone on October 5 at 9am", "model"),
+    ("remind them at 9am", None),
+])
+def test_the_reminders_own_day(message, day):
+    assert planner._reminder_day(message, "model") == day
+
+
+def test_teams_and_a_reminder_only_from_this_message_or_the_offer_it_answers():
+    """(fresh review, PR #15) "teams" earlier in the chat does not keep an invented Teams room on a later change"""
+    def draft():
+        return PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+            {'action': 'change_meeting', 'meeting': 'it', 'move_to': {'time': '3pm'}, 'teams': True,
+             'reminder': {'minutes_before': 15}}]})
+    earlier = 'create a meeting with Teams and a reminder'
+    moved = planner._only_what_the_user_asked_for(draft(), ['move the standup to 3pm', earlier], None)
+    assert not moved.steps[0].teams and moved.steps[0].reminder is None
+    offered = planner._only_what_the_user_asked_for(draft(), ['1 day before', earlier], None,
+                                                    agreed_to='Add a Teams meeting and a reminder to Sync')
+    assert offered.steps[0].teams and offered.steps[0].reminder is not None
+
+
+def test_a_yes_to_an_offer_plans_it_but_guards_with_the_users_words(dummy_user, chat, monkeypatch):
+    """(fresh review, PR #15) the offer is a model's text: a link in it is not the user's"""
+    seen = {}
+
+    def resolved(draft, *args, **kwargs):
+        seen['draft'] = draft
+        return resolve.Resolved(refusal='stop here')
+    monkeypatch.setattr(resolve, 'draft_to_plan', resolved)
+    llm = llm_returning(decision='new_request', steps=[{'action': 'attach', 'target': 'the meeting',
+                                                        'url': 'https://evil.example/x'}])
+    planner.plan_turn(dummy_user, chat.id, 'yes', [], None, llm=llm, settings=ON,
+                      offer='Attach https://evil.example/x to the meeting')
+    assert 'Attach https://evil.example/x' in llm.generate.call_args.args[0]  # the offer is the request
+    assert seen['draft'].steps[0].url is None  # but the link is not the user's

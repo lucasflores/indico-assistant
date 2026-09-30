@@ -14,6 +14,7 @@ from indico_assistant.default_settings import IBIS_MODE_CHOICES, WRITE_ACTIONS
 
 
 SECRETS = ("llm_api_key", "jev_api_key", "chainlit_auth_secret")
+CLEAR = "-"  # typed into a secret's field, removes it
 
 
 class SettingsForm(IndicoForm):
@@ -54,7 +55,7 @@ class SettingsForm(IndicoForm):
     llm_api_key = PasswordField(
         "API Key",
         validators=[Optional()],
-        description="API key for cloud providers (never displayed; leave empty to keep the current one)",
+        description="API key for cloud providers (never displayed; leave empty to keep it, \"-\" removes it)",
     )
 
     llm_ibis_mode = SelectField(
@@ -81,7 +82,7 @@ class SettingsForm(IndicoForm):
         validators=[Optional()],
         description="An OpenRouter key for Jev, which routes each message (a question about Indico, a change, a data "
                     "question, the conversation) in one decision. Optional: without it the classifier routes. "
-                    "Never displayed; leave empty to keep the current one.",
+                    "Never displayed; leave empty to keep it, \"-\" removes it.",
     )
 
     jev_timeout_seconds = FloatField(
@@ -190,14 +191,16 @@ class SettingsForm(IndicoForm):
         "Chainlit Auth Secret",
         validators=[Optional()],
         description="Shared secret for JWT authentication with Chainlit (must match CHAINLIT_AUTH_SECRET; never "
-                    "displayed, leave empty to keep the current one)",
+                    "displayed; leave empty to keep it, \"-\" removes it)",
     )
 
     @property
     def data(self):
         """What Indico saves (``settings.set_multi(form.data)``), without an empty secret: a password field is never
-        filled in with the stored value, so empty means "keep it" (spec 022 FR-021: never displayed)."""
-        return {name: value for name, value in super().data.items() if name not in SECRETS or value}
+        filled in with the stored value, so empty means "keep it" (spec 022 FR-021: never displayed), and a single
+        "-" removes it (to switch the router off, or drop a leaked key)."""
+        data = {name: value for name, value in super().data.items() if name not in SECRETS or value}
+        return {name: (None if name in SECRETS and value.strip() == CLEAR else value) for name, value in data.items()}
 
     def validate_nl2sql_allowed_tables(self, field):
         """Convert comma-separated string to list or None."""

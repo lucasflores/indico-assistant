@@ -183,3 +183,5 @@ def test_an_empty_secret_keeps_the_stored_one(request_context):
     form = SettingsForm(formdata=MultiDict({"jev_api_key": "", "llm_api_key": "sk-new"}), meta={"csrf": False})
     assert "jev_api_key" not in form.data and "chainlit_auth_secret" not in form.data
     assert form.data["llm_api_key"] == "sk-new"
+    cleared = SettingsForm(formdata=MultiDict({"jev_api_key": " - "}), meta={"csrf": False})
+    assert cleared.data["jev_api_key"] is None  # (fresh review) "-" removes it: the router can be switched off

@@ -206,7 +206,7 @@ pip install git+https://github.com/lucasflores/indico-assistant.git
 | API Key | Authentication key: an `sk-ibis-` key for ibis (required) | None |
 | Timeout | Request timeout in seconds | 30 |
 | Max Tokens | Maximum response tokens | 4096 |
-| Router key (Jev) | Optional OpenRouter key for Jev, which routes each message in one decision; without it the classifier routes. Never displayed; leave it empty to keep the stored key | None |
+| Router key (Jev) | Optional OpenRouter key for Jev, which routes each message in one decision; without it the classifier routes. Never displayed; leave it empty to keep the stored key, or enter "-" to remove it | None |
 | Router timeout | Seconds; a slower decision is ignored and the classifier routes instead | 1.5 |
 
 ### Chat Widget Settings

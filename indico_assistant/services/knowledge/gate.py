@@ -78,7 +78,8 @@ class Decision:
     intent: str | None
     skipped: bool
     reason: str  # "score", or why it was skipped: "no key", "timeout", "error", "invalid"
-    confidence: float | None = None
+    confidence: float | None = None  # the route's
+    intent_confidence: float | None = None
     probabilities: dict = field(default_factory=dict)
     ms: int = 0
     cost: float | None = None
@@ -170,6 +171,7 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_htt
         return _skipped("invalid", ms, cost)
     if ms > timeout * 1000:  # late: it does not decide
         return _skipped("timeout", ms, cost)
-    kind = intent.get("choice")
-    return Decision(choice, kind if isinstance(kind, str) and kind in INTENTS else None, False, "score",
-                    confidence=_number(route.get("confidence")), probabilities=probabilities, ms=ms, cost=cost)
+    kind = intent.get("choice") if isinstance(intent.get("choice"), str) and intent.get("choice") in INTENTS else None
+    return Decision(choice, kind, False, "score", confidence=_number(route.get("confidence")),
+                    intent_confidence=_number(intent.get("confidence")) if kind else None,
+                    probabilities=probabilities, ms=ms, cost=cost)

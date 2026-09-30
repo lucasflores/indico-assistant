@@ -310,6 +310,20 @@ def test_a_reminder_to_nobody_named_goes_to_speakers_and_participants(people, ex
     assert named['recipients'] == ['makoto@aithoth.com'] and not named['send_to_participants']
 
 
+def test_a_reminder_to_someone_not_found_asks_rather_than_emailing_everyone(people, existing):
+    """(fresh review, PR #15) a named recipient who cannot be found: a question, not the speakers and participants"""
+    chat, event = existing
+    plan = change(people['manager'], chat, meeting=f'#{event.id}', reminder={'people': ['Nobody Known']})
+    assert plan.questions and not any(s['args'].get('send_to_participants') for s in plan.steps)
+
+
+def test_a_reminder_the_day_before(people, existing):
+    chat, event = existing
+    args = change(people['manager'], chat, meeting=f'#{event.id}',
+                  reminder={'at': {'date': 'the day before', 'time': '9am'}}).steps[0]['args']
+    assert args['minutes_before'] == (START - (START - timedelta(days=1)).replace(hour=9)).total_seconds() // 60
+
+
 def test_a_reminder_at_a_set_time(people, existing):
     chat, event = existing
     tomorrow_9 = (START - timedelta(days=1)).replace(hour=9)

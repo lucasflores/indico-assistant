@@ -54,6 +54,7 @@ def test_one_call_asks_both_questions():
     assert (key, timeout) == ("sk-or-test", 1.5)
     assert (decision.route, decision.intent, decision.skipped, decision.reason) == ("change", "event_query", False, "score")
     assert decision.confidence == 0.9 and decision.cost == 0.00004
+    assert decision.intent_confidence == 0.8  # (fresh review, PR #15) the intent's own, not the route's
 
 
 def test_the_intents_are_the_classifiers_data_intents():

@@ -245,7 +245,8 @@ With the guide index present, no question needs the internet beyond the instance
 **Settings**
 - **FR-021**: New admin settings: the router's Jev key (optional; stored like the other keys, never displayed) and
   its timeout (default 1.5 s), a deadline for the whole call. A secret left empty on the settings form keeps the
-  stored one (a password field is never filled in, so saving any other setting would otherwise clear it).
+  stored one (a password field is never filled in, so saving any other setting would otherwise clear it), and a
+  single "-" removes it.
 
 **The chat answer** (revised 2026-09-30)
 - **FR-023**: A chat answer MUST be one model call through ibis, given the conversation so far. It may use general

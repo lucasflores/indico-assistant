@@ -773,7 +773,9 @@ def _reminder_args(draft, event, start, user, settings, person, questions, canno
     reminders page offers them; the plan shows who gets it before anything is sent."""
     tz = user_timezone(user)
     if draft.at is not None:
-        day = resolve_date(draft.at.date, local_today(user)) if draft.at.date else start.astimezone(tz).date()
+        meeting_day = start.astimezone(tz).date()
+        day = (meeting_day - timedelta(days=1) if draft.at.date == 'the day before'
+               else resolve_date(draft.at.date, local_today(user)) if draft.at.date else meeting_day)
         at = resolve_time(draft.at.time)
         if day is None or at is None:
             questions.append({'id': 'reminder_time', 'kind': 'text',
@@ -789,7 +791,8 @@ def _reminder_args(draft, event, start, user, settings, person, questions, canno
         cannot.append(f'It is too late for that reminder: “{event.title}” starts before it would be sent.')
         return None
     people = [who for who in map(person, draft.people) if who is not None]
-    nobody = not (draft.participants or draft.speakers or people)
+    nobody = not (draft.participants or draft.speakers or draft.people)  # (named but not found: a question, not
+    # everyone)
     return {'minutes_before': minutes, 'recipients': sorted({p.email for p in people if p.email}),
             'send_to_speakers': draft.speakers or nobody, 'send_to_participants': draft.participants or nobody}
 
