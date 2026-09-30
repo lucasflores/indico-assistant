@@ -58,6 +58,22 @@ logger = logging.getLogger(__name__)
 LOCAL_EVENT_DATE = "((e.start_dt AT TIME ZONE 'UTC') AT TIME ZONE e.timezone)::date"
 
 
+def _local_days(sql):
+    """A day is the event's local day, all of it (#4): the model sometimes writes the old UTC form,
+    e.start_dt BETWEEN 'DAY' AND 'DAY' (midnight UTC only) or ... AND 'DAY 23:59:59' (a UTC day, which shifts
+    events near local midnight). Rewritten to the template's local-date filter, for any range of plain dates,
+    whether or not the classifier extracted them."""
+    import re
+
+    return re.sub(
+        r"e\.start_dt\s+BETWEEN\s+'(\d{4}-\d{2}-\d{2})(?:\s+00:00(?::00)?)?'"
+        r"\s+AND\s+'(\d{4}-\d{2}-\d{2})(?:\s+23:59(?::59)?)?'",
+        rf"{LOCAL_EVENT_DATE} BETWEEN '\1' AND '\2'",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
 #: The reply to a message unrelated to Indico and the conversation (also the router's out_of_scope, spec 022)
 OUT_OF_SCOPE_MESSAGE = ("I can only help with questions about events, registrations, and contributions. "
                         "Please ask about something I can help with.")
@@ -165,28 +181,26 @@ class NL2SQLPipeline:
         # Extract the search keyword from entities
         keyword = None
         original_keyword = None
-        if classification.entities:
-            for entity in classification.entities:
-                if entity.type in ('project', 'topic', 'keyword', 'event'):
-                    original_keyword = entity.value
-                    keyword = entity.value
-                    
-                    # For multi-word terms, extract the most distinctive word
-                    words = entity.value.split()
-                    if len(words) > 1:
-                        # Avoid generic terms - prefer the LAST meaningful word (usually the unique identifier)
-                        generic_words = {'project', 'session', 'meeting', 'review', 'standup', 'update', 'call', 'sync', 'the', 'a', 'an'}
-                        
-                        # Try from right to left (last word is usually most specific)
-                        for word in reversed(words):
-                            if word.lower() not in generic_words and len(word) > 2:
-                                keyword = word
-                                logger.debug(f"[DEBUG] Extracted distinctive keyword: '{entity.value}' -> '{keyword}'")
-                                break
-                    break
+        values = [e.value for e in classification.entities or () if e.type in ('project', 'topic', 'keyword', 'event')]
+        if not values and (written := re.search(r"e\.title\s+ILIKE\s+'%([^'%]+)%'", sql, re.IGNORECASE)):
+            values = [written.group(1)]  # routed by Jev (spec 022), with no entities: the term the model searched
+        if values:
+            original_keyword = keyword = values[0]
+            # For multi-word terms, extract the most distinctive word
+            words = keyword.split()
+            if len(words) > 1:
+                # Avoid generic terms - prefer the LAST meaningful word (usually the unique identifier)
+                generic_words = {'project', 'session', 'meeting', 'review', 'standup', 'update', 'call', 'sync',
+                                 'the', 'a', 'an'}
+                # Try from right to left (last word is usually most specific)
+                for word in reversed(words):
+                    if word.lower() not in generic_words and len(word) > 2:
+                        keyword = word
+                        logger.debug(f"[DEBUG] Extracted distinctive keyword: '{original_keyword}' -> '{keyword}'")
+                        break
         
         if not keyword:
-            return sql  # Can't fix without a keyword
+            return _local_days(sql)  # can't broaden the search without a keyword; the days are fixed all the same
         # The keyword comes from the user's question and goes inside '%...%': escape quotes (an apostrophe
         # broke the query and triggered paid corrections) and LIKE wildcards.
         keyword = re.sub(r"[%_\\]", lambda m: "\\" + m.group(0), keyword).replace("'", "''")
@@ -264,19 +278,7 @@ class NL2SQLPipeline:
                 sql = sql[:insert_pos] + group_by_clause + "\n" + sql[insert_pos:]
                 logger.debug("[DEBUG] Added GROUP BY clause")
         
-        # A day is the event's local day, all of it (#4): the model sometimes writes the old UTC form,
-        # e.start_dt BETWEEN 'DAY' AND 'DAY' (midnight UTC only) or ... AND 'DAY 23:59:59' (a UTC day, which
-        # shifts events near local midnight). Rewritten to the template's local-date filter, for any range of
-        # plain dates, whether or not the classifier extracted them.
-        sql = re.sub(
-            r"e\.start_dt\s+BETWEEN\s+'(\d{4}-\d{2}-\d{2})(?:\s+00:00(?::00)?)?'"
-            r"\s+AND\s+'(\d{4}-\d{2}-\d{2})(?:\s+23:59(?::59)?)?'",
-            rf"{LOCAL_EVENT_DATE} BETWEEN '\1' AND '\2'",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        return _local_days(sql)
 
     @contextmanager
     def _span(self, name: str, **kwargs: Any) -> Generator[Any, None, None]:

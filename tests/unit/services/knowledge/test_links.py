@@ -48,5 +48,36 @@ def test_bare_urls():
     assert _check("See https://example.org/made-up for more.") == "See for more."
 
 
+def test_titles_parentheses_and_reference_links():
+    """(review, PR #15) the forms of markdown link the regex missed or broke"""
+    assert _check('[Admin](/admin/ "Admin page") and [Protection](/event/657/manage/protection "P")') == \
+        f"Admin and [Protection]({BASE}/event/657/manage/protection)"
+    assert _check('[evil](https://evil.com/x "t")') == "evil"
+    assert _check("[Wiki](https://en.wikipedia.org/wiki/Pion_(particle)) and more") == "Wiki and more"
+    assert _check("See [the page][1] and [tokens][2].\n\n[1]: /admin/\n[2]: /user/tokens/ \"Tokens\"") == \
+        f"See [the page][1] and [tokens][2].\n\n\n[2]: {BASE}/user/tokens/"
+
+
+def test_an_indico_under_a_path():
+    """(review, PR #15) BASE_URL https://host/indico: paths are relative to it, never doubled"""
+    base = "https://host/indico"
+    assert check("[Manage](/event/657/manage/) [again](https://host/indico/event/657/manage/)", PAGES, GUIDE, base) == \
+        f"[Manage]({base}/event/657/manage/) [again]({base}/event/657/manage/)"
+    from indico_assistant.services.knowledge.links import found_in
+    assert found_in(["[Sync](https://host/indico/event/657/)"], base)[0] == {"/event/657/"}
+
+
 def test_text_without_links_is_unchanged():
     assert _check("Nothing to link here (really).") == "Nothing to link here (really)."
+
+
+def test_menu_paths_are_relative_to_base_url(app, monkeypatch):
+    """(review, PR #15) under BASE_URL https://host/indico, url_for gives /indico/...: the link check adds BASE_URL"""
+    from types import SimpleNamespace
+
+    from indico_assistant.services.knowledge import pages
+
+    entry = SimpleNamespace(url="/indico/event/5/manage/", title="Settings")
+    monkeypatch.setattr("indico.web.menu.build_menu_structure", lambda menu_id, **kwargs: [entry])
+    with app.test_request_context(base_url="https://host/indico"):
+        assert list(pages._menu("top-menu")) == [("", "Settings", "/event/5/manage/")]

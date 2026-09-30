@@ -123,6 +123,14 @@ def test_a_follow_up_searches_the_guide_with_the_question_before_it():
     assert asked[0].startswith("how do I lock an event?\n") and len(asked[0]) <= 24 + knowledge.EARLIER_CHARS
 
 
+def test_never_an_empty_reply():
+    """(review, PR #15) main's guard: an empty reply, or one the link check removes entirely"""
+    for reply in ("", "https://getindico.io/"):
+        result = knowledge.answer("where?", [], llm=FakeLLM(reply=reply), caps=CAPS, pages=PAGES, guide=FakeGuide(),
+                                  base_url=BASE)
+        assert result.text == knowledge.NOT_ANSWERED
+
+
 def test_the_never_line_does_not_deny_teams():
     """(Copilot, PR #15) Teams is outside Indico and supported: only name what it has no access to"""
     text = CAPS.render()

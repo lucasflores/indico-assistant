@@ -173,41 +173,41 @@ class ChatService:
             context = [*context[:at], note, *context[at:]]
         from indico_assistant.services.actions.executor import open_plan
         waiting_plan = open_plan(session.id)
-        # the change the last answer offered: newer than any waiting plan, so a "yes" now agrees to it
-        offer = self._session_manager.offer_before(session.id, message_id)
-        if offer:
-            waiting_plan = None
+        offer = self._session_manager.offer_before(session.id, message_id)  # the change the last answer offered
         db.session.commit()
 
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
-        # Spec 022 (Lucas, 2026-09-30), in order: a plain yes to an offer plans the offered change, and a plain yes,
-        # or one of the plan's own choices, to a waiting plan goes straight to the planner; otherwise one Jev
+        # Spec 022 (Lucas, 2026-09-30), in order: a plain yes to an offer plans the offered change (the offer is
+        # newer than any waiting plan); a plain yes or no, or one of the plan's own choices, to a waiting plan goes
+        # straight to the planner (but a plain no to an offer turns down the offer, not the plan); otherwise one Jev
         # decision gives the route and a data question's kind; without Jev the classifier routes, with the planner
         # first after an offer. A change the planner cannot plan gets the knowledge answer.
-        from indico_assistant.services.actions.planner import AFFIRMATIVE, exact_reply
+        from indico_assistant.services.actions.planner import AFFIRMATIVE, NEGATIVE, exact_reply
         from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 
         decision, fallback, planned, answer, open_for_change = None, None, None, None, waiting_plan
         request, tried = message, False  # what the planner is asked; whether it was already asked
         if offer and AFFIRMATIVE.fullmatch(message):
-            route, request = "change", offer  # (the planner has no plan to confirm: it plans what was offered)
-        elif exact_reply(waiting_plan, message):
+            # the planner is asked for what was offered, as a new request (a bare yes has no plan to confirm)
+            route, request, open_for_change = "change", offer, None
+        elif exact_reply(waiting_plan, message) and not (offer and NEGATIVE.fullmatch(message)):
             route = "change"
         else:
             decision = self._decide(context, plan_waiting=waiting_plan is not None, offer=offer)
             route = decision.route
             if decision.skipped:  # no key, slow, or an error: the classifier routes, as before the router
-                fallback, open_for_change = "classifier", None  # (a change it finds is a new request)
+                open_for_change = None  # (a change the classifier finds is a new request)
                 if waiting_plan or offer:
                     planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
                     tried = waiting_plan is None  # (asked as a new request: asking again would give the same)
                     if planned is not None and waiting_plan is None and planned[1].get("cannot_plan"):
                         planned = None  # not a change after all: routed as if there had been no offer
+                fallback = "planner first" if planned is not None else None  # (the classifier did not run)
                 route = "change" if planned is not None else None
             if route in (None, "data"):
-                if route == "data" and decision.intent is None:
-                    fallback = "classifier"  # Jev's intent was not one of the 11: the classifier picks it
+                if route is None or decision.intent is None:
+                    fallback = "classifier"  # it routes, or (Jev's intent was not one of the 11) picks the kind
                 response_text, metadata = self._process_with_nl2sql(
                     message, context, event_id, user_id=viewer.id, auth_user=viewer,
                     intent=decision.intent if route == "data" else None,
@@ -221,8 +221,8 @@ class ChatService:
                 planned = self._plan(user, session.id, request, context, open_for_change, event_id)
             if planned is None or (planned[1].get("cannot_plan") and open_for_change is None):
                 planned, route, fallback = None, "knowledge", ", ".join(filter(None, (fallback, "planner")))
-        if route == "knowledge":
-            answer = self._knowledge(user, message, context, event_id)
+        if route == "knowledge":  # (after an offer the planner could not plan: about the offer, not the "yes")
+            answer = self._knowledge(user, request, context, event_id)
         elif route == "chat":
             answer = self._chat(message, context)
         plan = None
@@ -260,11 +260,12 @@ class ChatService:
         plugin = AssistantPlugin.instance
         settings = plugin.settings.get_all()
         event = Event.get(page_event_id, is_deleted=False) if page_event_id else None
-        history = context[:-1] if context and context[-1].get("content") == message else context
         with acting_as(user):
             caps, pages = capability_list(user, event, settings), page_list(user, event)
-        return knowledge.answer(message, history, llm=plugin.llm_service, caps=caps, pages=pages, guide=get_guide(),
-                                base_url=self._get_base_url(), event=event)  # (Indico's own address, as citations)
+        db.session.commit()  # plain lists now: no transaction stays open through the guide search and the model call
+        return knowledge.answer(message, _history(context), llm=plugin.llm_service, caps=caps, pages=pages,
+                                guide=get_guide(), base_url=self._get_base_url(),  # (Indico's own address)
+                                event=event)
 
     def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None):
         """The chat-action planner's answer, or None when the message turns out to be a question."""
@@ -273,9 +274,8 @@ class ChatService:
         from indico_assistant.services.actions.planner import plan_turn
 
         plugin = AssistantPlugin.instance
-        history = context[:-1] if context and context[-1].get("content") == message else context
         with acting_as(user):  # resolving names and checking permissions reads Indico as the user
-            turn = plan_turn(user, session_id, message, history, waiting_plan,
+            turn = plan_turn(user, session_id, message, _history(context), waiting_plan,
                              llm=plugin.llm_service, settings=plugin.settings.get_all(), page_event_id=page_event_id)
         if not turn.handled:
             return None
@@ -298,8 +298,8 @@ class ChatService:
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.knowledge.chat import chat_answer
 
-        history = context[:-1] if context and context[-1].get("content") == message else context
-        return chat_answer(message, history, llm=AssistantPlugin.instance.llm_service, base_url=self._get_base_url())
+        return chat_answer(message, _history(context), llm=AssistantPlugin.instance.llm_service,
+                           base_url=self._get_base_url())
 
     def _get_or_create_session(
         self,
@@ -636,6 +636,12 @@ def get_chat_service() -> ChatService:
     return _chat_service
 
 
+def _history(context):
+    """The conversation before the question: the context ends with the question (a page note goes before it). For
+    an accepted offer the planner is asked the offer instead, and the bare "yes" must not stay in its history."""
+    return context[:-1] if context and context[-1].get("role") == "user" else context
+
+
 def _route_of(metadata):
     """The route an NL2SQL pipeline result stands for (with the classifier, it routes as well as answers)."""
     if metadata.get("knowledge_request"):
@@ -658,7 +664,8 @@ def _route_record(route, answer=None, *, decision=None, fallback=None):
             "skipped": decision.skipped, "reason": decision.reason, "ms": decision.ms, "model": decision.name,
         },
         "shortcut": decision is None,
-        "fallback": fallback,  # classifier | planner | "classifier, planner"
+        "fallback": fallback,  # classifier | planner | "classifier, planner" | "planner first" (without Jev, after
+                               # an offer or with a plan waiting: the planner took it, the classifier did not run)
         "offer": answer.offer if answer else None,
         "guide_commit": answer.guide_commit if answer else None,
         "failed": bool(answer.failed) if answer else False,

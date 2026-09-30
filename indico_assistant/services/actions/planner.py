@@ -29,6 +29,9 @@ CONFIRM_HOW = 'To go ahead with the plan as shown, press Confirm or reply "yes".
 # the open plan ("yes, but make it 3pm" is a revision)
 AFFIRMATIVE = re.compile(r"\s*(yes|yep|yeah|ok(ay)?|sure|confirm(ed)?|go ahead|do it|create it|looks good|"
                          r"sounds good)( please)?[.!]*\s*", re.IGNORECASE)
+# ...and a plain no cancels it, also without the model (spec 022: the router never sees a reply to a waiting plan)
+NEGATIVE = re.compile(r"\s*(no|nope|nah|cancel( it| that)?|never ?mind|don'?t|stop)( thanks| thank you)?[.!]*\s*",
+                      re.IGNORECASE)
 
 SYSTEM_PROMPT = """You help a user make changes in Indico (meetings, their talks, reminders, Teams meetings,
 material) from a chat. You do not make changes yourself: you describe what the user asked for, the
@@ -77,19 +80,10 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE, cannot_plan=True)
-    if open_plan is not None:
-        if AFFIRMATIVE.fullmatch(message):
-            return _apply(PlanDraft(decision='confirm'), user, chat_session_id, open_plan, enabled, [], settings,
-                          page_event_id=page_event_id)
-        # a choice offered in the plan, or a suggestion accepted (a button, or typed): no LLM needed
-        if (draft := answered_draft(open_plan, message)) is not None:
-            return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
-                          (open_plan.draft or {}).get('topic', ''), suggestions=open_plan.suggestions,
-                          page_event_id=page_event_id)
-        if (accepted := accepted_suggestion(open_plan, message)) is not None:
-            draft, remaining = accepted
-            return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings,
-                          (open_plan.draft or {}).get('topic', ''), suggestions=remaining, page_event_id=page_event_id)
+    if (short := shortcut(open_plan, message)) is not None:
+        draft, topic, remaining = short
+        return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings, topic, suggestions=remaining,
+                      page_event_id=page_event_id)
     from indico_assistant.services.actions import suggestions as context_suggestions
     context = context_suggestions.build_context(user, message, chat_session_id, history)
     with collect_calls() as calls:
@@ -363,11 +357,27 @@ def _the_day(message):
     return chosen.group(0).lower() if chosen else None
 
 
+def shortcut(open_plan, message):
+    """(draft, topic, suggestions) for a reply to a waiting plan that needs no model to read: a plain yes or no, or one
+    of the plan's own choices or suggestions, as a button sends it or the user types it. None otherwise. The one rule
+    both the chat's router (spec 022, via ``exact_reply``) and ``plan_turn`` use."""
+    if open_plan is None:
+        return None
+    if AFFIRMATIVE.fullmatch(message):
+        return PlanDraft(decision='confirm'), '', ()
+    if NEGATIVE.fullmatch(message):
+        return PlanDraft(decision='cancel'), '', ()
+    topic = (open_plan.draft or {}).get('topic', '')
+    if (draft := answered_draft(open_plan, message)) is not None:
+        return draft, topic, open_plan.suggestions
+    if (accepted := accepted_suggestion(open_plan, message)) is not None:
+        return accepted[0], topic, accepted[1]
+    return None
+
+
 def exact_reply(open_plan, message):
-    """A reply to a waiting plan that needs no model to read (spec 022's shortcut, before the router): a plain yes,
-    or one of the plan's own choices or suggestions, as a button sends it or the user types it."""
-    return open_plan is not None and bool(AFFIRMATIVE.fullmatch(message) or answered_draft(open_plan, message) is not None
-                                          or accepted_suggestion(open_plan, message) is not None)
+    """Whether the planner takes ``message`` without a routing decision (spec 022's shortcut)."""
+    return shortcut(open_plan, message) is not None
 
 
 def accepted_suggestion(open_plan, message):

@@ -13,11 +13,16 @@ Page = namedtuple("Page", "title section path")
 
 
 def _menu(menu_id, **kwargs):
+    """(section, title, path) of a menu's entries, the path relative to BASE_URL: under a BASE_URL with a path of
+    its own (``https://host/indico``) ``url_for`` gives ``/indico/event/5/``, and the link check adds BASE_URL."""
+    from flask import has_request_context, request
     from indico.web.menu import build_menu_structure
 
+    root = request.script_root if has_request_context() else ""
     for entry in build_menu_structure(menu_id, **kwargs):
         for item in getattr(entry, "items", None) or [entry]:
             if (url := getattr(item, "url", None)) and url.startswith("/"):
+                url = url[len(root):] if root and url.startswith(root + "/") else url
                 yield (entry.title if item is not entry else ""), item.title, url
 
 

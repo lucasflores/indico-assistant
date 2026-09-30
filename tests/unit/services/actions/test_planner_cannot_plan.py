@@ -76,6 +76,9 @@ def test_exact_replies_to_a_waiting_plan(dummy_user, chat, monkeypatch):
     assert planner.exact_reply(plan, "Home")  # a button / a typed choice
     assert not planner.exact_reply(plan, "yes, but make it 3pm") and not planner.exact_reply(plan, "who is coming?")
     assert not planner.exact_reply(None, "yes")
+    assert planner.exact_reply(plan, "no") and planner.exact_reply(plan, "Cancel it.") and planner.exact_reply(plan, "never mind")
+    assert not planner.exact_reply(plan, "no, make it 3pm")
+    assert planner.shortcut(plan, "nope")[0].decision == "cancel" and planner.shortcut(plan, "yes")[0].decision == "confirm"
 
 
 

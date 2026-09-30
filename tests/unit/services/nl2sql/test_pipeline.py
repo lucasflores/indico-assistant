@@ -947,6 +947,21 @@ def test_a_day_filter_is_the_events_local_day(pipeline, old, start, end):
     assert "e.start_dt BETWEEN" not in fixed.replace("E.START_DT", "e.start_dt")
 
 
+def test_a_topic_search_routed_by_jev_is_broadened_too(pipeline):
+    """(review, PR #15) Jev gives no entities: the term the model searched is the keyword, and the days are local"""
+    from types import SimpleNamespace
+
+    from indico_assistant.services.nl2sql.pipeline import LOCAL_EVENT_DATE
+
+    sql = ("SELECT e.id, e.title FROM events.events e WHERE e.title ILIKE '%Catalyst%' "
+           "AND e.start_dt BETWEEN '2026-09-01' AND '2026-09-30' ORDER BY e.start_dt")
+    fixed = pipeline._fix_topic_search_sql(sql, SimpleNamespace(entities=[], time_range=None))
+    assert "n.html ILIKE '%Catalyst%'" in fixed and "LEFT JOIN events.contributions c" in fixed
+    assert f"{LOCAL_EVENT_DATE} BETWEEN '2026-09-01' AND '2026-09-30'" in fixed
+    days_only = "SELECT e.id FROM events.events e WHERE e.start_dt BETWEEN '2026-09-01' AND '2026-09-30'"
+    assert LOCAL_EVENT_DATE in pipeline._fix_topic_search_sql(days_only, SimpleNamespace(entities=[], time_range=None))
+
+
 def test_a_filter_with_real_times_is_left_alone(pipeline):
     from types import SimpleNamespace
 

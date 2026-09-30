@@ -40,5 +40,5 @@ def chat_answer(message, history, *, llm, base_url):
         result.failed = True
         return result
     paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
-    result.text = links.check(response.result.reply, sorted(paths), guide, base_url)
+    result.text = links.check(response.result.reply, sorted(paths), guide, base_url) or NOT_ANSWERED  # (never empty)
     return result
