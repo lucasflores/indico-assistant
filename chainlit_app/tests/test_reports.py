@@ -30,6 +30,7 @@ def chat(monkeypatch):
     """What the app sends, with a session that has (or has not) had a first message."""
     sent = {"forms": [], "messages": [], "removed": [], "indico": indico()}
     session = SimpleNamespace(has_first_interaction=True, thread_id="thread-1", token="tok")
+    context = SimpleNamespace(session=session, current_run=None)
     store = {}
 
     class Element:
@@ -52,7 +53,7 @@ def chat(monkeypatch):
 
     monkeypatch.setattr(app_chnlit.cl, "CustomElement", Element)
     monkeypatch.setattr(app_chnlit.cl, "Message", Message)
-    monkeypatch.setattr(app_chnlit.cl, "context", SimpleNamespace(session=session))
+    monkeypatch.setattr(app_chnlit.cl, "context", context)
     monkeypatch.setattr(app_chnlit.cl, "user_session", SimpleNamespace(get=lambda k, d=None: store.get(k, d),
                                                                        set=store.__setitem__))
     monkeypatch.setattr(app_chnlit, "_get_http_client", client)
@@ -149,3 +150,70 @@ async def test_cancel_removes_the_form(chat):
     await app_chnlit.on_window_message({"source": "indico-assistant", "type": "report"})
     await app_chnlit.on_report_cancel(action(form_key=props(chat)["form_key"]))
     assert chat["removed"] == [chat["forms"][0]]
+
+
+# --- US4: the offers (R3, R4) ------------------------------------------------------------------------------
+
+def offers(message):
+    return [a for a in message.actions if a.name == "report_open"]
+
+
+def feedback(value, for_id="a1", comment=None):
+    return SimpleNamespace(value=value, forId=for_id, comment=comment)
+
+
+async def test_a_thumbs_down_offers_a_report_once(chat):
+    await app_chnlit.on_feedback(feedback(0, comment="the date is wrong"))
+    [offer] = offers(chat["messages"][0])
+    assert offer.label == "Report a problem" and offer.payload == {"answer_id": "a1", "category": "wrong_answer",
+                                                                   "text": "the date is wrong"}
+    await app_chnlit.on_feedback(feedback(0))  # the same answer again
+    await app_chnlit.on_feedback(feedback(1, for_id="a2"))  # a thumbs up
+    assert len(chat["messages"]) == 1
+
+
+class Loading:
+    def __init__(self):
+        self.content, self.actions, self.sent = "", [], False
+
+    async def send(self):
+        self.sent = True
+
+
+async def shown(chat, status, body=None, headers=None):
+    message = Loading()
+    await app_chnlit._show_answer(httpx.Response(status, json=body or {}, headers=headers or {}), message,
+                                  chat["indico"][0], "tok")
+    assert message.sent
+    return message
+
+
+async def test_an_answer_with_a_problem_carries_the_offer(chat):
+    message = await shown(chat, 200, {"status": "done", "response": "I can only help with events.",
+                                      "message_id": "m9", "metadata": {"problem": "out_of_scope"}})
+    [offer] = offers(message)
+    assert offer.payload["answer_id"] == "m9" and offer.payload["category"] == "wrong_answer"
+    fine = await shown(chat, 200, {"status": "done", "response": "Two events.", "message_id": "m10", "metadata": {}})
+    assert offers(fine) == []
+
+
+@pytest.mark.parametrize("status,offered", [(202, True), (500, True), (504, True), (429, False), (401, False),
+                                            (403, False), (422, False)])
+async def test_an_error_with_no_answer_offers_a_report_without_one(chat, status, offered):
+    message = await shown(chat, status, {"status": "pending"} if status == 202 else {"error": "X"})
+    assert [o.payload["answer_id"] for o in offers(message)] == ([None] if offered else [])
+
+
+async def test_an_unreachable_indico_offers_a_report(chat):
+    chat["indico"] = indico(raises=httpx.ConnectError("gone"))
+    await app_chnlit._ask("When is the Sync?")
+    [message] = chat["messages"]
+    assert message.content == app_chnlit.UNREACHABLE and offers(message)[0].payload["answer_id"] is None
+
+
+async def test_a_resumed_question_that_got_no_answer_offers_a_report(chat, monkeypatch):
+    monkeypatch.setattr(app_chnlit, "RESUME_SETTLE", 0)
+    chat["indico"] = indico(status=404, body={})  # the job left the cache
+    await app_chnlit._after_resume("http://indico.test", "tok", pending_job_id="job-old")
+    [message] = chat["messages"]
+    assert message.content == app_chnlit.UNANSWERED and offers(message)[0].payload["answer_id"] is None

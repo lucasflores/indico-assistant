@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from indico_assistant.services.actions.planner import PlanTurn
 from indico_assistant.services.chat.service import ChatService
-from indico_assistant.services.nl2sql.models import PipelineResult
+from indico_assistant.services.nl2sql.models import PipelineError, PipelineErrorType, PipelineResult
 
 
 def answer_metadata(result: PipelineResult) -> dict:
@@ -32,3 +33,28 @@ def test_an_answer_records_its_evidence():
                                     "validation_rejection": "Attempt 1: forbidden keyword",
                                     "correction_attempts": 1, "corrected": True, "cached": False}
     assert metadata["sql_generated"] == "SELECT 1"  # (where it always was)
+
+
+# --- spec 021 R4: the problem flag the chat offers a report on ------------------------------------------------
+
+def failure(error_type):
+    return PipelineResult(success=False, error=PipelineError(error_type=error_type, message='m', user_message='u'))
+
+
+def test_a_good_answer_has_no_problem():
+    assert 'problem' not in answer_metadata(PipelineResult(success=True, answer='Two.'))
+
+
+def test_an_out_of_scope_question_and_a_failure_are_told_apart():
+    assert answer_metadata(failure(PipelineErrorType.OUT_OF_SCOPE))['problem'] == 'out_of_scope'
+    assert answer_metadata(failure(PipelineErrorType.VALIDATION_FAILED))['problem'] == 'failed'
+
+
+def test_the_planners_problem_reaches_the_answer():
+    service = ChatService(session_manager=MagicMock(), context_builder=MagicMock())
+    with patch("indico_assistant.plugin.AssistantPlugin"), \
+            patch("indico_assistant.services.actions.context.acting_as"), \
+            patch("indico_assistant.services.actions.planner.plan_turn",
+                  return_value=PlanTurn("I could not work out what to change.", problem="not_understood")):
+        reply, metadata, plan = service._plan(MagicMock(), "s1", "move it", [], None)
+    assert metadata == {"plan_id": None, "problem": "not_understood"} and plan is None

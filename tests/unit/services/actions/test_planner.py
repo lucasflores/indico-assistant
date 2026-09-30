@@ -184,3 +184,35 @@ def test_only_the_user_cancels_the_waiting_plan(dummy_user, chat, shown, message
     result = turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message=message)
     assert (ActionPlan.query.get(shown.id).status == 'cancelled') is cancelled
     assert result.handled is cancelled  # otherwise answered as a question
+
+
+# --- spec 021 R4: a turn says when the change did not go through, so the chat can offer a report -----------
+
+def test_switched_off_cannot_do_it(dummy_user, chat):
+    assert turn(dummy_user, chat, MagicMock(), settings={'actions_enabled': False}).problem == 'cannot_do'
+
+
+def test_a_failed_planning_call_was_not_understood(dummy_user, chat):
+    llm = MagicMock()
+    llm.generate.return_value = MagicMock(success=False)
+    assert turn(dummy_user, chat, llm).problem == 'not_understood'
+
+
+def test_no_steps_is_not_understood_even_with_the_models_own_reply(dummy_user, chat):
+    result = turn(dummy_user, chat, llm_returning(decision='new_request', reply='I am not sure what to change.'))
+    assert result.reply == 'I am not sure what to change.' and result.problem == 'not_understood'
+
+
+@pytest.mark.parametrize('outcome', ['unsupported', 'refused', 'invalid'])
+def test_a_change_it_cannot_make_is_flagged(dummy_user, chat, outcome):
+    draft = PlanDraft(decision='new_request', steps=[{'action': 'undo'}])
+    resolved = MagicMock(refusal='You cannot manage that event.' if outcome == 'refused' else None, steps=[])
+    with patch('indico_assistant.services.actions.resolve.draft_to_plan',
+               side_effect=NotImplementedError if outcome == 'unsupported' else None, return_value=resolved), \
+            patch.object(planner, 'validate_plan', return_value=['too many steps'] if outcome == 'invalid' else []):
+        result = planner._apply(draft, dummy_user, chat.id, None, ['create_event'], [], ON)
+    assert result.problem == 'cannot_do' and result.plan is None
+
+
+def test_a_cancel_is_no_problem(dummy_user, chat, shown):
+    assert turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message='cancel it').problem is None

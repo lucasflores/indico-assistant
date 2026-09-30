@@ -216,8 +216,8 @@ class ChatService:
                     intent_confidence=decision.intent_confidence if route == "data" else None,
                 )
                 route = _route_of(metadata)
-            elif route == "out_of_scope":
-                route, response_text, metadata = "refusal", OUT_OF_SCOPE_MESSAGE, {}
+            elif route == "out_of_scope":  # (spec 021 R4: a refusal carries the report offer)
+                route, response_text, metadata = "refusal", OUT_OF_SCOPE_MESSAGE, {"problem": "out_of_scope"}
         if route == "change" and planned is None:
             if not tried:
                 planned = self._plan(user, session.id, message, context, open_for_change, event_id, offer)
@@ -228,8 +228,8 @@ class ChatService:
         elif route == "chat":
             answer = self._chat(message, context)
         plan = None
-        if answer is not None:
-            response_text, metadata = answer.text, {}
+        if answer is not None:  # (a knowledge or chat answer that failed carries the report offer, spec 021 R4)
+            response_text, metadata = answer.text, {"problem": "failed"} if answer.failed else {}
         elif planned is not None:
             response_text, metadata, plan = planned
         metadata = {**(metadata or {}), "route": _route_record(route, answer, decision=decision, fallback=fallback)}
@@ -287,8 +287,10 @@ class ChatService:
                              settings=plugin.settings.get_all(), page_event_id=page_event_id, offer=offer)
         if not turn.handled:
             return None
-        return (turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None,
-                             "cannot_plan": turn.cannot_plan}, turn.plan)
+        metadata = {"plan_id": turn.plan["id"] if turn.plan else None, "cannot_plan": turn.cannot_plan}
+        if turn.problem:
+            metadata["problem"] = turn.problem  # the chat offers a report under it (spec 021 R4)
+        return turn.reply, metadata, turn.plan
 
     def _decide(self, context, plan_waiting=False, offer=None):
         """Jev's route for the latest message; skipped (the classifier routes) without a key, slow, or on an error."""
@@ -534,6 +536,7 @@ class ChatService:
         try:
             from indico_assistant.plugin import AssistantPlugin
             from indico_assistant.services.nl2sql import create_nl2sql_pipeline_from_plugin
+            from indico_assistant.services.nl2sql.models import PipelineErrorType
 
             plugin = AssistantPlugin.instance
             if not plugin:
@@ -617,6 +620,9 @@ class ChatService:
                     "cached": result.from_cache,
                 },
             })
+            if not result.success:  # the chat offers a report under it (spec 021 R4)
+                out_of_scope = result.error is not None and result.error.error_type == PipelineErrorType.OUT_OF_SCOPE
+                metadata["problem"] = "out_of_scope" if out_of_scope else "failed"
 
             return response_text, metadata
 

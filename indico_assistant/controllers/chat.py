@@ -26,7 +26,7 @@ from indico_assistant.services.chat import (
 
 logger = logging.getLogger(__name__)
 
-RESPONSE_METADATA = ("sql_generated", "confidence", "data_sources", "suggested_followups")
+RESPONSE_METADATA = ("sql_generated", "confidence", "data_sources", "suggested_followups", "problem")  # (+ 021)
 
 
 class RHChat(RHChatBase):
