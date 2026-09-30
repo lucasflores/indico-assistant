@@ -13,7 +13,7 @@ from werkzeug.exceptions import Forbidden, NotFound
 
 import indico_assistant.controllers.report_pages as pages
 from indico_assistant.models import IssueReport
-from indico_assistant.views import WPReports
+from indico_assistant.views import WPReports, WPReportsAdmin
 
 
 @pytest.fixture
@@ -30,6 +30,7 @@ def rendered(monkeypatch):
         return 'page'
 
     monkeypatch.setattr(WPReports, 'render_template', staticmethod(render))
+    monkeypatch.setattr(WPReportsAdmin, 'render_template', staticmethod(render))
     monkeypatch.setattr(pages, 'url_for_plugin', lambda endpoint, **kw: f'/{endpoint}/{kw}')
     monkeypatch.setattr(pages, 'flash', MagicMock())
     return seen
@@ -42,9 +43,9 @@ def filed(db, user, copy=None):
     return row
 
 
-def run(app, rh_class, viewer, method='GET', **view_args):
+def run(app, rh_class, viewer, method='GET', data=None, query=None, **view_args):
     """Process ``rh_class`` as Indico would after routing: arguments, access, then the page."""
-    with app.test_request_context(method=method):
+    with app.test_request_context(method=method, data=data, query_string=query):
         request.view_args = view_args
         session.set_session_user(viewer)
         rh = rh_class()
@@ -110,3 +111,55 @@ def test_the_profile_menu_shows_the_item_once_there_is_a_report(app, db, users, 
         item = pages.profile_menu_item(users['makoto'])
         assert item.name == 'assistant_reports' and item.title == 'Assistant reports'
         assert pages.profile_menu_item(users['lucas']) is None  # someone else's profile, and not an admin
+
+
+# --- US3: the admins' triage page (T031) -------------------------------------------------------------------
+
+def test_the_triage_pages_refuse_a_non_admin(app, db, users, rendered):
+    row = filed(db, users['makoto'])
+    for rh_class, view_args in ((pages.RHAdminReports, {}), (pages.RHAdminReport, {'report_id': row.id})):
+        with pytest.raises(Forbidden):
+            run(app, rh_class, users['makoto'], **view_args)
+
+
+def test_the_triage_list_filters_and_pages(app, db, users, rendered):
+    wanted = filed(db, users['makoto'])
+    wanted.category = 'wrong_answer'
+    filed(db, users['makoto'])
+    db.session.flush()
+    run(app, pages.RHAdminReports, users['lucas'], query={'category': 'wrong_answer'})
+    assert rendered['template'] == 'admin_reports.html' and rendered['reports'] == [wanted]
+    assert (rendered['page'], rendered['pages'], rendered['filters']) == (1, 1, {'status': None,
+                                                                                 'category': 'wrong_answer'})
+
+
+def test_a_good_save_redirects_and_a_stale_one_shows_the_current_state(app, db, users, rendered):
+    row = filed(db, users['makoto'])
+    response = run(app, pages.RHAdminReport, users['lucas'], 'POST',
+                   data={'status': 'under_review', 'note': 'Looking.', 'seen': ''}, report_id=row.id)
+    assert response.status_code == 302 and (row.status, row.note) == ('under_review', 'Looking.')
+    stale = run(app, pages.RHAdminReport, users['lucas'], 'POST',
+                data={'status': 'closed', 'note': 'Done.', 'seen': ''}, report_id=row.id)  # from the old page
+    assert stale == 'page' and rendered['template'] == 'admin_report.html' and rendered['stale'] is True
+    assert (row.status, row.note) == ('under_review', 'Looking.')
+    assert rendered['seen'] == row.updated_at.isoformat()  # the page now carries the current version
+
+
+def test_a_report_page_shows_the_full_copy_to_an_admin(app, db, users, rendered):
+    copy = {'messages': [{'id': 'a', 'role': 'assistant', 'content': 'x', 'evidence': {'intent': 'q'}}]}
+    row = filed(db, users['makoto'], copy=copy)
+    run(app, pages.RHAdminReport, users['lucas'], report_id=row.id)
+    assert rendered['report'] == row and rendered['copy'] == copy and rendered['reporter'] == users['makoto']
+
+
+def test_the_admin_menu_counts_the_open_reports(app, db, users, rendered):
+    with app.test_request_context():
+        session.set_session_user(users['lucas'])
+        assert pages.admin_menu_item().badge is None
+        filed(db, users['makoto'])
+        filed(db, users['makoto']).status = 'closed'
+        db.session.flush()
+        item = pages.admin_menu_item()
+        assert (item.name, item.section, item.badge) == ('assistant_reports', 'integration', 1)
+        session.set_session_user(users['makoto'])
+        assert pages.admin_menu_item() is None

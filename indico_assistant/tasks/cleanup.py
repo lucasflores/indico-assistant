@@ -28,6 +28,8 @@ RETENTION = [
     ('plugin_assistant.document_sync_log', 'started_at', 'retention_sync_log_days'),
     ('plugin_assistant.observability_sync_log', 'started_at', 'retention_sync_log_days'),
     ('plugin_assistant.action_plans', 'created_at', 'retention_plan_days'),
+    # counted from closing: a report that is not closed has no closed_at, so it never matches (spec 021 FR-020)
+    ('plugin_assistant.issue_reports', 'closed_at', 'retention_report_days'),
 ]
 BATCH_SIZE = 5000
 

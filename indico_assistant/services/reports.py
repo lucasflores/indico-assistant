@@ -17,7 +17,7 @@ from indico.core.plugins import url_for_plugin
 from sqlalchemy.dialects.postgresql import insert
 
 from indico_assistant.models import ActionPlan, ChatMessage, ChatSession, IssueReport
-from indico_assistant.models.report import CATEGORIES, TEXT_MAX
+from indico_assistant.models.report import CATEGORIES, NOTE_MAX, STATUSES, TEXT_MAX
 from indico_assistant.services.chat.rate_limiter import get_rate_limiter
 
 COPY_MESSAGES = 50
@@ -191,3 +191,81 @@ def user_view(copy: dict | None) -> dict | None:
 
 def user_detail(report: IssueReport) -> dict:
     return {**summary(report), 'text': report.text, 'copy': user_view(report.copy)}
+
+
+# --- triage (US3) ------------------------------------------------------------------------------------------
+
+PAGE_SIZE = 50
+
+
+def _filters(status: str | None, category: str | None) -> tuple[str | None, str | None]:
+    if status and status not in STATUSES:
+        raise _invalid('status', 'Unknown status')
+    if category and category not in CATEGORIES:
+        raise _invalid('category', 'Unknown category')
+    return status or None, category or None
+
+
+def admin_list(status: str | None = None, category: str | None = None,
+               page: int = 1) -> tuple[list[IssueReport], int, int]:
+    """One page of every report, newest first, with the page shown and the page count (FR-015)."""
+    status, category = _filters(status, category)
+    query = IssueReport.query
+    if status:
+        query = query.filter_by(status=status)
+    if category:
+        query = query.filter_by(category=category)
+    pages = max(1, -(-query.count() // PAGE_SIZE))
+    page = min(max(1, page), pages)
+    rows = (query.order_by(IssueReport.created_at.desc(), IssueReport.id.desc())
+            .offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).all())
+    return rows, page, pages
+
+
+def open_count() -> int:
+    return IssueReport.query.filter_by(status='open').count()
+
+
+def admin_update(admin, report_id: int, status: Any, note: Any, seen: Any) -> IssueReport:
+    """Save the status and the note, as ``admin`` (FR-017). ``seen`` is the report's ``updated_at`` as the admin's
+    page showed it ('' when never updated): a save from an out-of-date page is refused, never applied over the
+    newer one (R11). The check and the write are one UPDATE, so two admins saving at once cannot both win."""
+    report = db.session.get(IssueReport, report_id)
+    if report is None:
+        raise ReportError(404, 'NOT_FOUND', 'Report not found')
+    if status not in STATUSES:
+        raise _invalid('status', 'Unknown status')
+    note = note.strip() if isinstance(note, str) else ''
+    if len(note) > NOTE_MAX:
+        raise _invalid('note', f'The note is at most {NOTE_MAX} characters')
+    if (seen or '') != (report.updated_at.isoformat() if report.updated_at else ''):
+        raise ReportError(409, 'STALE', 'The report changed since you opened it', {'report': admin_detail(report)})
+    now = datetime.now(UTC)
+    closed_at = (report.closed_at if report.status == 'closed' else now) if status == 'closed' else None
+    same_version = (IssueReport.updated_at.is_(None) if report.updated_at is None
+                    else IssueReport.updated_at == report.updated_at)
+    saved = IssueReport.query.filter(IssueReport.id == report.id, same_version).update(
+        {'status': status, 'note': note or None, 'updated_by_id': admin.id, 'updated_at': now, 'closed_at': closed_at},
+        synchronize_session=False)
+    db.session.refresh(report)
+    if not saved:  # the other admin's save landed between our read and our write
+        raise ReportError(409, 'STALE', 'The report changed since you opened it', {'report': admin_detail(report)})
+    return report
+
+
+def _person(user_id: int | None, with_email: bool = False) -> dict | None:
+    from indico.modules.users import User
+    user = User.get(user_id) if user_id else None
+    if user is None:
+        return None
+    return {'id': user.id, 'name': user.full_name, **({'email': user.email} if with_email else {})}
+
+
+def admin_summary(report: IssueReport) -> dict:
+    return {**summary(report), 'user': _person(report.user_id)}
+
+
+def admin_detail(report: IssueReport) -> dict:
+    """Everything, for the team: the reporter as Indico knows them, and the whole copy with its evidence."""
+    return {**summary(report), 'text': report.text, 'user': _person(report.user_id, with_email=True),
+            'updated_by': _person(report.updated_by_id), 'closed_at': _when(report.closed_at), 'copy': report.copy}

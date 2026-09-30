@@ -9,8 +9,10 @@ Someone else's report, and one that does not exist, get the same 404, so the API
 from __future__ import annotations
 
 from flask import jsonify, request, session
+from indico.core.db import db
 
 from indico_assistant.controllers.base import RHChatBase
+from indico_assistant.models import IssueReport
 from indico_assistant.services import reports
 
 
@@ -72,3 +74,52 @@ class RHReportDelete(RHReportsAPI):
         if not reports.delete_own(self.user, request.view_args['report_id']):
             return self._not_found_error("Report")
         return '', 204
+
+
+class RHAdminReportsAPI(RHReportsAPI):
+    """Triage (US3): Indico admins only (FR-015)."""
+
+    ADMIN_ONLY = True
+    RATE_LIMIT = "read"
+
+    def _refused(self, error):
+        return self._error_response(error.code, error.message, error.details, status=error.status)
+
+
+class RHAdminReportList(RHAdminReportsAPI):
+    """GET /admin/reports?status=&category=&page=: every report, newest first, 50 a page."""
+
+    def _process(self):
+        try:
+            page = int(request.args.get('page') or 1)
+            rows, page, pages = reports.admin_list(request.args.get('status'), request.args.get('category'), page)
+        except ValueError:
+            return self._validation_error('page must be a number', 'page')
+        except reports.ReportError as error:
+            return self._refused(error)
+        return jsonify({'reports': [reports.admin_summary(r) for r in rows], 'page': page, 'pages': pages,
+                        'open': reports.open_count()}), 200
+
+
+class RHAdminReportDetail(RHAdminReportsAPI):
+    """GET /admin/reports/<id>: the report with its whole copy, evidence included (FR-016)."""
+
+    def _process(self):
+        report = db.session.get(IssueReport, request.view_args['report_id'])
+        if report is None:
+            return self._not_found_error("Report")
+        return jsonify(reports.admin_detail(report)), 200
+
+
+class RHAdminReportUpdate(RHAdminReportsAPI):
+    """PATCH /admin/reports/<id> {status, note, seen}: 409 STALE when the report changed since ``seen`` (R11)."""
+
+    def _process(self):
+        data = request.get_json(silent=True)
+        data = data if isinstance(data, dict) else {}
+        try:
+            report = reports.admin_update(self.user, request.view_args['report_id'], data.get('status'),
+                                          data.get('note'), data.get('seen'))
+        except reports.ReportError as error:
+            return self._refused(error)
+        return jsonify(reports.admin_detail(report)), 200

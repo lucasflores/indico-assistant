@@ -78,6 +78,7 @@ DEFAULT_SETTINGS = {
     "retention_error_days": 30,
     "retention_sync_log_days": 90,
     "retention_plan_days": 90,  # chat action plans (their audit trail; undo only reaches back 24 h)
+    "retention_report_days": 365,  # issue reports, counted from closing; open ones are never purged (spec 021)
     # Chat actions (Feature 019): off until an admin enables them, since they write to shared data
     "actions_enabled": False,
     "actions_allowed": list(WRITE_ACTIONS),

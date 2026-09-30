@@ -62,6 +62,7 @@ class AssistantPlugin(IndicoPlugin):
         self.template_hook("html-head", self._render_widget_script)
         # spec 021: the profile's "Assistant reports"
         self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
+        self.connect(signals.menu.items, _admin_menu, sender='admin-sidemenu')
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
@@ -242,3 +243,8 @@ def _profile_menu(sender, user, **kwargs):
     # (imported here: the controllers import the plugin's models, which need the plugin loaded)
     from indico_assistant.controllers.report_pages import profile_menu_item
     return profile_menu_item(user)
+
+
+def _admin_menu(sender, **kwargs):
+    from indico_assistant.controllers.report_pages import admin_menu_item
+    return admin_menu_item()
