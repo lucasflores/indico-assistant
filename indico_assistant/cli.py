@@ -74,7 +74,7 @@ def health_command():
 
     from indico_assistant.services.knowledge import guide
 
-    knowledge = guide.status({"knowledge_jev_api_key": plugin.settings.get("knowledge_jev_api_key")})
+    knowledge = guide.status({"jev_api_key": plugin.settings.get("jev_api_key")})
     click.echo("Knowledge: ", nl=False)
     if knowledge["ok"]:
         click.secho(f"guide {knowledge['guide_commit'][:7]}, {knowledge['pages']} pages, {knowledge['model']}; "

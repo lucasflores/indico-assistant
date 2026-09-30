@@ -61,6 +61,10 @@ class PipelineResult(BaseModel):
         default=False,
         description="Spec 022: a how-do-I or can-you question, not data; the knowledge answer answers it",
     )
+    chat_request: bool = Field(
+        default=False,
+        description="Spec 022: answerable from the conversation; the chat answer answers it",
+    )
     answer: str | None = Field(
         default=None, description="Natural language answer to the question"
     )

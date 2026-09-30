@@ -88,5 +88,16 @@ def test_the_prompt_carries_the_never_list_and_each_reason():
     knowledge.answer("Can you add a Teams meeting?", [], llm=llm, caps=caps, pages=PAGES, guide=FakeGuide(),
                      base_url=BASE)
     prompt = llm.asked[0]["prompt"]
-    assert "You cannot manage the event “Sync”" in prompt and all(item in prompt for item in NEVER)
+    assert "they cannot manage the event “Sync”" in prompt and all(item in prompt for item in NEVER)
     assert prompt.index("## What I can do") > prompt.index("## Indico's user guide")  # nearest the question
+
+
+def test_reasons_are_about_the_user_not_the_assistant():
+    """Run 1 (2026-09-30): "You cannot create events…" was read as the assistant's limit, and a viewer was told to
+    create the meeting themselves. The list says who cannot, and the rules say not to send the user to do it."""
+    from dataclasses import replace
+
+    caps = replace(CAPS, can=[], cannot=[("create a meeting", "You cannot create events in any category on this Indico")])
+    text = caps.render()
+    assert "they cannot create events in any category on this Indico" in text and "You cannot" not in text
+    assert "never tell the user to do it themselves" in knowledge.RULES

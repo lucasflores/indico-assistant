@@ -63,7 +63,7 @@ class RHHealth(RH):
         # Spec 022: the guide copy and the gate (a broken copy degrades the plugin, it never fails it)
         from indico_assistant.services.knowledge import guide
 
-        knowledge = guide.status({"knowledge_jev_api_key": plugin.settings.get("knowledge_jev_api_key")}
+        knowledge = guide.status({"jev_api_key": plugin.settings.get("jev_api_key")}
                                  if plugin else {})
 
         # Determine overall status

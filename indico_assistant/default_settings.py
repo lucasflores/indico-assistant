@@ -39,11 +39,10 @@ DEFAULT_SETTINGS = {
     # once the acceptance sweep's evidence is in, so an upgrade changes nothing by itself.
     "llm_ibis_mode": "md_json",
     "timeout_seconds": 30,
-    # The knowledge route (spec 022): Jev decides which messages are "how do I" / "can you" questions. It is called at
-    # OpenRouter directly (constitution 1.1.0, Principle III); without a key the classifier decides alone.
-    "knowledge_jev_api_key": None,
-    "knowledge_jev_cutoff": 0.2,
-    "knowledge_jev_timeout_seconds": 1.5,
+    # The router (spec 022): one Jev decision gives each message its route and, for data, its kind. Jev is called at
+    # OpenRouter directly (constitution 1.1.0, Principle III); without a key the classifier routes instead.
+    "jev_api_key": None,
+    "jev_timeout_seconds": 1.5,
     "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)
     "nl2sql_enabled": True,

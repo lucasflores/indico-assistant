@@ -650,3 +650,10 @@ def test_knowledge_questions_have_their_own_intent():
     from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
     assert '**knowledge**' in CLASSIFICATION_PROMPT and 'PRIORITY -1 - knowledge' in CLASSIFICATION_PROMPT
     assert CLASSIFICATION_PROMPT.index('PRIORITY -1 - knowledge') < CLASSIFICATION_PROMPT.index('PRIORITY 0 - write_request')
+
+
+def test_chat_has_its_own_intent():
+    # Spec 022: the fallback router offers the same routes as Jev, chat included
+    from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
+    assert '**chat**' in CLASSIFICATION_PROMPT
+
