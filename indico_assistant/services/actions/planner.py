@@ -141,7 +141,9 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
                 return PlanTurn('Please answer the questions in the plan first.')
             if executor.confirm_typed(open_plan.id, user) != 'confirmed':
                 return PlanTurn('That plan is no longer valid; nothing was changed.')
-            return PlanTurn(outcome_message(executor.run(open_plan.id, enabled=enabled)))
+            ran = executor.run(open_plan.id, enabled=enabled)
+            # (a change that did not run offers a report, spec 021 R4; fresh review)
+            return PlanTurn(outcome_message(ran), problem=None if ran.status == 'done' else 'cannot_do')
     elif draft.decision in ('unrelated', 'confirm', 'cancel'):
         return PlanTurn('', handled=False)
     if not draft.steps:  # (a clarifying reply too: nothing was planned. Narrow to `not draft.reply` if noisy)

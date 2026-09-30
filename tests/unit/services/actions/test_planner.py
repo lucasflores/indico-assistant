@@ -216,3 +216,16 @@ def test_a_change_it_cannot_make_is_flagged(dummy_user, chat, outcome):
 
 def test_a_cancel_is_no_problem(dummy_user, chat, shown):
     assert turn(dummy_user, chat, llm_returning(decision='cancel'), open_plan=shown, message='cancel it').problem is None
+
+
+
+@pytest.mark.parametrize(('status', 'problem'), [('done', None), ('failed', 'cannot_do'), ('refused', 'cannot_do')])
+def test_a_confirmed_plan_that_did_not_run_is_flagged(dummy_user, chat, shown, status, problem):
+    # (fresh review, PR #16: a typed "yes" whose plan then failed said nothing was changed, with no report offer)
+    def ran(plan_id, enabled=None):
+        shown.status, shown.error = status, None if status == 'done' else 'boom'
+        return shown
+    with patch.object(executor, 'confirm_typed', return_value='confirmed'), patch.object(executor, 'run', ran), \
+            patch('indico_assistant.tasks.actions.outcome_message', return_value='outcome'):
+        result = turn(dummy_user, chat, MagicMock(), open_plan=shown, message='yes')
+    assert result.reply == 'outcome' and result.problem == problem

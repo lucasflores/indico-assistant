@@ -287,3 +287,13 @@ def test_nothing_from_the_query_log_reaches_the_copy(db, users, limiter, monkeyp
     db.session.flush()
     dumped = json.dumps(copy_of(db, users, limiter, monkeypatch, chat, rows[1]))
     assert 'lucas.private@example.com' not in dumped and '10.1.2.3' not in dumped
+
+
+def test_each_refusal_is_a_new_exception(db, users):
+    # (fresh review, PR #16: one shared exception instance, raised again and again, kept every traceback it passed)
+    raised = []
+    for _ in range(2):
+        with pytest.raises(service.ReportError) as refused:
+            service.build_copy(users['lucas'], uuid4(), None)
+        raised.append(refused.value)
+    assert raised[0] is not raised[1] and raised[0].status == raised[1].status == 404

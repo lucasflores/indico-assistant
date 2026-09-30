@@ -59,8 +59,10 @@ class RHUserReports(RHUserBase):
 
 
 class RHUserReportBase(RHUserBase):
-    def _process_args(self):
-        RHUserBase._process_args(self)
+    def _check_access(self):
+        # logged in, and allowed this profile, before the report is looked up: looked up for nobody, it failed with
+        # a 500 for an existing id and a 404 for a missing one, which told anyone which ids exist (fresh review)
+        RHUserBase._check_access(self)
         self.report = reports.own_report(self.user, request.view_args['report_id'])
         if self.report is None:
             raise NotFound
@@ -114,22 +116,16 @@ class RHAdminReports(RHAdminBase):
             rows, page, pages = reports.admin_list(page=request.args.get('page', 1, type=int))
         return WPReportsAdmin.render_template(
             'admin_reports.html', MENU_ITEM, reports=rows, page=page, pages=pages, filters=filters, labels=LABELS,
-            open=reports.open_count(), people={p.id: p for p in _people(rows)},
+            open=reports.open_count(), people=reports.people(rows),
             page_url=lambda n: url_for_plugin('assistant.admin_reports', page=n, **{k: v for k, v in filters.items() if v}),
             report_url=lambda report: url_for_plugin('assistant.admin_report', report_id=report.id))
-
-
-def _people(rows):
-    from indico.modules.users import User
-    ids = {row.user_id for row in rows} | {row.updated_by_id for row in rows if row.updated_by_id}
-    return User.query.filter(User.id.in_(ids)).all() if ids else []
 
 
 class RHAdminReport(RHAdminBase):
     """One report with its whole copy and evidence (FR-016); POST saves the status and the note (FR-017)."""
 
-    def _process_args(self):
-        RHAdminBase._process_args(self)
+    def _check_access(self):
+        RHAdminBase._check_access(self)  # an admin before the lookup: a 404 would tell others which ids exist
         self.report = db.session.get(IssueReport, request.view_args['report_id'])
         if self.report is None:
             raise NotFound
@@ -149,7 +145,7 @@ class RHAdminReport(RHAdminBase):
                 flash('Saved.', 'success')
                 return redirect(url_for_plugin('assistant.admin_report', report_id=self.report.id))
         report = self.report
-        people = {p.id: p for p in _people([report])}
+        people = reports.people([report])
         return WPReportsAdmin.render_template(
             'admin_report.html', MENU_ITEM, report=report, copy=report.copy, labels=LABELS, stale=stale,
             reporter=people.get(report.user_id), updated_by=people.get(report.updated_by_id),

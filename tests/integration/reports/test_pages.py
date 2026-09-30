@@ -47,7 +47,8 @@ def run(app, rh_class, viewer, method='GET', data=None, query=None, **view_args)
     """Process ``rh_class`` as Indico would after routing: arguments, access, then the page."""
     with app.test_request_context(method=method, data=data, query_string=query):
         request.view_args = view_args
-        session.set_session_user(viewer)
+        if viewer is not None:
+            session.set_session_user(viewer)
         rh = rh_class()
         rh._process_args()
         rh._check_access()
@@ -163,3 +164,21 @@ def test_the_admin_menu_counts_the_open_reports(app, db, users, rendered):
         assert (item.name, item.section, item.badge) == ('assistant_reports', 'integration', 1)
         session.set_session_user(users['makoto'])
         assert pages.admin_menu_item() is None
+
+
+def test_an_anonymous_visitor_is_sent_to_log_in_whether_or_not_the_report_exists(app, db, users, rendered):
+    # (fresh review, PR #16: the report was looked up before Indico's login check: a 500 for an existing id and a
+    # 404 for a missing one, which told anyone which ids exist)
+    row = filed(db, users['makoto'])
+    for rh_class in (pages.RHUserReport, pages.RHUserReportDelete):
+        for report_id in (row.id, row.id + 1000):
+            with pytest.raises(Forbidden):
+                run(app, rh_class, None, 'POST' if rh_class is pages.RHUserReportDelete else 'GET', report_id=report_id)
+
+
+def test_the_triage_page_tells_others_nothing_about_which_reports_exist(app, db, users, rendered):
+    row = filed(db, users['makoto'])
+    for viewer in (None, users['makoto']):
+        for report_id in (row.id, row.id + 1000):
+            with pytest.raises(Forbidden):
+                run(app, pages.RHAdminReport, viewer, report_id=report_id)

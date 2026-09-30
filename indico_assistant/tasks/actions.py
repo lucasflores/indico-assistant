@@ -64,7 +64,10 @@ def execute_plan(job_id, plan_id):
         # the plan is carried out; saving the reply in the chat must not turn that into a failure
         if plan.session_id is not None and (chat := ChatSession.query.get(plan.session_id)) is not None:
             manager = get_session_manager()
-            message = manager.add_assistant_message(chat, reply, {'plan_id': str(plan.id), 'plan_status': plan.status})
+            metadata = {'plan_id': str(plan.id), 'plan_status': plan.status}
+            if plan.status != 'done':
+                metadata['problem'] = 'cannot_do'  # a change that did not run carries the report offer (spec 021 R4)
+            message = manager.add_assistant_message(chat, reply, metadata)
             manager.commit()
             message_id = str(message.id)
     except Exception:

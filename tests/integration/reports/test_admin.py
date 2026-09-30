@@ -111,3 +111,23 @@ def test_every_admin_endpoint_refuses_a_non_admin_and_admits_an_admin(app, db, u
         with app.test_request_context():
             session.set_session_user(users['lucas'])
             rh_class()._check_access()  # (the read limit behind it is Redis-backed, as in the other RH tests)
+
+
+def test_a_note_is_measured_as_the_browser_measures_it(db, users, monkeypatch):
+    # (fresh review, PR #16: a form posts line breaks as CRLF, so a note the textarea allowed failed the length check)
+    row = filed(db, users['makoto'])
+    note = ('x' * 98 + '\r\n') * 20 + 'x' * 10  # 1,990 characters as the textarea counts, 2,010 as posted
+    assert len(note) == 2010 and len(note.replace('\r\n', '\n')) == 1990
+    status, _ = save(users, monkeypatch, row, status='open', note=note, seen='')
+    assert status == 200 and '\r' not in row.note
+
+
+def test_the_list_looks_its_people_up_in_one_query(db, users, monkeypatch):
+    # (fresh review, PR #16: one User.get per row)
+    filed(db, users['makoto'])
+    filed(db, users['lucas'])
+    from indico.modules.users import User
+    monkeypatch.setattr(User, 'get', classmethod(lambda cls, *a, **k: pytest.fail('a lookup per row')))
+    status, body = call(RHAdminReportList, users['lucas'], monkeypatch)
+    assert status == 200 and {r['user']['name'] for r in body['reports']} == {users['makoto'].full_name,
+                                                                              users['lucas'].full_name}
