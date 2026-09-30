@@ -87,3 +87,17 @@ def test_a_model_that_cannot_load(copy_dir, monkeypatch):
     monkeypatch.setattr(embedding, "load_model", fail)
     guide = Guide(copy_dir)
     assert guide.excerpts("timetable") == [] and "offline" in guide.problem
+
+
+def test_describe_reads_the_files_without_loading_the_model(copy_dir, monkeypatch):
+    """The health check runs in the web process: the model (375 MB) is only ever loaded in the worker."""
+    def never(name):
+        raise AssertionError("the model was loaded")
+    monkeypatch.setattr(embedding, "load_model", never)
+    from indico_assistant.services.knowledge.guide import status
+
+    assert Guide(copy_dir).describe() == {"ok": True, "guide_commit": "abc1234", "pages": 4, "model": "fake/model"}
+    assert not Guide(copy_dir.parent / "missing").describe()["ok"]
+    monkeypatch.setattr("indico_assistant.services.knowledge.guide_build.OUT_DIR", copy_dir)
+    assert status({"knowledge_jev_api_key": "k"})["gate"] == "jev"
+    assert status({})["gate"] == "classifier only"

@@ -179,6 +179,17 @@ class SessionManager:
         metadata = (message.metadata_json or {}) if message is not None else {}
         return metadata['event_id'] if 'event_id' in metadata else fallback
 
+    def offer_before(self, session_id: UUID, message_id: UUID | None) -> str | None:
+        """The change the last answer before the question ``message_id`` offered to make (spec 022 FR-005): the
+        question then goes to the planner first, so a "yes" plans it."""
+        question = ChatMessage.query.get(message_id) if message_id else None
+        if question is None:
+            return None
+        last = (ChatMessage.query.filter(ChatMessage.session_id == session_id, ChatMessage.role == 'assistant',
+                                         ChatMessage.created_at < question.created_at)
+                .order_by(ChatMessage.created_at.desc()).first())
+        return (((last.metadata_json or {}).get('route') or {}).get('offer') or None) if last else None
+
     def rename(self, session: ChatSession, title: str) -> None:
         """Rename a conversation, as the Past Chats sidebar does (spec 020 US4). Not a new activity: its
         place in the sidebar stays."""

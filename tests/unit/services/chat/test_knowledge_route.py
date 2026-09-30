@@ -17,6 +17,7 @@ def routed():
     session_id = uuid4()
     manager.get_session.return_value = MagicMock(id=session_id, event_id=None)
     manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+    manager.offer_before.return_value = None
     context.build_context.return_value = [{"role": "user", "content": "How do I lock my event?"}]
     context.page_note.return_value = None
     stubs = MagicMock()

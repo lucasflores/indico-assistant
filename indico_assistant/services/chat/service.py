@@ -177,27 +177,42 @@ class ChatService:
 
         # Feature 019: a message about an open plan ("make it 30 minutes", "yes") goes to the planner first;
         # otherwise NL2SQL classifies it, and a change request goes to the planner (research R13)
-        planned = self._plan(user, session.id, message, context, waiting_plan, event_id) if waiting_plan else None
-        route, knowledge = "change", None
-        if planned is None:
-            response_text, metadata = self._process_with_nl2sql(
-                message, context, event_id, user_id=viewer.id, auth_user=viewer
-            )
-            route = "data"
-            if metadata.get("knowledge_request"):  # spec 022: "how do I…" / "can you…"
-                knowledge = self._knowledge(user, message, context, event_id)
-                response_text, metadata, route = knowledge.text, {}, "knowledge"
-            elif metadata.get("write_request"):
-                route = "change"
-                planned = self._plan(user, session.id, message, context, None, event_id)
-                if planned is None:  # the planner found no change in it after all: never an empty reply
-                    from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
-                    response_text = response_text or NOT_UNDERSTOOD
+        # Spec 022, in order: the knowledge gate (Jev); the planner first when a plan waits or the last answer
+        # offered a change; the classifier (knowledge, a change, or data); and a planner that finds nothing to
+        # change hands over to the knowledge answer.
+        gate, gate_says_knowledge = self._gate(context)
+        route, knowledge, fallback, planned = "change", None, None, None
+        if gate_says_knowledge:
+            route, knowledge = "knowledge", self._knowledge(user, message, context, event_id)
+        else:
+            offer = None if waiting_plan else self._session_manager.offer_before(session.id, message_id)
+            if waiting_plan or offer:
+                planned = self._plan(user, session.id, message, context, waiting_plan, event_id)
+                if planned is not None and not waiting_plan and planned[1].get("nothing_to_change"):
+                    planned = None  # no change in the reply to an offer: routed as if there had been no offer
+            if planned is None:
+                response_text, metadata = self._process_with_nl2sql(
+                    message, context, event_id, user_id=viewer.id, auth_user=viewer
+                )
+                route = "data"
+                if metadata.get("knowledge_request"):
+                    route, fallback = "knowledge", "classifier"
+                    knowledge = self._knowledge(user, message, context, event_id)
+                elif metadata.get("write_request"):
+                    route = "change"
+                    planned = self._plan(user, session.id, message, context, None, event_id)
+                    if planned is None:  # the planner found no change in it after all: never an empty reply
+                        from indico_assistant.services.actions.planner import NOT_UNDERSTOOD
+                        response_text = response_text or NOT_UNDERSTOOD
+                    elif planned[1].get("nothing_to_change"):
+                        planned, route, fallback = None, "knowledge", "planner_nothing_to_change"
+                        knowledge = self._knowledge(user, message, context, event_id)
         plan = None
-        if planned is not None:
+        if knowledge is not None:
+            response_text, metadata = knowledge.text, {}
+        elif planned is not None:
             response_text, metadata, plan = planned
-        metadata = {**(metadata or {}), "route": _route_record(route, knowledge,
-                                                               fallback="classifier" if knowledge else None)}
+        metadata = {**(metadata or {}), "route": _route_record(route, knowledge, gate=gate, fallback=fallback)}
 
         assistant_msg = self._session_manager.add_assistant_message(
             self._session_manager.get_session(session_id), response_text, metadata,
@@ -246,7 +261,20 @@ class ChatService:
                              llm=plugin.llm_service, settings=plugin.settings.get_all(), page_event_id=page_event_id)
         if not turn.handled:
             return None
-        return turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None}, turn.plan
+        return (turn.reply, {"plan_id": turn.plan["id"] if turn.plan else None,
+                             "nothing_to_change": turn.nothing_to_change}, turn.plan)
+
+    def _gate(self, context):
+        """(Jev's decision, whether it says knowledge): skipped, and the classifier decides, without a key."""
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.knowledge import gate
+
+        try:
+            settings = AssistantPlugin.instance.settings.get_all()
+        except RuntimeError:  # the plugin is not active (tests, scripts): no key, so the classifier decides
+            settings = {}
+        result = gate.decide(context, settings)
+        return result, gate.is_knowledge(result, settings)
 
     def _get_or_create_session(
         self,
@@ -582,9 +610,10 @@ def _route_record(route, knowledge=None, *, gate=None, fallback=None):
     traffic. ``gate``: the knowledge gate's decision, when it ran."""
     return {
         "route": route,
-        "gate": getattr(gate, "name", None),
+        "gate": gate.name if gate is not None and gate.reason != "no key" else None,
         "gate_score": getattr(gate, "score", None),
         "gate_skipped": gate is None or bool(gate.skipped),
+        "gate_reason": getattr(gate, "reason", None),
         "fallback": fallback,
         "offer": knowledge.offer if knowledge else None,
         "guide_commit": knowledge.guide_commit if knowledge else None,

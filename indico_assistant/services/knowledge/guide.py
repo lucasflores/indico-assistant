@@ -32,12 +32,7 @@ class Guide:
             try:
                 from indico_assistant.services.embedding import service as embedding
 
-                manifest = json.loads((self._dir / "manifest.json").read_text())
-                chunks = json.loads((self._dir / "chunks.json").read_text())
-                vectors = np.load(self._dir / "vectors.npy")
-                if vectors.shape != (len(chunks), manifest["dims"]):
-                    raise ValueError(f"the index holds {vectors.shape}, the manifest says {len(chunks)} x "
-                                     f"{manifest['dims']}")
+                manifest, chunks, vectors = self._read()
                 model, dims = embedding.load_model(manifest["model"])
                 if dims != manifest["dims"]:
                     raise ValueError(f"{manifest['model']} gives {dims} dimensions, the index has {manifest['dims']}")
@@ -46,6 +41,24 @@ class Guide:
                 logger.warning(self.problem)
                 return
             self.manifest, self._chunks, self._vectors, self._model = manifest, chunks, vectors, model
+
+    def _read(self):
+        manifest = json.loads((self._dir / "manifest.json").read_text())
+        chunks = json.loads((self._dir / "chunks.json").read_text())
+        vectors = np.load(self._dir / "vectors.npy")
+        if vectors.shape != (len(chunks), manifest["dims"]):
+            raise ValueError(f"the index holds {vectors.shape}, the manifest says {len(chunks)} x {manifest['dims']}")
+        return manifest, chunks, vectors
+
+    def describe(self):
+        """The copy's state from its files alone, for the health check (which runs in the web process: the model is
+        only loaded where questions are answered, in the worker)."""
+        try:
+            manifest, _, _ = self._read()
+        except Exception as exc:
+            return {"ok": False, "problem": f"guide copy unavailable: {exc}"}
+        return {"ok": True, "guide_commit": manifest["commit"], "pages": len(manifest["pages"]),
+                "model": manifest["model"]}
 
     @property
     def ok(self):
@@ -82,3 +95,11 @@ def get_guide():
 
         _guide = Guide(OUT_DIR)
     return _guide
+
+
+def status(settings):
+    """The knowledge route's state for the health check: the guide copy's files and which gate decides."""
+    from indico_assistant.services.knowledge.guide_build import OUT_DIR
+
+    return {**Guide(OUT_DIR).describe(),
+            "gate": "jev" if settings.get("knowledge_jev_api_key") else "classifier only"}

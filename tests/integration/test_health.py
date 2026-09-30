@@ -246,3 +246,26 @@ class TestHealthEndpointEdgeCases:
         assert response["status"] == "degraded"
         assert response["llm"]["status"] == "timeout"
         assert "timed out" in response["llm"]["error"]
+
+
+class TestKnowledgeHealth:
+    """Spec 022: the guide copy and the gate are reported; a broken copy degrades, never fails, the plugin."""
+
+    def _health(self, knowledge):
+        from indico_assistant.controllers import RHHealth
+
+        controller = RHHealth.__new__(RHHealth)
+        plugin = MagicMock()
+        plugin.settings.get = MagicMock(side_effect=lambda k: {"enabled": True, "llm_provider": "ibis"}.get(k))
+        plugin.llm_service.health_check.return_value = HealthStatus(status="connected", latency_ms=5, provider="ibis",
+                                                                     model="ibis/Balanced")
+        with patch("indico_assistant.services.knowledge.guide.status", return_value=knowledge):
+            return controller._compute_health_status(plugin)
+
+    def test_a_working_copy(self):
+        response = self._health({"ok": True, "guide_commit": "e7e0016", "pages": 54, "model": "m", "gate": "jev"})
+        assert response["status"] == "healthy" and response["knowledge"]["guide_commit"] == "e7e0016"
+
+    def test_a_broken_copy_degrades(self):
+        response = self._health({"ok": False, "problem": "guide copy unavailable: no file", "gate": "classifier only"})
+        assert response["status"] == "degraded" and response["knowledge"]["problem"].startswith("guide copy")

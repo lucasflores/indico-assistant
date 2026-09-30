@@ -65,6 +65,7 @@ class PlanTurn:
     reply: str
     plan: dict | None = None  # PlanView for the client, with the confirm token
     handled: bool = True  # False: not about changes after all, answer it as a question
+    nothing_to_change: bool = False  # no step, or nothing to change: the chat gives the knowledge answer (spec 022)
     llm_calls: list = field(default_factory=list)
 
 
@@ -140,7 +141,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
     elif draft.decision in ('unrelated', 'confirm', 'cancel'):
         return PlanTurn('', handled=False)
     if not draft.steps:
-        return PlanTurn(draft.reply or NOT_UNDERSTOOD)
+        return PlanTurn(draft.reply or NOT_UNDERSTOOD, nothing_to_change=True)
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
@@ -148,7 +149,7 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
     except NotImplementedError:
         return PlanTurn(NOT_SUPPORTED)
     if resolved.refusal:
-        return PlanTurn(resolved.refusal)
+        return PlanTurn(resolved.refusal, nothing_to_change=resolved.refusal == resolve.NOTHING_TO_CHANGE)
     if errors := validate_plan(resolved.steps, enabled):
         return PlanTurn('I cannot plan that: ' + '; '.join(errors))
     try:
