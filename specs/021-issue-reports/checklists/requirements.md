@@ -37,10 +37,11 @@
   - a report is kept until 1 year after it closes;
   - no email;
   - reports stay in Indico only.
+- Decided by Lucas after the review of PR #11 (2026-09-29): the Report button sits in the panel's title bar, not in
+  the chat's input bar; the user can delete their own report.
 - Defaults taken without asking. Each can be changed in review:
-  - the user can't withdraw or edit a sent report;
   - a copy holds at most 50 messages;
   - a user can send 20 reports a day;
-  - the user doesn't see which admin changed the status;
-  - the input bar's Report button covers reports that don't point at an answer, so ordinary answers don't carry a
-    report button of their own.
+  - the user doesn't see which admin changed the status, nor how answers were made (the evidence is for admins);
+  - a save from an out-of-date admin page is refused, not merged;
+  - ordinary answers carry no report button of their own. The title bar's Report button covers them.
