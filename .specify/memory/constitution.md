@@ -1,5 +1,17 @@
 <!--
-Sync Impact Report:
+Sync Impact Report (1.1.0, 2026-09-30):
+- Version change: 1.0.0 → 1.1.0 (MINOR: one bounded exception added to Principle III)
+- Modified principles: III. LLM Provider Abstraction. Decision models that return a score, not text, may use their
+  own client under four conditions. ibis is added to the supported providers (already implemented, and the shipped
+  default).
+- Rationale: spec 022 routes knowledge questions with Jev, a decision model called at OpenRouter's decisions
+  endpoint. It returns a probability, not a chat completion, so Instructor cannot call it. Lucas decided to keep it
+  outside ibis (2026-09-29).
+- Impact on existing code: none. Every model call today is inside LLMService, on the Instructor client.
+- Migration plan: none needed.
+- Templates status: unchanged (the plan template's Constitution Check reads the principles).
+
+Sync Impact Report (1.0.0):
 - Version change: 0.0.0 → 1.0.0 (initial constitution)
 - Modified principles: N/A (new document)
 - Added sections: Core Principles (6), Technology Constraints, Development Workflow, Governance
@@ -48,10 +60,14 @@ LLM interactions MUST use Instructor for structured outputs with swappable provi
 
 - All LLM calls MUST go through a unified client abstraction using Instructor
 - Provider swapping MUST be configuration-driven (no code changes required)
-- Supported providers: Ollama (local), HuggingFace Router (cloud), OpenAI-compatible APIs
+- Supported providers: ibis router (the default), Ollama (local), HuggingFace Router (cloud), OpenAI-compatible APIs
 - All LLM responses MUST be validated via Pydantic models
 - Retry logic with automatic validation MUST be built into the abstraction
 - Provider configuration MUST be stored in plugin settings
+- Exception: a decision model that returns a score rather than text (e.g. Jev) MAY use its own small client, only
+  if (1) its key and timeout are plugin settings, (2) when it is unset, slow or failing, the plugin falls back to
+  an Instructor-based path, (3) its score is validated before use, and (4) it is mockable in tests. Everything that
+  generates text stays under the abstraction.
 
 **Rationale**: Instructor provides type-safe structured outputs with automatic retries. Provider abstraction enables self-hosted deployments (Ollama) and cloud options (HuggingFace) without code changes.
 
@@ -147,4 +163,4 @@ This constitution supersedes all other development practices for this project.
   3. Migration plan for non-compliant code
   4. Version bump following semantic versioning
 
-**Version**: 1.0.0 | **Ratified**: 2026-01-14 | **Last Amended**: 2026-01-14
+**Version**: 1.1.0 | **Ratified**: 2026-01-14 | **Last Amended**: 2026-09-30
