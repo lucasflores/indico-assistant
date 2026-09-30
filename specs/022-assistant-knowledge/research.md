@@ -42,8 +42,11 @@ can't know who is asking, or what this instance has switched on:
   request.
 - "Can you do X?", when the assistant can, gets an offer first ("Yes, shall I?"). A yes then goes to the planner.
 
-**Model: through ibis only.** Every call, the knowledge answer included, goes through the ibis API. The local
-instance was switched to the Balanced dial on 2026-09-29.
+**Model: through ibis, except Jev.** Every model call, the knowledge answer included, goes through the ibis API.
+The local instance was switched to the Balanced dial on 2026-09-29, and new installs default to it (PR #13).
+- Jev stays separate: the plugin calls OpenRouter's decisions endpoint directly, with its own key setting.
+- Without that key, or when Jev doesn't answer within its time budget, routing falls back to the classifier with
+  the knowledge category. Private instances that can't reach OpenRouter still get a knowledge route.
 
 **Hand-off.** Changes the assistant already makes keep today's plan-and-confirm flow. It sends the user to the right
 page, with a link, for:
@@ -106,9 +109,8 @@ Two sets were used:
 
 ## Decided (Lucas, 2026-09-29)
 
-1. **The model:** everything goes through the ibis API; the instance now uses the Balanced dial. Open: ibis has no
-   route for Jev yet. The only client is `JevGate` in ibis-routing, which calls OpenRouter's decisions endpoint
-   directly. So the gate needs an ibis endpoint first.
+1. **The model:** everything goes through the ibis API, except Jev, which stays separate and is called on
+   OpenRouter directly. The instance now uses the Balanced dial; new installs default to ibis (PR #13).
 2. **Routing:** tested Jev first. It beats the classifier on single questions (44 vs 41) and on follow-ups (23 vs 20)
    (above), so it becomes the gate.
 3. **The admin docs:** later.
