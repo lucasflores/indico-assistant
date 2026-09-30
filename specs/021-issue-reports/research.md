@@ -107,6 +107,13 @@ with no `answer_id`. That covers these branches:
 Rate limits (429), sign-in (401, 403) and validation (400, 422) get no offer: they are not problems with the
 assistant.
 
+**After spec 022** (merged 2026-09-30, rebased onto): answers now come by routes.
+- The router's own out-of-scope refusal sets `problem: 'out_of_scope'`.
+- A knowledge or chat answer with `failed` set gets `problem: 'failed'`.
+- When the planner cannot plan and no plan is waiting (`cannot_plan`), the knowledge answer replaces the planner's
+  reply, and its `problem` goes with it. The user gets an explanation, not a failure.
+- With a plan waiting, the planner's reply and its `problem` stand.
+
 **Rationale**: the Chainlit app does not import `indico_assistant`, and the planner's replies vary, so the app
 cannot recognise a failure from the text (spec FR-010). A planner answer stores only `{"plan_id"}` today.
 

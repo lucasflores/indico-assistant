@@ -57,4 +57,4 @@ def test_the_planners_problem_reaches_the_answer():
             patch("indico_assistant.services.actions.planner.plan_turn",
                   return_value=PlanTurn("I could not work out what to change.", problem="not_understood")):
         reply, metadata, plan = service._plan(MagicMock(), "s1", "move it", [], None)
-    assert metadata == {"plan_id": None, "problem": "not_understood"} and plan is None
+    assert metadata == {"plan_id": None, "cannot_plan": False, "problem": "not_understood"} and plan is None
