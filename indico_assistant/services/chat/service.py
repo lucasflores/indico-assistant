@@ -246,7 +246,7 @@ class ChatService:
         with acting_as(user):
             caps, pages = capability_list(user, event, settings), page_list(user, event)
         return knowledge.answer(message, history, llm=plugin.llm_service, caps=caps, pages=pages, guide=get_guide(),
-                                base_url=settings.get("base_url") or "", event=event)
+                                base_url=self._get_base_url(), event=event)  # (Indico's own address, as citations)
 
     def _plan(self, user, session_id, message, context, waiting_plan, page_event_id=None):
         """The chat-action planner's answer, or None when the message turns out to be a question."""
