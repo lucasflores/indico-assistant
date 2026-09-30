@@ -126,6 +126,13 @@ class PipelineResult(BaseModel):
         default=False, description="Whether result was served from cache"
     )
 
+    # What the answer records as its evidence for triage (spec 021 R5); NL2SQLPipeline.process fills them
+    intent: str | None = Field(default=None, description="The classified intent")
+    intent_confidence: float | None = Field(default=None, description="The classifier's confidence in it")
+    validation_rejection: str | None = Field(
+        default=None, description="The last reason a safety check rejected a generated query"
+    )
+
 
 class ValidationResult(BaseModel):
     """Result of SQL validation."""

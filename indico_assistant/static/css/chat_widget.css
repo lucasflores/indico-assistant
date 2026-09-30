@@ -87,7 +87,14 @@ html #assistant-panel.assistant-closing { animation: assistant-out 0.2s ease-in 
   color: #fff;
   flex: none;
 }
-#assistant-panel-close {
+#assistant-panel-report {
+  margin-left: auto;  /* beside », at the bar's right end */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#assistant-panel-report:disabled { opacity: 0.5; cursor: default; }
+#assistant-panel-close, #assistant-panel-report {
   border: none;
   background: transparent;
   color: inherit;
@@ -98,7 +105,8 @@ html #assistant-panel.assistant-closing { animation: assistant-out 0.2s ease-in 
   border-radius: 6px;
   cursor: pointer;
 }
-#assistant-panel-close:hover, #assistant-panel-close:focus-visible { background: rgba(255, 255, 255, 0.2); }
+#assistant-panel-close:hover, #assistant-panel-close:focus-visible,
+#assistant-panel-report:enabled:hover, #assistant-panel-report:focus-visible { background: rgba(255, 255, 255, 0.2); }
 
 #assistant-panel-placeholder {
   position: absolute;

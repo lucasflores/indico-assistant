@@ -50,13 +50,14 @@ the forms, offers and "Report sent" carry no thumbs (spec FR-007a).
   in the page;
 - **error**: the message, with the text kept.
 
-The result line is `aria-live="polite"`.
+The categories are toggle buttons (`aria-pressed`) in a labelled `role="group"`. The result line is
+`aria-live="polite"`.
 
 ## Test hooks
 
 | Hook | Meaning |
 |---|---|
 | `#assistant-panel-report[disabled]` | the title bar's button |
-| `#issue-report`, `#issue-kind-<category>[aria-checked]`, `#issue-text`, `#issue-attach`, `#issue-send`, `#issue-cancel` | the form |
-| `#issue-report-sent a[href]` | the sent state and its link |
+| `[data-issue-report=<form_key>]`, `[data-issue="kind-<category>"][aria-pressed]`, `[data-issue=text]`, `[data-issue=attach]`, `[data-issue=send]`, `[data-issue=cancel]` | the form. Attributes, not ids, since two forms can be open at once |
+| `[data-issue=sent] a[href]` | the sent state and its link |
 | an action button whose label is "Report a problem" | an offer |

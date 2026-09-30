@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-
 revision = '009_create_issue_reports'
 down_revision = '008_add_chat_session_title'
 branch_labels = None

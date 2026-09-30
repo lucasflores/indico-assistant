@@ -308,9 +308,14 @@ class NL2SQLPipeline:
 
         Collected per thread/task (collect_calls), so concurrent questions never mix their costs.
         """
+        trace: dict[str, Any] = {}
         with collect_calls() as calls:
-            result = self._process(*args, **kwargs)
+            result = self._process(*args, _trace=trace, **kwargs)
         result.llm_calls = calls
+        # the evidence the answer records (spec 021 R5), whichever of _process's returns ended it
+        result.intent = trace.get("intent")
+        result.intent_confidence = trace.get("intent_confidence")
+        result.validation_rejection = trace.get("validation_rejection")
         return result
 
     def _process(
@@ -325,6 +330,7 @@ class NL2SQLPipeline:
         conversation_history: list[dict[str, str]] | None = None,
         intent: str | None = None,
         intent_confidence: float | None = None,
+        _trace: dict[str, Any] | None = None,
     ) -> PipelineResult:
         """
         Process a natural language question through the pipeline.
@@ -360,6 +366,7 @@ class NL2SQLPipeline:
             PipelineResult with the answer or error information.
         """
         start_time = time.time()
+        trace = _trace if _trace is not None else {}  # filled for process() (spec 021 R5)
         classification_time = 0
         generation_time = 0
         execution_time = 0
@@ -438,6 +445,7 @@ class NL2SQLPipeline:
                 classification.intent,
                 classification.confidence,
             )
+            trace.update(intent=classification.intent, intent_confidence=classification.confidence)
 
             # A change, not a question: the chat-action planner answers it (Feature 019), no SQL at all
             if classification.intent == "write_request":
@@ -537,6 +545,7 @@ class NL2SQLPipeline:
                 validation_attempts += 1
                 rejection_reason = "; ".join(validation_result.violations)
                 log_validation_rejection(audit_log, f"Attempt {validation_attempts}: {rejection_reason}")
+                trace["validation_rejection"] = f"Attempt {validation_attempts}: {rejection_reason}"
 
                 # Regenerate SQL with validation feedback
                 gen_start = time.time()
@@ -586,6 +595,7 @@ class NL2SQLPipeline:
             if not validation_result.valid:
                 rejection_reason = "; ".join(validation_result.violations)
                 log_validation_rejection(audit_log, f"Final rejection: {rejection_reason}")
+                trace["validation_rejection"] = f"Final rejection: {rejection_reason}"
                 return self._error_result(
                     PipelineErrorType.VALIDATION_FAILED,
                     f"Validation failed after {validation_attempts} retries: {validation_result.violations}",

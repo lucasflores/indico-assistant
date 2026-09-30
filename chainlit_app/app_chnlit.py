@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 import asyncio
+from uuid import uuid4
+
 import chainlit as cl
 import chainlit.server
 import httpx
@@ -515,6 +517,95 @@ async def on_plan_choice(action: cl.Action):
     await cl.Message(content=action.payload["text"], type="user_message").send()
     await _ask(action.payload["text"])
 
+
+
+# --- Issue reports (spec 021, contracts/panel.md): the form, and what opens it ------------------------------
+
+
+def _has_messages() -> bool:
+    """Whether this chat has anything to attach yet (a new chat has not; a resumed one has)."""
+    try:
+        return bool(cl.context.session.has_first_interaction)
+    except Exception:
+        return False
+
+
+async def _report_form(answer_id: str | None = None, category: str | None = None, text: str = "",
+                       can_attach: bool = True) -> None:
+    """The report form (public/elements/IssueReport.jsx) in a message of its own. Its key makes a second Send
+    of the same form return the first report (R8). Never sent from inside a run, so it has no thumbs (FR-007a)."""
+    form_key = str(uuid4())
+    element = cl.CustomElement(name="IssueReport", display="inline",
+                               props={"form_key": form_key, "answer_id": answer_id, "category": category,
+                                      "text": text or "", "can_attach": can_attach})
+    message = await cl.Message(content="", elements=[element]).send()
+    forms = cl.user_session.get("report_forms") or {}
+    forms[form_key] = message
+    cl.user_session.set("report_forms", forms)
+
+
+@cl.on_window_message
+async def on_window_message(data):
+    """The panel's title bar asked for a report form (R2). Chainlit forwards every window message here, whoever
+    posted it, so only this exact one does anything, and all it does is open an empty form."""
+    if isinstance(data, dict) and data.get("source") == "indico-assistant" and data.get("type") == "report":
+        await _report_form(can_attach=_has_messages())
+
+
+@cl.action_callback("report_open")
+async def on_report_open(action: cl.Action):
+    """An offer's button: the form for that answer (US4)."""
+    payload = action.payload or {}
+    await _report_form(answer_id=payload.get("answer_id"), category=payload.get("category"),
+                       text=payload.get("text") or "")
+
+
+def _report_refusal(response: httpx.Response) -> str:
+    """Why a report was not sent, in one sentence the form shows under its text (which it keeps)."""
+    if response.status_code == 404:
+        return 'The conversation could not be attached, so untick "Attach this conversation" and send again.'
+    if response.status_code == 422:
+        try:
+            reason = (response.json().get("message") or "").rstrip(".")
+        except Exception:
+            reason = ""
+        return f"The report could not be sent: {reason or 'something in it is not valid'}."
+    if response.status_code == 429:
+        retry = response.headers.get("Retry-After")
+        wait = f" in {int(retry) // 60 + 1} minutes" if retry and retry.isdigit() and int(retry) > 90 else " in a minute"
+        return f"You have sent many reports for now, so please try again{wait}."
+    return "The report could not be sent, so please try again shortly."
+
+
+@cl.action_callback("report_submit")
+async def on_report_submit(action: cl.Action):
+    """The form's Send: the report goes to Indico as the user. Its answer goes back to the form (callAction)."""
+    payload = action.payload or {}
+    indico_api_url, auth_token = _get_indico_api_url(), _get_auth_token()
+    if not indico_api_url or not auth_token:
+        return {"ok": False, "message": "Authentication token missing, so please sign in again."}
+    attach = payload.get("attach") is True
+    body = {"form_key": payload.get("form_key"), "category": payload.get("category"), "text": payload.get("text"),
+            "attach": attach, "session_id": _thread_id() if attach else None,
+            "answer_id": payload.get("answer_id")}
+    client = await _get_http_client(indico_api_url)
+    try:
+        response = await client.post("/api/assistant/reports", json=body, headers={"X-Assistant-Auth": auth_token})
+    except httpx.RequestError:
+        logger.warning("Could not reach Indico to send a report", exc_info=True)
+        return {"ok": False, "message": "The assistant service could not be reached, so please try again shortly."}
+    if response.status_code in (200, 201):
+        sent = response.json()
+        return {"ok": True, "report_id": sent["report_id"], "url": sent["url"]}
+    return {"ok": False, "message": _report_refusal(response)}
+
+
+@cl.action_callback("report_cancel")
+async def on_report_cancel(action: cl.Action):
+    """The form's Cancel: the form goes, and nothing is sent."""
+    message = (cl.user_session.get("report_forms") or {}).pop((action.payload or {}).get("form_key"), None)
+    if message is not None:
+        await message.remove()
 
 if __name__ == "__main__":
     # Allows `python app_chnlit.py` during quick tests

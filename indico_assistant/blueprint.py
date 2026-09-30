@@ -149,6 +149,11 @@ def _register_routes():
     blueprint.add_url_rule("/feedback", "feedback", RHFeedback, methods=["POST"])
     blueprint.add_url_rule("/feedback/<feedback_id>", "feedback_delete", RHFeedbackDelete, methods=["DELETE"])  # (020)
     
+    # Issue reports (Feature 021, contracts/api.md)
+    from indico_assistant.controllers.reports import RHReportCreate
+
+    blueprint.add_url_rule("/reports", "report_create", RHReportCreate, methods=["POST"])
+
     # Admin API endpoints (Feature 005, T043)
     from indico_assistant.controllers.admin import (
         RHAdminErrors,

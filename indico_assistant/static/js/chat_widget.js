@@ -51,6 +51,8 @@
 
   function setMode(mode) {
     root.dataset.assistantPanel = mode;
+    const report = panel && panel.querySelector("#assistant-panel-report");
+    if (report) report.disabled = mode !== "ready";  // the frame must be there to draw the form (spec 021)
   }
 
   function clampWidth(width) {
@@ -88,6 +90,12 @@
     if (frame && frame.contentWindow && origin) {
       frame.contentWindow.postMessage(Object.assign({ source: "indico-assistant" }, message), origin);
     }
+  }
+
+  // the title bar's Report button: the chat draws an empty report form (spec 021 R2, contracts/panel.md)
+  function askForReport() {
+    postToFrame({ type: "report" });
+    if (frame) frame.focus();  // the user pressed a button: the form is where they type next
   }
 
   function sendLogin() {
@@ -146,6 +154,11 @@
            tabindex="0" aria-valuemin="${MIN_WIDTH}"></div>
       <div id="assistant-panel-bar">
         <span>Indico Assistant</span>
+        <button id="assistant-panel-report" type="button" aria-label="Report a problem" title="Report a problem" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg>
+        </button>
         <button id="assistant-panel-close" type="button" aria-label="Hide the assistant" title="Hide (Esc)">»</button>
       </div>
       <div id="assistant-panel-placeholder" role="status">Loading the assistant…</div>`;
@@ -156,6 +169,7 @@
     panel.appendChild(frame);
     document.body.appendChild(panel);
     panel.querySelector("#assistant-panel-close").addEventListener("click", closePanel);
+    panel.querySelector("#assistant-panel-report").addEventListener("click", askForReport);
     panel.addEventListener("keydown", (event) => { if (event.key === "Escape") closePanel(); });
     bindResize(panel.querySelector("#assistant-panel-handle"));
     applyWidth();

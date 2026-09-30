@@ -9,12 +9,11 @@ copy, never the live chat (FR-018). Retention deletes closed reports ``retention
 
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from indico.core.db import db
 from sqlalchemy import CheckConstraint, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-
 
 CATEGORIES = ('bug', 'feature', 'wrong_answer')
 STATUSES = ('open', 'under_review', 'closed')
@@ -41,7 +40,7 @@ class IssueReport(db.Model):
     form_key = Column(UUID(as_uuid=True), nullable=False)
     category = Column(String(20), nullable=False)
     text = Column(Text, nullable=False)
-    copy = Column(JSONB, nullable=True)  # None: the conversation was not attached (FR-004)
+    copy = Column(JSONB(none_as_null=True), nullable=True)  # SQL NULL when not attached (FR-004), not JSON null
     status = Column(String(20), nullable=False, default='open')
     note = Column(Text, nullable=True)
     updated_by_id = Column(Integer, nullable=True)

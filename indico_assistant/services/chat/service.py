@@ -605,6 +605,17 @@ class ChatService:
                 "write_request": getattr(result, 'write_request', False),
                 "knowledge_request": getattr(result, 'knowledge_request', False),
                 "chat_request": getattr(result, 'chat_request', False),
+                # how the answer was made, for the team's triage of a report (spec 021 R5): recorded now, since the
+                # query log has no link to answers. Never returned to the user (sessions API, job result)
+                "evidence": {
+                    "intent": result.intent,
+                    "intent_confidence": result.intent_confidence,
+                    "row_count": result.row_count,
+                    "validation_rejection": result.validation_rejection,
+                    "correction_attempts": result.correction_attempts,
+                    "corrected": result.corrected,
+                    "cached": result.from_cache,
+                },
             })
 
             return response_text, metadata

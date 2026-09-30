@@ -8,9 +8,10 @@ Someone else's report, and one that does not exist, get the same 404, so the API
 
 from __future__ import annotations
 
-from flask import session
+from flask import jsonify, request, session
 
 from indico_assistant.controllers.base import RHChatBase
+from indico_assistant.services import reports
 
 
 class RHReportsAPI(RHChatBase):
@@ -26,3 +27,16 @@ class RHReportsAPI(RHChatBase):
     def _check_csrf(self):
         if session.user is not None:  # the Indico cookie came with it (a token call carries none)
             super()._check_csrf()
+
+
+class RHReportCreate(RHReportsAPI):
+    """POST /reports: send a report (spec 021 US1). The limit counts only a report that is stored (R8)."""
+
+    def _process(self):
+        try:
+            report, created = reports.create_report(self.user, request.get_json(silent=True))
+        except reports.ReportError as error:
+            if error.status == 429:
+                raise self._rate_limit_error(error.retry_after) from None
+            return self._error_response(error.code, error.message, error.details, status=error.status)
+        return jsonify({'report_id': report.id, 'url': reports.report_url(report.id)}), 201 if created else 200
