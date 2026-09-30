@@ -360,7 +360,7 @@ without overwriting anyone.
 
 ### Tests first
 
-- [ ] T037 [P] [US4] In `tests/unit/test_answer_evidence.py`, the `problem` flag (R4):
+- [x] T037 [P] [US4] In `tests/unit/test_answer_evidence.py`, the `problem` flag (R4):
   - **pipeline**: a failed result gives `problem: 'failed'`, an out-of-scope one gives `'out_of_scope'`, and a
     good one gives none;
   - **planner**: each `plan_turn` return point listed in R4 sets `PlanTurn.problem`. `planner.py:98` and `:143`
@@ -368,7 +368,7 @@ without overwriting anyone.
     cancel give none;
   - **carried through**: `ChatService._plan` puts it in the metadata. The job endpoint returns `problem` (add
     to the existing job test in `tests/integration/chat/test_chat_endpoint.py`).
-- [ ] T038 [P] [US4] In `chainlit_app/tests/test_reports.py`:
+- [x] T038 [P] [US4] In `chainlit_app/tests/test_reports.py`:
   - **thumbs**: `on_feedback` with `value=0` sends one offer message whose `report_open` payload is `{answer_id:
     forId, category: 'wrong_answer', text: comment}`. A second thumbs down on the same answer sends nothing, and
     `value=1` sends nothing;
@@ -380,10 +380,10 @@ without overwriting anyone.
 
 ### Implementation
 
-- [ ] T039 [US4] Add `problem` to `PlanTurn` in `services/actions/planner.py`, and set it at R4's return points.
+- [x] T039 [US4] Add `problem` to `PlanTurn` in `services/actions/planner.py`, and set it at R4's return points.
   In `services/chat/service.py`, set `metadata['problem']` for NL2SQL results, and copy `turn.problem` in
   `_plan`. Add `"problem"` to `RESPONSE_METADATA` in `controllers/chat.py`. This makes T037 pass.
-- [ ] T040 [US4] In `chainlit_app/app_chnlit.py`:
+- [x] T040 [US4] In `chainlit_app/app_chnlit.py`:
   - `_offer(answer_id=None)` returns the `report_open` action (label "Report a problem", icon `flag`);
   - `@cl.on_feedback` handles thumbs down, with the `offered` set in `cl.user_session` (R3);
   - the offers go in `_show_answer`'s and `_after_resume`'s branches as T038 lists.

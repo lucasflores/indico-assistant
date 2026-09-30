@@ -186,12 +186,14 @@ async def _after_resume(indico_api_url: str, auth_token: str, pending_job_id: st
             answer = await _wait_for_answer(client, pending_job_id, auth_token)
         if answer.status_code == 404:  # the job left the cache: no answer is coming (R9)
             loading_msg.content = UNANSWERED
+            loading_msg.actions = [_offer()]  # (spec 021: a question that got no answer)
             await loading_msg.send()
             return
         await _show_answer(answer, loading_msg, client, auth_token)
     except httpx.RequestError:
         logger.warning("Could not reach Indico while waiting for a resumed answer", exc_info=True)
         loading_msg.content = UNREACHABLE
+        loading_msg.actions = [_offer()]
         await loading_msg.send()
 
 
@@ -298,6 +300,7 @@ async def _ask(text: str, files=()):
     except httpx.RequestError:
         logger.exception("Failed to reach Indico assistant API")
         loading_msg.content = UNREACHABLE
+        loading_msg.actions = [_offer()]  # (spec 021: a question that got no answer)
         await loading_msg.send()
         return
 
@@ -314,6 +317,7 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
 
     if response.status_code == 202:  # still pending after ANSWER_TIMEOUT (every caller: review, PR #5)
         loading_msg.content = "The assistant is taking too long to answer. Please try again."
+        loading_msg.actions = [_offer()]  # (spec 021 FR-010a: no answer, so none to report)
         await loading_msg.send()
         return
     if response.status_code == 429:  # the per-user limits (10 a minute, 200 a day)
@@ -353,6 +357,7 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
             pass
 
         loading_msg.content = error_message
+        loading_msg.actions = [_offer()]
         await loading_msg.send()
         return
     if response.status_code >= 400:
@@ -412,6 +417,8 @@ async def _show_answer(response: httpx.Response, loading_msg: cl.Message, client
         return
 
     loading_msg.content = reply
+    if metadata.get("problem"):  # it failed, was out of scope, or a change was not made (spec 021 R4)
+        loading_msg.actions = [_offer(data.get("message_id"))]
     await loading_msg.send()
     await _drop_stale_plan_buttons(client, auth_token)
 
@@ -542,6 +549,27 @@ async def _report_form(answer_id: str | None = None, category: str | None = None
     forms = cl.user_session.get("report_forms") or {}
     forms[form_key] = message
     cl.user_session.set("report_forms", forms)
+
+
+def _offer(answer_id: str | None = None, text: str = "") -> cl.Action:
+    """The "Report a problem" button (US4). With an answer, the form starts as a wrong-answer report."""
+    return cl.Action(name="report_open", label="Report a problem", icon="flag",
+                     payload={"answer_id": answer_id, "category": "wrong_answer" if answer_id else None,
+                              "text": text or ""})
+
+
+@cl.on_feedback
+async def on_feedback(feedback):
+    """A thumbs down offers a report of that answer, once (R3). Chainlit calls this after the data layer has
+    stored the vote, so the answer is the user's own; it runs outside a run, so the offer has no thumbs."""
+    if feedback.value != 0:
+        return
+    offered = cl.user_session.get("offered") or set()
+    if feedback.forId in offered:
+        return
+    cl.user_session.set("offered", offered | {feedback.forId})
+    await cl.Message(content="Sorry that answer missed. Tell the team about it?",
+                     actions=[_offer(feedback.forId, feedback.comment)]).send()
 
 
 @cl.on_window_message

@@ -74,6 +74,9 @@ class PlanTurn:
     # plan waiting, the chat gives the knowledge answer instead (spec 022)
     cannot_plan: bool = False
     llm_calls: list = field(default_factory=list)
+    # the change did not go through: 'not_understood' or 'cannot_do'. The chat offers a report under such an
+    # answer (spec 021 R4); the reply alone cannot say, since the model writes some of them itself
+    problem: str | None = None
 
 
 def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings,
@@ -83,7 +86,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     user's own words, since the offer was written by a model (a link or an address in it is not the user's)."""
     enabled = enabled_actions(settings)
     if not enabled:
-        return PlanTurn(NOT_AVAILABLE, cannot_plan=True)
+        return PlanTurn(NOT_AVAILABLE, cannot_plan=True, problem='cannot_do')
     if (short := shortcut(open_plan, message)) is not None:
         draft, topic, remaining = short
         return _apply(draft, user, chat_session_id, open_plan, enabled, [], settings, topic, suggestions=remaining,
@@ -97,7 +100,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
-        return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls)
+        return PlanTurn(NOT_UNDERSTOOD, llm_calls=calls, problem='not_understood')
     draft = response.result
     if draft.decision == 'confirm' and open_plan is not None:  # agreement read into more than a plain yes
         if not draft.steps:
@@ -141,19 +144,19 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
             return PlanTurn(outcome_message(executor.run(open_plan.id, enabled=enabled)))
     elif draft.decision in ('unrelated', 'confirm', 'cancel'):
         return PlanTurn('', handled=False)
-    if not draft.steps:
-        return PlanTurn(draft.reply or NOT_UNDERSTOOD, cannot_plan=True)
+    if not draft.steps:  # (a clarifying reply too: nothing was planned. Narrow to `not draft.reply` if noisy)
+        return PlanTurn(draft.reply or NOT_UNDERSTOOD, cannot_plan=True, problem='not_understood')
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,
                                          settings=settings, topic=topic, page_event_id=page_event_id)
     except NotImplementedError:
-        return PlanTurn(NOT_SUPPORTED, cannot_plan=True)
+        return PlanTurn(NOT_SUPPORTED, cannot_plan=True, problem='cannot_do')
     if resolved.refusal:
-        return PlanTurn(resolved.refusal, cannot_plan=resolved.refusal == resolve.NOTHING_TO_CHANGE)
+        return PlanTurn(resolved.refusal, cannot_plan=resolved.refusal == resolve.NOTHING_TO_CHANGE, problem='cannot_do')
     if errors := validate_plan(resolved.steps, enabled):  # an action switched off: the knowledge answer says why
         return PlanTurn('I cannot plan that: ' + '; '.join(errors),
-                        cannot_plan=any(step['action'] not in enabled for step in resolved.steps))
+                        cannot_plan=any(step['action'] not in enabled for step in resolved.steps), problem='cannot_do')
     try:
         plan, token = executor.create_plan(
             user, chat_session_id, steps=resolved.steps, summary=resolved.summary, questions=resolved.questions,

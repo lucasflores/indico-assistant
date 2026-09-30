@@ -120,6 +120,14 @@ class TestChatJob:
         assert (data['status'], data['response'], data['session_id']) == ('done', 'Three events.', str(session_id))
         assert data['metadata'] == {'sql_generated': 'SELECT 1'}
 
+    def test_done_says_what_went_wrong_but_not_how_it_was_made(self, request_, jobs):
+        # spec 021: the chat offers a report under an answer with a problem; the evidence is for the team only
+        jobs[0]['job1'] = {'status': 'done', 'user_id': 123, 'session_id': str(uuid4()), 'message_id': str(uuid4()),
+                           'response': 'I can only help with events.',
+                           'metadata': {'problem': 'out_of_scope', 'evidence': {'intent': 'out_of_scope'}}}
+        response, _ = self._get(request_)
+        assert response.get_json()['metadata'] == {'problem': 'out_of_scope'}
+
     def test_done_with_a_plan(self, request_, jobs):
         plan = {'id': str(uuid4()), 'status': 'shown', 'expires_at': '2026-09-28T12:30:00+00:00', 'token': 't0k',
                 'summary': 'Create “Sync”', 'steps': [{'n': 1, 'description': 'Create “Sync”', 'side_effects': []}],
