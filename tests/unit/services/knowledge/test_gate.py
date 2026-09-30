@@ -64,6 +64,13 @@ def test_the_intents_are_the_classifiers_data_intents():
     assert set(gate.INTENTS) == set(listed) - routes and len(gate.INTENTS) == 11
 
 
+def test_a_concrete_can_you_is_a_change_as_the_classifier_has_it():
+    from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
+
+    assert "Can you move it to 3pm?" in CLASSIFICATION_PROMPT and "can you move it to 3pm?" in gate.ROUTES["change"]
+    assert "can you create meetings?" in CLASSIFICATION_PROMPT and "can you create meetings?" in gate.ROUTES["knowledge"]
+
+
 @pytest.mark.parametrize(("settings", "transport", "reason"), [
     ({**SETTINGS, "jev_api_key": None}, _transport(), "no key"),
     (SETTINGS, _transport(raises=httpx.ReadTimeout("slow")), "timeout"),

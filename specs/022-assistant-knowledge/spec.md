@@ -163,8 +163,8 @@ With the guide index present, no question needs the internet beyond the instance
     dates and names from the question itself.
   - change → the planner, given the waiting plan if there is one.
 - **FR-003**: **The planner's fall-through.** When the planner cannot plan the message (no step, nothing to change,
-  not a change after all, an action it doesn't have, changes switched off) and no plan is waiting, the message MUST
-  get the knowledge answer. With a plan waiting, the planner's reply stands.
+  not a change after all, an action it doesn't have, changes or that action switched off) and no plan is waiting, the
+  message MUST get the knowledge answer. With a plan waiting, the planner's reply stands.
 - **FR-004**: **Without Jev.** Without a Jev key, on a timeout, an error, or an answer that isn't one of the routes,
   the classifier MUST route instead, with the same routes (it gains a `chat` category), never in addition to Jev.
   Without Jev's reading of the conversation, the last answer's offer sends the next message to the planner first.
@@ -172,7 +172,8 @@ With the guide index present, no question needs the internet beyond the instance
 - **FR-006**: Jev MUST be sent the latest message plus the last two exchanges, in the format ibis's web gate uses
   (each earlier reply cut to 400 characters), and a note when a plan is waiting.
 - **FR-007**: The route criteria and intents MUST be the ones the router probe measured (thread E study), with the
-  chat route as decided on 2026-09-30.
+  chat route as decided on 2026-09-30, and a "can you …?" naming a concrete change routed as a change, as the
+  classifier routes it. A general "can you create meetings?" stays knowledge.
 
 **What the assistant can do (generated, never hand-written)**
 - **FR-008**: For each knowledge question, the assistant MUST build the list of what it can do for this user. The

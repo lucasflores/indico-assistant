@@ -7,8 +7,9 @@ its answers are validated, the classifier routes instead whenever it is skipped,
 One call carries two ``choice`` questions: ``route`` (knowledge, change, data, chat, out_of_scope) and ``intent`` (the
 classifier's 11 data intents, used only for data). The state is the format ibis's web gate measured
 (ibis_routing.webgate.gate_input): the last two exchanges, each earlier reply cut to 400 characters, then the latest
-message. The criteria are the ones the router probe measured (thread E study, jev_router_probe.py), with the chat
-route as Lucas set it on 2026-09-30: from the conversation, informed by general knowledge.
+message. The criteria are the ones the router probe measured (thread E study, jev_router_probe.py), with two changes
+Lucas made on 2026-09-30: a "can you ...?" naming a concrete change is a change (the plan card is the offer, as the
+classifier has it), and chat answers from the conversation, informed by general knowledge.
 """
 
 import math
@@ -24,11 +25,13 @@ PLAN_WAITING = "(A plan made in this chat is waiting for the user to confirm it.
 
 ROUTES = {
     "knowledge": "How to do something in Indico, where a page or setting is, or what the assistant itself can or "
-                 "cannot do, including questions asking whether it can do something (\"can you ...?\", \"are you "
-                 "able to ...?\") even when they name a change.",
-    "change": "An instruction asking the assistant to make a change in Indico now (create, change, move, add, "
-              "attach, cancel or undo something), usually with its details, or an agreement to a change it just "
-              "offered or planned. A question asking whether it can do something, or how to, is not a change.",
+                 "cannot do in general (\"what can you do?\", \"can you create meetings?\", \"are you able to "
+                 "send emails?\").",
+    "change": "A request to make a change in Indico now (create, change, move, add, attach, cancel or undo "
+              "something), including a polite one naming a concrete change (\"can you move it to 3pm?\", "
+              "\"could you add a Teams meeting to this event?\"), or an agreement to a change the assistant just "
+              "offered or planned. Asking how to make a change, or what the assistant can do in general, is not a "
+              "change.",
     "data": "A question about information stored in Indico: events, meetings, talks, speakers, sessions, schedules, "
             "registrations, participants, minutes and notes, attached files and what they say. Unfamiliar project, "
             "topic or meeting names are usually things stored in Indico.",

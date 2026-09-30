@@ -43,6 +43,12 @@ def test_only_links_already_in_the_conversation_survive():
     assert result.text == f"See [Sync]({BASE}/event/351/), the timetable and a guide page."
 
 
+def test_a_link_in_the_latest_message_survives():
+    llm = FakeLLM(reply="- [This agenda](/event/353/): Tuesday")
+    result = chat.chat_answer("Rephrase [this agenda](/event/353/) as a list", HISTORY, llm=llm, base_url=BASE)
+    assert result.text == f"- [This agenda]({BASE}/event/353/): Tuesday"
+
+
 def test_the_rules_allow_general_knowledge_but_no_lookups():
     assert "general knowledge" in chat.RULES and "never invent" in chat.RULES.lower()
 

@@ -152,8 +152,9 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
         return PlanTurn(NOT_SUPPORTED, cannot_plan=True)
     if resolved.refusal:
         return PlanTurn(resolved.refusal, cannot_plan=resolved.refusal == resolve.NOTHING_TO_CHANGE)
-    if errors := validate_plan(resolved.steps, enabled):
-        return PlanTurn('I cannot plan that: ' + '; '.join(errors))
+    if errors := validate_plan(resolved.steps, enabled):  # an action switched off: the knowledge answer says why
+        return PlanTurn('I cannot plan that: ' + '; '.join(errors),
+                        cannot_plan=any(step['action'] not in enabled for step in resolved.steps))
     try:
         plan, token = executor.create_plan(
             user, chat_session_id, steps=resolved.steps, summary=resolved.summary, questions=resolved.questions,
