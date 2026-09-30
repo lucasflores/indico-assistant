@@ -211,8 +211,8 @@ No report exists until Send is pressed.
 - **FR-003**: When "Attach this conversation" is ticked, the report MUST store a copy of the conversation, taken when
   it is sent: up to 50 messages ending at the reported answer, or at the latest message when the report has no
   answer. The copy MUST include, for each message, its text, time and the page it was sent from. For each answer it
-  MUST also include what was recorded with the answer when it was made (FR-003b). The copy MUST NOT include email
-  or IP addresses.
+  MUST also include what was recorded with the answer when it was made (FR-003b). The copy MUST NOT add anything
+  about the reporter that the messages don't already hold, such as the email and IP address the query log keeps.
 - **FR-003a**: A report MUST copy only a conversation of the user sending it, and a reported answer MUST belong to
   that conversation. Anything else is refused, with the same refusal whether the conversation exists or not
   (FR-014).
@@ -308,8 +308,8 @@ No report exists until Send is pressed.
   show that a report naming another user's conversation, or an answer from a different conversation, is refused
   and stores nothing (FR-003a).
 - **SC-004**: Automated tests show that the copy stays unchanged when the conversation is continued, deleted or
-  purged. They also show that an unticked report stores nothing from the conversation, that no copy holds an email
-  or IP address, that a user's view of a report holds no evidence, and that a deleted report leaves nothing behind.
+  purged. They also show that an unticked report stores nothing from the conversation, that no copy holds the
+  reporter's email or IP address from the query log, that a user's view of a report holds no evidence, and that a deleted report leaves nothing behind.
 - **SC-005**: Automated tests show that retention deletes a closed report past the period and keeps every open or
   under-review report, whatever its age, including one closed longer ago than the period and then reopened.
 - **SC-006**: An admin's status or note change shows on the user's profile page at its next load, in every test.
