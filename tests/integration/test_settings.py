@@ -20,7 +20,9 @@ class TestGlobalSettingsPersistence:
         from indico_assistant.default_settings import DEFAULT_SETTINGS
 
         assert DEFAULT_SETTINGS["enabled"] is True
-        assert DEFAULT_SETTINGS["llm_provider"] == "ollama"
+        assert DEFAULT_SETTINGS["llm_provider"] == "ibis"
+        assert DEFAULT_SETTINGS["llm_model"] == "ibis/Balanced"
+        assert DEFAULT_SETTINGS["llm_base_url"] == "https://labs.aithoth.com/ibis-api"
         assert DEFAULT_SETTINGS["timeout_seconds"] == 30
 
     def test_settings_form_is_configured(self):
