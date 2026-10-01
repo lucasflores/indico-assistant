@@ -43,7 +43,7 @@ user scoped access to info on their own github account."
   - Each tool has a name, a description, an argument schema and a text result: the same shape as an MCP tool. So a
     later connector can be backed by an MCP server without changing the loop.
 - **Each Indico instance registers its own GitHub App.** Its callback address is the instance's own, and its admin
-  owns the secret. For our test instance, who registers it is Lucas's call (see Open questions).
+  owns the secret.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -299,10 +299,9 @@ after Lucas agrees.
 - **More connectors:** mixing GitHub and Indico data in one answer, other connectors, MCP servers, and Chainlit's
   own MCP client.
 
-## Open questions for Lucas
+## Decided after review (Lucas, 2026-09-30)
 
-1. **Who registers the GitHub App for our test instance:** your account (`lucasflores`) or the AI-Thoth
-   organisation? The code doesn't depend on it, but live checks against real GitHub do.
-2. **Can an admin disconnect a user's GitHub** from that user's profile? Default: yes, as spec 021 lets admins see
-   another user's pages.
-3. **GitHub Enterprise Server stays out of v1?** Default: yes. Adding it later makes GitHub's address a setting.
+1. **Who registers the GitHub App:** the person with top admin rights on the Indico instance. For our test instance
+   that is Lucas, who also owns the AI-Thoth organisation.
+2. **An admin can disconnect a user's GitHub** from that user's profile page.
+3. **GitHub Enterprise Server stays out of v1.**
