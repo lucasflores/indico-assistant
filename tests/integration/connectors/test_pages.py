@@ -243,3 +243,62 @@ def test_the_menu_item(app, db, users, rendered, settings):
     settings['github_enabled'] = False
     assert item(users['makoto'], users['makoto']) is None
     assert item(users['lucas'], users['makoto']) is not None  # (an admin can still remove it)
+
+
+# --- no token anywhere (SC-004, T037) ----------------------------------------------------------------------
+
+def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fake, settings, caplog, monkeypatch):
+    """Connect, the page, the API, a refresh, an answer and a disconnect: every token GitHub issued is then looked
+    for in the logs, the redirects, the page's data, the API's body, the model's prompts and the route record."""
+    import logging
+    from datetime import UTC, datetime
+
+    from indico_assistant.controllers import connections as api_module
+    from indico_assistant.services.chat.service import _route_record
+    from indico_assistant.services.connectors import loop
+
+    caplog.set_level(logging.DEBUG)
+    issued, seen = set(), []
+
+    def remember():
+        issued.update(fake.state["tokens"], fake.state["refresh"])
+
+    makoto = users['makoto']
+    response, _ = run(app, pages.RHConnect, makoto, method='POST')
+    seen.append(response.location)
+    response, _ = connect(app, makoto)
+    seen.append(response.location)
+    remember()
+    run(app, pages.RHConnections, makoto)
+    seen.append(repr(rendered))
+
+    request = MagicMock(view_args={})
+    monkeypatch.setattr(api_module, 'request', request)
+    rh = api_module.RHConnectionsAPI.__new__(api_module.RHConnectionsAPI)
+    rh._user = makoto
+    with app.test_request_context():
+        seen.append(rh._process()[0].get_data(as_text=True))
+
+    Connection.query.filter_by(user_id=makoto.id).one().access_expires_at = datetime.now(UTC)  # (refreshed next)
+    prompts = []
+
+    class Recording:
+        def generate(self, prompt, response_model, **kwargs):
+            prompts.append((prompt, kwargs))
+            step = (response_model(call={"tool": "my_pull_requests"}) if len(prompts) == 1
+                    else response_model(**({"reply": "Done."} if "reply" in response_model.model_fields
+                                           else {"answer": "Done."})))
+            return MagicMock(success=True, result=step)
+
+    result = loop.answer(makoto.id, "which of my PRs are open?", [], llm=Recording(), settings=settings,
+                         base_url="http://indico.test", profile_url="http://indico.test/user/assistant-connections/")
+    remember()
+    seen += [repr(prompts), repr(_route_record("connector", result)), result.text]
+    with app.test_request_context():
+        session.set_session_user(makoto)
+        store.disconnect(makoto.id, github.app_for(settings))
+    seen.append(caplog.text)
+
+    assert len(issued) >= 4  # (the first pair, then the refreshed pair)
+    for token in issued:
+        assert all(token not in text for text in seen), "a token leaked"

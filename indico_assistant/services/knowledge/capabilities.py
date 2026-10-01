@@ -31,6 +31,7 @@ class CapabilityList:
     cannot: list  # (action summary, reason)
     event: dict | None  # {id, title, type, manages, locked}
     changes_enabled: bool
+    github: str | None = None  # spec 023: None while GitHub is off; else their login, or "" when not connected
 
     def render(self):
         lines = [f"You are talking to {self.user_name}{' (an Indico administrator)' if self.is_admin else ''}."]
@@ -58,8 +59,16 @@ class CapabilityList:
                 by_reason.setdefault(why, []).append(what)
             lines += [f"Changes I cannot make for them ({_about_them(why)}): " + "; ".join(whats) + "."
                       for why, whats in by_reason.items()]
-        lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It has no access to GitHub, email inboxes or "
-                     "calendars outside Indico.")
+        if self.github is None:
+            lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It has no access to GitHub, email inboxes or "
+                         "calendars outside Indico.")
+        else:
+            lines.append("It can read their GitHub, read-only (their pull requests, the reviews waiting for them, "
+                         "issues assigned to them, their repositories): "
+                         + (f"they are connected as @{self.github}." if self.github else "they have not connected it "
+                            "yet, which they can do on the Connected accounts page of their profile."))
+            lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It never changes anything on GitHub, and has "
+                         "no access to email inboxes or calendars outside Indico.")
         return "\n".join(lines)
 
 
@@ -110,7 +119,13 @@ def capability_list(user, event=None, settings=None):
     if event is not None:
         event_info = {"id": event.id, "title": event.title, "type": getattr(event.type_, "name", str(event.type_)),
                       "manages": bool(event.can_manage(user)), "locked": bool(event.is_locked)}
+    github = None
+    if settings.get("github_enabled"):
+        from indico_assistant.services.connectors.store import connection
+
+        row = connection(user.id)
+        github = row.account_login if row is not None and not row.needs_renewal else ""
     return CapabilityList(user_name=user.full_name, is_admin=bool(user.is_admin),
                           data_questions=bool(settings.get("nl2sql_enabled", True)), create_in=create_in,
                           propose_in=propose_in, can=can, cannot=cannot, event=event_info,
-                          changes_enabled=bool(enabled))
+                          changes_enabled=bool(enabled), github=github)

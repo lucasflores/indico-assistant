@@ -120,3 +120,27 @@ def test_room_booking_is_listed_only_for_those_indico_shows_it_to(people):
 def test_the_page_list_is_built_as_the_user_only(people, dummy_event):
     with acting_as(people["manager"]), pytest.raises(RuntimeError):
         page_list(people["stranger"], dummy_event)  # never another user's menus
+
+
+# --- spec 023: what the knowledge answer says about GitHub (FR-018) ------------------------------------------
+
+def test_github_off_keeps_todays_line(people):
+    text = _caps(people["manager"]).render()
+    assert "It has no access to GitHub, email inboxes or calendars outside Indico." in text
+
+
+def test_github_on_says_whether_this_user_is_connected(people, monkeypatch):
+    from cryptography.fernet import Fernet
+    from indico.core.db import db
+
+    from indico_assistant.services.connectors import store
+    from indico_assistant.services.connectors.github import Account, Tokens
+
+    on = {**SETTINGS, "github_enabled": True}
+    text = _caps(people["manager"], settings=on).render()
+    assert "It can read their GitHub" in text and "not connected it" in text and "Connected accounts" in text
+    assert "no access to GitHub" not in text and "never changes anything on GitHub" in text
+    monkeypatch.setenv(store.KEY_ENV, Fernet.generate_key().decode())
+    store.save(people["manager"].id, "github", Account(1001, "octo-dev"), Tokens("ghu_x", None, None, None))
+    db.session.flush()
+    assert "connected as @octo-dev" in _caps(people["manager"], settings=on).render()

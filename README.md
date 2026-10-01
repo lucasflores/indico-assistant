@@ -16,6 +16,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 - [Features](#features)
 - [Chat actions](#chat-actions)
 - [Issue reports](#issue-reports)
+- [GitHub](#github)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -184,6 +185,30 @@ Open reports and reports under review are never deleted. Run `indico db --all-pl
 `plugin_assistant.issue_reports` (migration 009).
 
 The design is in `specs/021-issue-reports/`.
+
+## GitHub
+
+Users connect their own GitHub account and ask the assistant about it: "which of my pull requests are still open?",
+"anything waiting for my review?", "what happened in owner/repo this week?". The assistant only reads, with that
+user's own token, and never changes anything on GitHub.
+
+**Connecting.** Under **My profile → Connected accounts**, **Connect GitHub** goes to GitHub to authorise the
+instance's GitHub App and comes back. The page then shows the account, the repositories the assistant can see (the
+accounts and organisations where the app is installed, with a link to add more), and **Disconnect**, which deletes
+the tokens and revokes the authorisation on GitHub. An admin can see and remove another user's connection, but never
+reads their GitHub.
+
+**Asking.** While GitHub is on, the router has a sixth route, `connector`. A user who isn't connected gets a link to
+connect. Otherwise a short loop of model calls picks from seven read tools (my pull requests, reviews waiting on me,
+my issues, a search, one issue or pull request in full, a repository's recent activity, the repositories it can see)
+and then answers, at most 3 lookups and 60 s. Text from GitHub is treated as data, never as an instruction; the
+answer links only to the GitHub items its lookups returned, and shows no images. GitHub's notifications aren't
+available: GitHub's API doesn't give them to an app.
+
+**Setting it up.** Register a GitHub App with read-only Metadata, Issues and Pull requests, set
+`INDICO_ASSISTANT_CONNECTOR_KEY` for the web server and the worker, and fill in the settings: see
+`docs/DEPLOYMENT.md`. Run `indico db --all-plugins upgrade` first: it adds `plugin_assistant.connections` (migration
+010). The design is in `specs/023-github-connector/` and `docs/design/routing.md`.
 
 ## Requirements
 
@@ -424,6 +449,13 @@ and `GET` or `DELETE /api/assistant/reports/{id}` reads or deletes one. Admins h
 "note", "seen"}`, where `seen` is the `updated_at` last read: `409 STALE` if it changed. Someone else's report and a
 missing one both return `404`. A write made with the Indico session cookie needs the `X-CSRF-Token` header. The full
 contract is `specs/021-issue-reports/contracts/api.md`.
+
+### Connections
+
+`GET /api/assistant/connections` lists the caller's connected accounts: `[{"service", "login", "connected_at",
+"last_used_at", "needs_renewal"}]`, never a token. `DELETE /api/assistant/connections/github` disconnects. Connecting
+needs a browser (GitHub's sign-in), so it is the profile page's. A write made with the Indico session cookie needs the
+`X-CSRF-Token` header.
 
 ### Vector Search
 
