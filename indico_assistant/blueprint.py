@@ -185,6 +185,26 @@ def _register_routes():
     blueprint.add_url_rule("!/admin/assistant-reports/<int:report_id>/", "admin_report", RHAdminReport,
                            methods=["GET", "POST"])
 
+    # Connected accounts (spec 023): the API, the profile page, and GitHub's one fixed callback
+    from indico_assistant.controllers.connections import (
+        RHConnect,
+        RHConnectionDelete,
+        RHConnections,
+        RHConnectionsAPI,
+        RHDisconnect,
+        RHGitHubCallback,
+    )
+    from indico_assistant.services.connectors.github import CALLBACK_PATH
+
+    blueprint.add_url_rule("/connections", "connections_api", RHConnectionsAPI, methods=["GET"])
+    blueprint.add_url_rule("/connections/<service>", "connection_delete", RHConnectionDelete, methods=["DELETE"])
+    with blueprint.add_prefixed_rules("!/user/<int:user_id>", "!/user"):
+        blueprint.add_url_rule("/assistant-connections/", "user_connections", RHConnections)
+        blueprint.add_url_rule("/assistant-connections/github/connect", "github_connect", RHConnect, methods=["POST"])
+        blueprint.add_url_rule("/assistant-connections/github/disconnect", "github_disconnect", RHDisconnect,
+                               methods=["POST"])
+    blueprint.add_url_rule("!" + CALLBACK_PATH, "github_callback", RHGitHubCallback)
+
     # Admin API endpoints (Feature 005, T043)
     from indico_assistant.controllers.admin import (
         RHAdminErrors,

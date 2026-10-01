@@ -11,3 +11,7 @@ class WPReports(WPJinjaMixinPlugin, WPUser):
 
 class WPReportsAdmin(WPJinjaMixinPlugin, WPAdmin):
     """A page in Indico's admin area (``templates/`` extending ``admin/base.html``)."""
+
+
+class WPConnections(WPJinjaMixinPlugin, WPUser):
+    """The profile's "Connected accounts" (spec 023), as the reports page is."""

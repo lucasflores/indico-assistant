@@ -56,7 +56,28 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
 - For a release, rebuild the guide copy from a pinned commit: `indico assistant guide-build --commit <sha>`
   (needs GitHub access at build time only), and commit `indico_assistant/knowledge_guide/`.
 
-### 3. Content Security Policy
+### 3. GitHub (optional, spec 023)
+Users connect their own GitHub account from their profile ("Connected accounts"), then ask the assistant about
+their pull requests, reviews and issues. It only reads.
+- **Register a GitHub App.** This is done by whoever has top admin rights on this Indico, under the account or
+  organisation that will own it (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
+  - Callback URL: the one shown on the plugin's settings page, `<BASE_URL>/assistant/github/callback`.
+  - "Expire user authorization tokens": on (GitHub's default). Webhook: off.
+  - Repository permissions: **Metadata**, **Issues** and **Pull requests**, all read-only. No account
+    permissions, and nothing with write access.
+  - "Where can this GitHub App be installed": any account, so users can add their own repositories.
+  - Then note the client ID and generate a client secret.
+- **Make the tokens' key.** Run `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+  and set the result as `INDICO_ASSISTANT_CONNECTOR_KEY` in the environment of **both** the web server and the
+  Celery worker. Keep it out of `indico.conf`, which drops unknown keys, and out of any repository. If the key
+  changes, every connection needs renewing.
+- **Fill in the settings:** Enable GitHub, the client ID, the client secret, and the app's public page
+  (`https://github.com/apps/<name>`). GitHub can't be turned on until the ID, the secret and the key are all set.
+- **Network:** both processes need outbound HTTPS to `github.com` and `api.github.com`.
+- **Dev mode:** `INDICO_ASSISTANT_FAKE_GITHUB=1` on both processes, with Indico's `DEBUG` on, swaps in a fake
+  GitHub with fixed data (`services/connectors/fake_github.py`). Any client ID and secret will do.
+
+### 4. Content Security Policy
 - Indico must allow the panel's frame: `frame-src 'self' https://assistant.example.org`.
 - With Indico's `CSP_ENABLED`, the panel's inline `<head>` snippet carries Indico's nonce. Nothing else is needed.
 - The page loads no script from Chainlit and makes no requests to it. Only the frame talks to Chainlit.
@@ -77,3 +98,5 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
 - Every conversation read or write goes to Indico as the signed-in user. Indico returns someone else's
   conversation to no one.
 - Rotate `CHAINLIT_AUTH_SECRET` periodically, updating Indico's setting to match.
+- GitHub tokens (spec 023) are stored encrypted with `INDICO_ASSISTANT_CONNECTOR_KEY`, and never appear in a URL,
+  a log, a page or an API response. Disconnecting deletes them and revokes the app's authorisation on GitHub.

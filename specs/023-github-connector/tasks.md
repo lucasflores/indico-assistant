@@ -86,36 +86,36 @@ runs (T042, T043) happen only after Lucas says go.
 
 ### Tests first
 
-- [ ] T012 [US1] `tests/integration/connectors/test_pages.py`, run as `tests/integration/reports/test_pages.py`
+- [x] T012 [US1] `tests/integration/connectors/test_pages.py`, run as `tests/integration/reports/test_pages.py`
   runs its handlers. The page:
   - an anonymous visitor goes to the login page, not a 500 or a 404;
   - a user sees Connect when unconnected. Connected, they see the login, the dates, the repositories (from the
     fake), the "add repositories" link and Disconnect. A GitHub error while loading the repositories shows
     "couldn't load", and the page still renders.
-- [ ] T013 [US1] Same file. Connect and the callback:
+- [x] T013 [US1] Same file. Connect and the callback:
   - Connect is POST only, with CSRF, and only on your own profile (an admin on another profile gets 403);
   - it stores `state` and the verifier in the session, and redirects to the authorise URL;
   - the callback with the right state stores the connection and redirects to the page with a flash;
   - a wrong, missing or reused state, a state made for another user, or `error=access_denied` stores nothing;
   - fake mode goes straight to the callback.
-- [ ] T014 [US1] Same file. Disconnect: your own; an admin's on another profile (FR-006, Lucas 2026-09-30); a
+- [x] T014 [US1] Same file. Disconnect: your own; an admin's on another profile (FR-006, Lucas 2026-09-30); a
   non-admin on another profile gets 403. CSRF is required.
-- [ ] T015 [P] [US1] `tests/integration/connectors/test_api.py`:
+- [x] T015 [P] [US1] `tests/integration/connectors/test_api.py`:
   - `GET /api/assistant/connections` lists the user's connections, and no field holds a token;
   - `DELETE /api/assistant/connections/github` disconnects;
   - a cookie call without the CSRF token is refused, and a token call (`X-Assistant-Auth`) needs none;
   - another user's connection can't be reached.
-- [ ] T016 [P] [US1] The menu: "Connected accounts" is on your own profile while GitHub is on, and absent while it
+- [x] T016 [P] [US1] The menu: "Connected accounts" is on your own profile while GitHub is on, and absent while it
   is off. An admin on another profile sees it while that user has a connection.
 
 ### Code
 
-- [ ] T017 [US1] `views.py`: `WPConnections`. `templates/connections.html` extends `users/base.html` (block
+- [x] T017 [US1] `views.py`: `WPConnections`. `templates/connections.html` extends `users/base.html` (block
   `user_content`), and its forms carry ids and `csrf_token`.
-- [ ] T018 [US1] `controllers/connections.py`: `RHConnections`, `RHConnect`, `RHGitHubCallback`, `RHDisconnect`,
+- [x] T018 [US1] `controllers/connections.py`: `RHConnections`, `RHConnect`, `RHGitHubCallback`, `RHDisconnect`,
   `RHConnectionsAPI`, and `profile_menu_item`. Routes go in `blueprint.py`; the menu goes in `plugin.py`.
   Objects are looked up in `_check_access`, after `RHUserBase._check_access`. This makes T012–T016 pass.
-- [ ] T019 [US1] `docs/DEPLOYMENT.md`:
+- [x] T019 [US1] `docs/DEPLOYMENT.md`:
   - registering the GitHub App: read-only Metadata, Issues and Pull requests; user tokens that expire; the
     callback URL from the settings page;
   - making the Fernet key;

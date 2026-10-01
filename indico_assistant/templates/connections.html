@@ -1,0 +1,69 @@
+{% extends 'users/base.html' %}
+{# The profile's "Connected accounts" (spec 023 FR-005): the account, what the assistant can see, Connect or Disconnect.
+   The buttons are Indico's data-method POSTs, which carry the CSRF token. An admin on someone else's profile sees the
+   connection and can remove it, but no repositories: the page never reads GitHub as another user. #}
+
+{% block user_content %}
+    <div class="i-box">
+        <div class="i-box-header">
+            <div class="i-box-title">GitHub</div>
+            <div class="i-box-buttons">
+                {% if connection %}
+                    <button class="ui small button" data-href="{{ disconnect_url }}" data-method="POST"
+                            data-confirm="The assistant will no longer read this GitHub account, and the app's authorisation is revoked on GitHub.">
+                        Disconnect
+                    </button>
+                {% elif own and enabled %}
+                    <button class="ui primary small button" data-href="{{ connect_url }}" data-method="POST">
+                        Connect GitHub
+                    </button>
+                {% endif %}
+            </div>
+        </div>
+        <div class="i-box-content">
+            {% if connection %}
+                <dl class="i-data-list">
+                    <dt>Account</dt>
+                    <dd>
+                        <a href="https://github.com/{{ connection.account_login }}" target="_blank" rel="noopener">@{{ connection.account_login }}</a>
+                        {% if connection.needs_renewal %}<span class="ui orange small label">Needs renewing</span>{% endif %}
+                    </dd>
+                    <dt>Connected</dt>
+                    <dd>{{ connection.connected_at|format_datetime('short') }}</dd>
+                    <dt>Last used</dt>
+                    <dd>{{ connection.last_used_at|format_datetime('short') if connection.last_used_at else 'Not yet' }}</dd>
+                </dl>
+                {% if own and connection.needs_renewal and enabled %}
+                    <p>
+                        GitHub no longer accepts this connection.
+                        <button class="ui primary small button" data-href="{{ connect_url }}" data-method="POST">Connect again</button>
+                    </p>
+                {% endif %}
+                {% if repos is not none %}
+                    <h4>Repositories the assistant can see ({{ repo_count }})</h4>
+                    <ul>
+                        {% for repo in repos %}
+                            <li><a href="{{ repo.html_url }}" target="_blank" rel="noopener">{{ repo.full_name }}</a>{% if repo.private %} <span class="text-superfluous">private</span>{% endif %}</li>
+                        {% else %}
+                            <li class="italic">None yet.</li>
+                        {% endfor %}
+                    </ul>
+                    {% if repo_count > repos|length %}<p class="text-superfluous">And {{ repo_count - repos|length }} more.</p>{% endif %}
+                {% elif repos_failed %}
+                    <p class="italic">The repositories couldn't be loaded from GitHub just now.</p>
+                {% endif %}
+                {% if own and add_url %}
+                    <p>
+                        The assistant sees the accounts and organisations where the app is installed.
+                        <a href="{{ add_url }}" target="_blank" rel="noopener">Add repositories or organisations</a>
+                    </p>
+                {% endif %}
+            {% else %}
+                <p>
+                    Connect your GitHub account, and the assistant can answer questions about your pull requests, the
+                    reviews waiting for you, and your issues. It only reads; it never changes anything on GitHub.
+                </p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}
