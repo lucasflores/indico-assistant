@@ -206,3 +206,25 @@ def test_a_bare_name_resolves_past_the_first_100_repositories_once_per_answer():
 def test_no_review_searches_without_pull_requests(client, fake):
     call(client, "my_pull_requests", page=2)
     assert not any("review:" in q for q in fake.searches)
+
+
+def test_a_deleted_accounts_comment_doesnt_break_the_lookup(client):
+    """(fresh-review) GitHub gives user: null for a deleted account."""
+    assert "- ghost " in call(client, "item", repo="thoth-labs/indico-assistant", number=5)
+
+
+def test_review_decisions_reach_the_listed_page(monkeypatch):
+    """(fresh-review) page 6 lists items 101-120: the decisions read two pages of 100, not one."""
+    asked = []
+    item = {"number": 120, "repository_url": "https://api.github.com/repos/o/r"}
+
+    def find(client, q, page=1, per_page=20):
+        asked.append((q.rsplit(" ", 1)[-1], page, per_page))
+        return ([item], 120) if per_page == 20 or page == 2 else ([], 120)
+
+    monkeypatch.setattr(github, "_find", find)
+    notes = github._decisions(None, "is:pr author:@me is:open", page=6)([item])
+    assert {(qualifier, page) for qualifier, page, per in asked if per == 100} == {
+        ("review:approved", 1), ("review:approved", 2), ("review:changes_requested", 1),
+        ("review:changes_requested", 2)}
+    assert notes == {("o/r", 120): "changes requested"}

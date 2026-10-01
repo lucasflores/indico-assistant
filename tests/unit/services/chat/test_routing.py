@@ -398,3 +398,17 @@ def test_the_connector_gets_its_own_history_without_indico_answers(routed):
     run("which of my PRs are open?")
     history = s.connector.call_args.args[2]
     assert history is s.context.connector_history.return_value
+
+
+def test_an_unexpected_connector_failure_is_a_failed_answer_with_the_report_offer():
+    """(fresh-review) as _knowledge does: never the task's internal error."""
+    from unittest.mock import patch as patch_
+
+    service = ChatService(session_manager=MagicMock(), context_builder=MagicMock())
+    with patch_("indico_assistant.services.connectors.loop.answer", side_effect=ValueError("bad expires_in")), \
+            patch_("indico.core.plugins.url_for_plugin", return_value="/x"), \
+            patch_("indico_assistant.plugin.AssistantPlugin") as plugin, \
+            patch_("indico_assistant.services.chat.service.db"):
+        plugin.instance.settings.get_all.return_value = {}
+        result = service._connector(MagicMock(id=6), "my PRs?", [])
+    assert result.failed and result.tools == []

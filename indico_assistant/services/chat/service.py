@@ -333,10 +333,22 @@ class ChatService:
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.connectors.loop import answer
 
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from indico_assistant.services.connectors.loop import ConnectorResult
+        from indico_assistant.services.knowledge.answer import NOT_ANSWERED
+
         plugin = AssistantPlugin.instance
-        return answer(user.id, message, _history(context), llm=plugin.llm_service, settings=plugin.settings.get_all(),
-                      base_url=self._get_base_url(),
-                      profile_url=url_for_plugin("assistant.user_connections", _external=True))
+        try:
+            return answer(user.id, message, _history(context), llm=plugin.llm_service,
+                          settings=plugin.settings.get_all(), base_url=self._get_base_url(),
+                          profile_url=url_for_plugin("assistant.user_connections", _external=True))
+        except SoftTimeLimitExceeded:  # (the task reports the timeout)
+            raise
+        except Exception:  # (an unexpected failure: a plain failed answer with the report offer, as _knowledge does)
+            logger.exception("The connector answer failed")
+            db.session.rollback()
+            return ConnectorResult(NOT_ANSWERED, failed=True)
 
     def _get_or_create_session(
         self,

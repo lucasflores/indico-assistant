@@ -6,6 +6,7 @@ send their secrets in the request body, not the query string.
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
@@ -91,15 +92,27 @@ class GitHubClient:
         self._http = httpx.Client(base_url=API, timeout=timeout, transport=transport, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": API_VERSION})
+        self._timeout = timeout
         self.cache = {}  # (for one answer: e.g. the repositories, once however many bare names it resolves)
+        #: (time.monotonic) no call starts after it, and none outlasts it: the loop's whole budget, however many calls
+        #: one tool makes (fresh-review)
+        self.deadline = None
+
+    def _get(self, path, params=None):
+        if self.deadline is None:
+            return _send(self._http, "GET", path, params=params)
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise GitHubError(0, "GitHub took too long for this answer")
+        return _send(self._http, "GET", path, params=params, timeout=min(self._timeout, left))
 
     def get(self, path, params=None):
-        return _json(_send(self._http, "GET", path, params=params))
+        return _json(self._get(path, params))
 
     def newest(self, path, n=10):
         """The newest ``n`` of a list GitHub returns oldest first, a page of 100 at a time: from its last page (and
         the one before, when that is short), not from the first page (Copilot, PR #17)."""
-        first = _send(self._http, "GET", path, params={"per_page": 100})
+        first = self._get(path, {"per_page": 100})
         items, last = _json(first), _last_page(first.headers.get("link"))
         if last and last > 1:
             items = self.get(path, {"per_page": 100, "page": last})
@@ -314,6 +327,11 @@ def _ago(iso):
     return f"{int(days // 7)} weeks ago" if days < 60 else f"{int(days // 30)} months ago"
 
 
+def _login(user):
+    """A user's login; GitHub gives ``null`` for a deleted account (fresh-review)."""
+    return (user or {}).get("login") or "ghost"
+
+
 def _where(item):
     return item["repository_url"].split("/repos/", 1)[1], item["number"]
 
@@ -324,7 +342,7 @@ def _line(item, note=None):
     state = "merged" if pull and pull.get("merged_at") else item.get("state", "?")
     repo, number = _where(item)
     bits = [f"#{number} {repo}", f'"{_cut(item.get("title"), 120)}"', state + (" (draft)" if item.get("draft") else ""),
-            f"opened {_ago(item.get('created_at'))} by {(item.get('user') or {}).get('login', '?')}"]
+            f"opened {_ago(item.get('created_at'))} by {_login(item.get('user'))}"]
     if note:
         bits.append(note)
     if item.get("labels"):
@@ -360,10 +378,14 @@ def _query(*parts):
     return " ".join(p for p in parts if p)
 
 
-def _decisions(client, q):
-    """Each open pull request's review decision, from two more searches (a search result carries none)."""
+def _decisions(client, q, page=1):
+    """Each open pull request's review decision, from two more searches (a search result carries none), reading as
+    many pages of 100 as reach the listed page (fresh-review: two, for page 6 to 10)."""
+    pages = -(-page * 20 // 100)
+
     def found(qualifier):
-        return {_where(item) for item in _find(client, f"{q} {qualifier}", per_page=100)[0]}
+        return {_where(item) for k in range(1, pages + 1)
+                for item in _find(client, f"{q} {qualifier}", page=k, per_page=100)[0]}
 
     def notes(items):  # (only when the list has items: GitHub allows 30 searches a minute)
         if not items:
@@ -380,7 +402,7 @@ def _my_pull_requests(client, args):
     repo = _full(client, args.repo)
     q = _query("is:pr author:@me", state, repo and f"repo:{repo}")
     return _search(client, q, "pull requests opened by the user", args.page,
-                   _decisions(client, q) if args.state == "open" else None)
+                   _decisions(client, q, args.page) if args.state == "open" else None)
 
 
 def _review_requests(client, args):
@@ -408,19 +430,19 @@ def _item(client, args):
     lines = [_line(issue)]
     if is_pull:
         pull = client.get(f"{base}/pulls/{args.number}")
-        asked = ", ".join(r["login"] for r in pull.get("requested_reviewers") or [])
+        asked = ", ".join(_login(r) for r in pull.get("requested_reviewers") or [])
         lines.append(f"From {pull['head']['ref']} into {pull['base']['ref']}"
                      + (f"; review requested from {asked}" if asked else ""))
     if issue.get("assignees"):
-        lines.append("Assigned to " + ", ".join(a["login"] for a in issue["assignees"]))
+        lines.append("Assigned to " + ", ".join(_login(a) for a in issue["assignees"]))
     if issue.get("body"):
         lines.append("Description: " + _cut(issue["body"], 300))
     if is_pull and (reviews := client.newest(f"{base}/pulls/{args.number}/reviews")):
-        lines += ["Newest reviews:", *(f"- {r['user']['login']}: {r['state']} {_ago(r.get('submitted_at'))}"
+        lines += ["Newest reviews:", *(f"- {_login(r.get('user'))}: {r['state']} {_ago(r.get('submitted_at'))}"
                                        + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews)]
     if issue.get("comments"):
         comments = client.newest(f"{base}/issues/{args.number}/comments")
-        lines += ["Newest comments:", *(f"- {c['user']['login']} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
+        lines += ["Newest comments:", *(f"- {_login(c.get('user'))} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
                                         for c in comments)]
     return "\n".join(lines), [issue["html_url"]]
 

@@ -16,10 +16,11 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import Union
 
+from celery.exceptions import SoftTimeLimitExceeded
 from pydantic import BaseModel, Field, create_model, model_validator
 
 from indico_assistant.services.connectors import Tool  # noqa: F401 - (the tools' shape, as loop.Tool)
-from indico_assistant.services.connectors.github import GitHubError
+from indico_assistant.services.connectors.github import GitHubClient, GitHubError
 from indico_assistant.services.knowledge.answer import NOT_ANSWERED, KnowledgeResult
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,8 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
     tools = tuple(tools)
     by_name, first, step = {t.name: t for t in tools}, lookup_model(tools), step_model(tools)
     started, done, seen = now(), [], set()
+    if isinstance(client, GitHubClient):  # (every GitHub call inside the budget, however many one tool makes)
+        client.deadline = time.monotonic() + BUDGET_SECONDS
     result, answered = ConnectorResult(NOT_ANSWERED), False
     with collect_calls() as calls:
         for n in range(MAX_TOOL_STEPS):
@@ -150,6 +153,8 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
                     result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": False})
                     break
                 text, ok = f"GitHub error {error.status}: {error.message}", False
+            except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout; fresh-review)
+                raise
             except Exception:  # noqa: BLE001 - (an answer GitHub shaped unexpectedly): this lookup fails, not the answer
                 logger.exception("The %s tool failed", call.tool)
                 text, ok = "The lookup failed.", False
@@ -194,6 +199,18 @@ def answer(user_id, message, history, *, llm, settings, base_url, profile_url):
         result.text = RENEW_REPLY.format(url=profile_url)
     elif not result.failed:  # links only to what GitHub returned, or the conversation already had; no images
         paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
-        result.text = links.check(links.strip_images(result.text), sorted(paths), guide, base_url,
-                                  urls=result.urls, strict=True) or NOT_ANSWERED
+        result.text = _clean(result.text, sorted(paths), guide, base_url, result.urls) or NOT_ANSWERED
     return result
+
+
+def _clean(text, paths, guide, base_url, urls):
+    """The answer's links checked until checking changes nothing (fresh-review: one pass can rebuild an image out
+    of nested markup, e.g. ``!![[x](…)](//evil…)``). Markup still changing after 10 passes is refused."""
+    from indico_assistant.services.knowledge import links
+
+    for _ in range(10):
+        cleaned = links.check(links.strip_images(text), paths, guide, base_url, urls=urls, strict=True)
+        if cleaned == text:
+            return text
+        text = cleaned
+    return None

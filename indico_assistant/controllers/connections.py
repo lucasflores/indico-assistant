@@ -45,10 +45,8 @@ def profile_menu_item(user) -> SideMenuItem | None:
     """"Connected accounts": on your own profile while GitHub is on; on another's (an admin) while they have one."""
     if not user.can_be_modified(session.user):
         return None
-    if user == session.user and not _settings().get('github_enabled'):
-        return None
-    if user != session.user and store.connection(user.id) is None:
-        return None
+    if not (user == session.user and _settings().get('github_enabled')) and store.connection(user.id) is None:
+        return None  # (off, or someone else's: shown only while there is a connection to see or remove)
     return SideMenuItem(MENU_ITEM, 'Connected accounts', _profile_url('assistant.user_connections', user), 30)
 
 
@@ -58,8 +56,8 @@ class RHConnectionsBase(RHUserBase):
         self.settings = _settings()
         self.own = self.user == session.user
         self.connection = store.connection(self.user.id)
-        if not self.settings.get('github_enabled') and (self.own or self.connection is None):
-            raise NotFound  # off: only an admin removing someone's existing connection gets here
+        if not self.settings.get('github_enabled') and self.connection is None:
+            raise NotFound  # off: only an existing connection, to see and remove (fresh-review: the user's too)
 
 
 class RHConnections(RHConnectionsBase):
@@ -94,7 +92,9 @@ class RHConnect(RHConnectionsBase):
     def _check_access(self):
         RHConnectionsBase._check_access(self)
         if not self.own:
-            raise Forbidden  # (no one connects GitHub for someone else; off, the base class already refused)
+            raise Forbidden  # (no one connects GitHub for someone else)
+        if not self.settings.get('github_enabled'):
+            raise NotFound
 
     def _process(self):
         state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)

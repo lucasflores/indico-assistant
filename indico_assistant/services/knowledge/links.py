@@ -18,7 +18,11 @@ _BARE = r"https?://(?:[^\s()<>\]]|\([^\s()<>]*\))+"
 _TITLE = r'(?:\s+"[^"]*")?'
 _LINK = re.compile(rf"\[([^\]]+)\]\(\s*<?({_URL})>?{_TITLE}\s*\)"  # [label](url "title")
                    rf"|( ?)({_BARE})"  # a bare URL
-                   rf"|^( {{0,3}}\[[^\]]+\]:[ \t]*)<?({_URL})>?{_TITLE}[ \t]*$", re.M)  # [1]: url "title"
+                   rf"|^( {{0,3}}\[[^\]]+\]:[ \t]*)<?({_URL})>?{_TITLE}[ \t]*$", re.M | re.I)  # [1]: url "title"
+
+
+#: Any link target, whatever its label (``](url "title")``): the strict pass, for labels the link pattern can't parse
+_TARGET = re.compile(rf"\]\(\s*<?({_URL}|)>?{_TITLE}\s*\)", re.I)
 
 
 def _local(path, root):
@@ -82,11 +86,14 @@ def check(text, pages, guide_urls, base_url, urls=(), strict=False):
         bare, tail = (bare[:trail.start()], trail.group()) if trail else (bare, "")
         return f"{space}{new}{tail}" if (new := resolve(bare)) else tail
 
-    return _LINK.sub(replace, text)
+    text = _LINK.sub(replace, text)
+    if strict:  # (fresh-review: a label holding brackets hides its link from _LINK; every target is checked alone)
+        text = _TARGET.sub(lambda m: f"]({new})" if m.group(1) and (new := resolve(m.group(1))) else "]", text)
+    return text
 
 
 def strip_images(text):
     """No markdown image survives: an image is fetched as soon as the answer is shown, so its address could carry
     private text away (spec 023 FR-017). Every image marker becomes a plain link, which ``check`` then keeps or
     drops like any other, whatever the alt text holds (Copilot, PR #17: nested brackets slipped past a regex)."""
-    return text.replace("![", "[")
+    return re.sub(r"!+\[", "[", text)

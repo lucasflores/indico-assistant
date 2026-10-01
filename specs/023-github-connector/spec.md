@@ -71,7 +71,8 @@ disconnect, and check the stored token is gone. No chat is needed.
 3. **Given** a user who refuses on GitHub, or whose callback carries a wrong or reused `state`, **When** they come
    back, **Then** nothing is stored and the page says the connection wasn't made.
 4. **Given** GitHub is turned off, **When** a user opens their profile, **Then** there's no "Connected accounts"
-   page. An admin can still see and remove a user's existing connection.
+   page, unless they still have a connection. Then the page shows it with only Disconnect, so they can remove it
+   themselves. An admin can see and remove it too.
 
 ---
 
@@ -183,8 +184,11 @@ that pull request's reviews.
   - The answer is saved in the user's own chat history, like every answer.
   - If they send an issue report with the conversation copy ticked (spec 021), the admins see it. The form already
     says the copy is attached.
-- **Turned off:** while GitHub is off, the route isn't offered and stored connections are left alone. Turning it
-  back on doesn't make everyone reconnect.
+- **Turned off:** while GitHub is off, the route isn't offered and stored connections are left alone. Their owners
+  can still remove them. Turning it back on doesn't make everyone reconnect.
+- **Deleting an account:** when Indico deletes or anonymises an account, its connections are deleted and their
+  grants revoked on GitHub. Merging two accounts drops the merged one's connection without revoking it: the two
+  are usually one person on the same GitHub account.
 
 ## Requirements *(mandatory)*
 

@@ -80,7 +80,8 @@ ITEMS = [
                      ("lucas-f", 1, "Agreed, let's use the user's timezone.")], labels=["bug"]),
     _issue(IA, 20, "The report button is misaligned on mobile", "lucas-f", 1, assignees=[USER], labels=["bug"],
            body=INJECTED[9]),
-    _issue(IA, 5, "Write the deployment docs", "lucas-f", 30, assignees=[USER], state="closed"),
+    _issue(IA, 5, "Write the deployment docs", "lucas-f", 30, assignees=[USER], state="closed",
+           comments=[(None, 29, "A comment from an account that was deleted since.")]),  # (GitHub's user: null)
     _issue(IA, 21, "Status page", "rita-r", 2, assignees=["makoto-k"], body=INJECTED[2],
            comments=[("rita-r", 1, INJECTED[8])]),
     _issue(IR, 40, "The cost snapshot goes stale", "lucas-f", 2, assignees=[USER], labels=["bug"]),
@@ -129,7 +130,7 @@ def _url(item, suffix=""):
 
 
 def _user(login):
-    return {"login": login, "html_url": f"https://github.com/{login}"}
+    return {"login": login, "html_url": f"https://github.com/{login}"} if login else None
 
 
 def _visible(repo):
@@ -217,6 +218,9 @@ class FakeGitHub:
     def _revoke(self, request):
         if not request.headers.get("Authorization", "").startswith("Basic "):
             return self._error(401, "Requires authentication")
+        token = json.loads(request.content or b"{}").get("access_token")
+        if self.state["tokens"].get(token, 0) <= time.time():  # (as GitHub: not with an expired or unknown token)
+            return self._error(404, "Not Found")
         self.state["tokens"], self.state["refresh"] = {}, {}  # (the grant: every token of the user's)
         self._save()
         return httpx.Response(204)

@@ -34,5 +34,8 @@ def test_the_connector_sees_only_the_users_messages_and_githubs_answers(db, dumm
                                     metadata_json={'route': {'route': route}} if route else None)
                         for i, (role, text, route) in enumerate(turns)])
     db.session.flush()
-    assert [m['content'] for m in ContextBuilder().connector_history(session.id)] == [
-        'when is the sync?', 'my open PRs?', '#16 and #17.', 'the oldest?']
+    from indico_assistant.services.chat.context_builder import HIDDEN
+
+    history = ContextBuilder().connector_history(session.id)
+    assert [m['content'] for m in history] == ['when is the sync?', HIDDEN, 'my open PRs?', '#16 and #17.', 'the oldest?']
+    assert [m['role'] for m in history] == ['user', 'assistant', 'user', 'assistant', 'user']  # (fresh-review: alternating)
