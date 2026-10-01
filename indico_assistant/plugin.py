@@ -93,8 +93,9 @@ class AssistantPlugin(IndicoPlugin):
         uid = int(session.user.id)
         widths = self.PANEL_WIDTHS
         return (f'<script nonce="{get_csp_nonce()}">{self._PANEL_SNIPPET.format(uid=uid, **widths)}</script>'
-                f'<script src="{widget_script_url()}" data-user="{uid}" data-min-width="{widths["min"]}" '
-                f'data-default-width="{widths["default"]}" data-narrow="{widths["narrow"]}" defer></script>')
+                f'<script src="{widget_script_url()}" data-user="{uid}" data-login="{_login_marker(session.sid)}" '
+                f'data-min-width="{widths["min"]}" data-default-width="{widths["default"]}" '
+                f'data-narrow="{widths["narrow"]}" defer></script>')
 
     @property
     def llm_client(self):
@@ -185,6 +186,17 @@ class AssistantPlugin(IndicoPlugin):
             if event_value is not None:
                 return event_value
         return self.settings.get(key)
+
+
+def _login_marker(sid):
+    """What the panel compares to start each login on a new chat: Indico gives the session a new id at every login
+    (``set_session_user``), and the page gets a keyed hash of it, never the id itself, which signs the user in."""
+    import hmac
+
+    from indico.core.config import config
+
+    key = config.SECRET_KEY if isinstance(config.SECRET_KEY, bytes) else config.SECRET_KEY.encode()
+    return hmac.new(key, (sid or "").encode(), "sha256").hexdigest()[:16]
 
 
 _PENDING_INDEXING = 'indico_assistant_pending_indexing'
