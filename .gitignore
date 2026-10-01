@@ -62,10 +62,4 @@ Thumbs.db
 
 # spec 020 browser tests
 tests/browser/node_modules/
-tests/browser/walk-last.png
-tests/browser/sidebar-last.png
-tests/browser/us4-last.png
-tests/browser/hover-last.png
-tests/browser/feedback-last.png
-tests/browser/tabs-last.png
-tests/browser/reports-last.png
+tests/browser/*-last.png

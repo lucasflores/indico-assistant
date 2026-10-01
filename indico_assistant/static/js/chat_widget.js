@@ -6,8 +6,8 @@
  * back open, on the same conversation, after every navigation:
  * - the per-user state is kept in the browser: open and width in localStorage, the open conversation per tab
  *   (sessionStorage), so two tabs keep their own; a new tab starts on the last one used;
- * - each Indico login starts on a new chat: the script tag's data-login changes then (plugin.py), and a
- *   conversation kept from an earlier login is not reopened;
+ * - each Indico login starts on a new chat: the script tag's data-login is a token set at login (plugin.py),
+ *   and a conversation kept from an earlier login is not reopened;
  * - an inline <head> snippet (plugin.py) reserves an open panel's width before the page paints;
  * - the frame signs in with a fresh token for this page (it carries the page's event) sent by
  *   postMessage, never in a URL, and reports back: ready, the open conversation, Indico links, Esc.
@@ -57,7 +57,9 @@
 
   function saveState() {
     try {
-      localStorage.setItem(STATE_KEY, JSON.stringify(state));  // (its threadId: where a new tab starts)
+      const stored = JSON.parse(localStorage.getItem(STATE_KEY) || "{}").login;
+      if (!LOGIN || !stored || stored === LOGIN)  // (fresh-review: a tab from an earlier login keeps only its own)
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));  // (its threadId: where a new tab starts)
       sessionStorage.setItem(TAB_KEY, state.threadId || "");
     } catch (e) { /* private mode: not kept */ }
   }

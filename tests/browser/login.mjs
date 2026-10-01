@@ -1,6 +1,8 @@
-// Each Indico login starts the panel on a new chat (Lucas, 2026-10-01). A login gives the session a new id, and the
-// script tag's data-login changes with it; a conversation kept from the earlier login is not reopened. Within one
-// login, page views keep the open conversation. No question is asked: it reuses one of the user's conversations.
+// Each Indico login starts the panel on a new chat (Lucas, 2026-10-01). Indico's logged_in signal, sent at the end
+// of every login, gives the session a new token (plugin.py); the script tag's data-login carries it, and a
+// conversation kept from the earlier login is not reopened. Within one login, page views keep the open
+// conversation. A "login" here is mint_session.py, which sends that signal. No question is asked: it reuses one
+// of the user's conversations.
 //   WALK_USER=6 node login.mjs
 import { execFileSync } from "node:child_process";
 import { browserAs, INDICO, mintSession } from "./lib.mjs";
@@ -16,7 +18,8 @@ const { browser, page } = await browserAs(USER, { headless: !process.argv.includ
 const chat = () => page.frames().find((f) => f.url().startsWith("http://127.0.0.1:8001") && !f.url().includes("login"));
 async function until(pred, ms = 10000) {
   const t0 = Date.now();
-  while (Date.now() - t0 < ms) { if (await pred().catch(() => false)) return true; await sleep(100); }
+  // (fresh-review: a frame not there yet throws before a promise exists)
+  while (Date.now() - t0 < ms) { if (await Promise.resolve().then(pred).catch(() => false)) return true; await sleep(100); }
   return false;
 }
 const ready = () => until(() => page.evaluate(() => document.documentElement.dataset.assistantPanel === "ready"), 20000);

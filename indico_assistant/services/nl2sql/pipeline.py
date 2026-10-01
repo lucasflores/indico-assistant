@@ -76,7 +76,7 @@ def _local_days(sql):
 
 #: The reply to a message unrelated to Indico and the conversation (also the router's out_of_scope, spec 022)
 OUT_OF_SCOPE_MESSAGE = ("That's outside what I can help with. I can answer questions about this Indico and its "
-                        "events, explain how to do things in it, and make changes you confirm.")
+                        "events, and explain how to do things in it.")  # (changes may be off: fresh-review of #19)
 
 class NL2SQLPipeline:
     """

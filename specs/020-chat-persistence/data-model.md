@@ -50,15 +50,19 @@ PR #5.)
 `localStorage["indico-assistant:<user id>"]` on the Indico origin, shared by the user's tabs:
 
 ```json
-{"open": true, "width": 440, "threadId": "3f2c…"}
+{"open": true, "width": 440, "threadId": "3f2c…", "login": "9b1e…"}
 ```
 
 - `open`: whether the panel reopens on the next page (FR-002).
 - `width`: the panel width in px, clamped to 320 px…50% of the viewport (FR-006d).
 - `threadId`: the last conversation used, which is where a brand-new tab starts.
+- `login`: the login it belongs to, the script tag's `data-login` (a token set at each Indico login). A page with
+  another one drops `threadId` and opens a new chat (2026-10-01). A tab from an earlier login doesn't write here.
 
 `sessionStorage["indico-assistant-thread:<user id>"]`, per tab: the conversation this tab resumes (FR-001).
-It's an empty string for a new chat. Two tabs keep their own conversation (review, PR #5). A stale id
+It's an empty string for a new chat. Two tabs keep their own conversation (review, PR #5).
+`sessionStorage["indico-assistant-login:<user id>"]`: the login this tab's conversation belongs to; a tab left open
+since an earlier login drops its conversation. A stale id
 (deleted, expired, someone else's) resumes nothing, and the panel starts a new chat.
 
 Chainlit's own auth cookie (`access_token`, on the Chainlit origin) holds the session JWT (R3).
