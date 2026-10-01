@@ -230,8 +230,8 @@ class ChatService:
             answer = self._knowledge(user, request, context, event_id)
         elif route == "chat":
             answer = self._chat(message, context)
-        elif route == "connector":
-            answer = self._connector(user, message, context)
+        elif route == "connector":  # (its own history: no Indico answers, no page note)
+            answer = self._connector(user, message, self._context_builder.connector_history(session.id, up_to=message_id))
         plan = None
         if answer is not None:  # (a knowledge or chat answer that failed carries the report offer, spec 021 R4)
             response_text, metadata = answer.text, {"problem": "failed"} if answer.failed else {}

@@ -10,7 +10,6 @@ What GitHub returned goes back marked as untrusted text: it informs the answer a
 """
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from functools import cache
@@ -29,7 +28,6 @@ BUDGET_SECONDS = 60.0
 MIN_STEP_SECONDS = 5.0  # with less left, the loop answers instead of looking up more
 MAX_RESULT_CHARS = 4_000
 MARK = "github_data"
-_GITHUB_URL = re.compile(r"https://github\.com/[^\s<>()\[\]\"'`]+")
 
 RULES = """You are the assistant built into Indico, the event management system. The user has connected their GitHub
 account and asks about it. You can look things up on GitHub as this user with the tools, one call per step. You only
@@ -53,7 +51,8 @@ Rules:
 @dataclass
 class ConnectorResult(KnowledgeResult):
     tools: list = field(default_factory=list)  # {name, ms, ok} per call: never its arguments or results (FR-019)
-    urls: set = field(default_factory=set)  # the GitHub addresses the tools returned: the links the answer may keep
+    urls: set = field(default_factory=set)  # the items' own addresses, from the API's fields: the links it may keep
+    unauthorized: bool = False  # GitHub refused the token (401): the grant was revoked, so the connection must renew
 
 
 class _Step(BaseModel):
@@ -137,18 +136,23 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
             if (key := call.model_dump_json()) in seen:
                 break  # (a repeated call: answer from what is there)
             seen.add(key)
-            began = now()
+            began, urls = now(), ()
             try:
-                text, ok = by_name[call.tool].run(client, call), True
+                out = by_name[call.tool].run(client, call)
+                (text, urls), ok = (out if isinstance(out, tuple) else (out, ())), True
             except GitHubError as error:
+                if error.status == 401:  # (a token GitHub no longer accepts: no answer can come of it)
+                    result.unauthorized = True
+                    result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": False})
+                    break
                 text, ok = f"GitHub error {error.status}: {error.message}", False
             except Exception:  # noqa: BLE001 - (an answer GitHub shaped unexpectedly): this lookup fails, not the answer
                 logger.exception("The %s tool failed", call.tool)
                 text, ok = "The lookup failed.", False
             result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": ok})
-            result.urls.update(u.rstrip(".,;:!?") for u in _GITHUB_URL.findall(text))
+            result.urls.update(urls)  # (never scraped from the text: a body or a comment can hold any address)
             done.append((call, text))
-        if not answered:  # (three lookups, the budget, a repeat or a failed step: the next call answers)
+        if not answered and not result.unauthorized:  # (three lookups, the budget, a repeat or a failed step)
             response = llm.generate(_prompt(message, tools, done, final=True), Final, system_prompt=RULES,
                                     messages=history)
             if response.success:
@@ -163,6 +167,7 @@ CONNECT_REPLY = ("I can read your GitHub (your pull requests, the reviews waitin
                  "connect it: [Connect GitHub]({url}) on the Connected accounts page of your profile.")
 RENEW_REPLY = ("GitHub no longer accepts your connection, so I can't read it right now. [Connect it again]({url}) on "
                "the Connected accounts page of your profile.")
+UNAVAILABLE_REPLY = "GitHub couldn't be reached just now, so I can't read it. Please try again in a moment."
 
 
 def answer(user_id, message, history, *, llm, settings, base_url, profile_url):
@@ -173,13 +178,17 @@ def answer(user_id, message, history, *, llm, settings, base_url, profile_url):
 
     access = store.token(user_id, github.app_for(settings))
     if access.state != store.OK:
-        return ConnectorResult((RENEW_REPLY if access.state == store.RENEW else CONNECT_REPLY).format(url=profile_url))
+        reply = {store.RENEW: RENEW_REPLY, store.UNAVAILABLE: UNAVAILABLE_REPLY}.get(access.state, CONNECT_REPLY)
+        return ConnectorResult(reply.format(url=profile_url))
     store.used(user_id)  # (commits: no transaction stays open through the model calls)
     with github.client_for(access.token, settings) as client:
         result = run(message, history, github.TOOLS, client=client, llm=llm,
                      step_timeout=float(settings.get("timeout_seconds") or 30))
-    if not result.failed:  # links only to what GitHub returned, or the conversation already had; no images
+    if result.unauthorized:  # (the grant was revoked on GitHub: the stored token looked fine until now)
+        store.renew(user_id)
+        result.text = RENEW_REPLY.format(url=profile_url)
+    elif not result.failed:  # links only to what GitHub returned, or the conversation already had; no images
         paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
         result.text = links.check(links.strip_images(result.text), sorted(paths), guide, base_url,
-                                  urls=result.urls) or NOT_ANSWERED
+                                  urls=result.urls, strict=True) or NOT_ANSWERED
     return result

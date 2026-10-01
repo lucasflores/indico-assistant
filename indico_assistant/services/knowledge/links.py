@@ -45,10 +45,11 @@ def _key(path):
     return path.rstrip("/") or "/"
 
 
-def check(text, pages, guide_urls, base_url, urls=()):
+def check(text, pages, guide_urls, base_url, urls=(), strict=False):
     """``text`` with every link checked. ``pages``: paths the user can open; ``guide_urls``: the copy's pages;
     ``urls``: addresses kept exactly as they are, whatever their fragment (a connector answer's GitHub items, spec
-    023 FR-017: only what its tools returned, so a text read on GitHub can't plant a link)."""
+    023 FR-017: only what its tools returned, so a text read on GitHub can't plant a link); ``strict``: no other
+    site's links either (Indico's docs site is kept for the knowledge answer, not page by page)."""
     known = {_key(p): p for p in pages}
     exact = {u.split("#")[0] for u in urls}
     base = base_url.rstrip("/")
@@ -62,7 +63,7 @@ def check(text, pages, guide_urls, base_url, urls=()):
         if parts.netloc == GUIDE_HOST:
             page = f"https://{GUIDE_HOST}{_key(parts.path) if _key(parts.path) != '/' else ''}/"
             return url if page in guide_urls else None
-        if parts.netloc in KEPT_HOSTS:
+        if parts.netloc in KEPT_HOSTS and not strict:
             return url
         if parts.netloc not in ("", host) and _key(parts.path) == "/":
             return None
@@ -84,10 +85,8 @@ def check(text, pages, guide_urls, base_url, urls=()):
     return _LINK.sub(replace, text)
 
 
-_IMAGE = re.compile(r"!\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
-
-
 def strip_images(text):
-    """Every markdown image becomes its text: an image is fetched as soon as the answer is shown, so its address
-    could carry private text away (spec 023 FR-017)."""
-    return _IMAGE.sub(r"\1", text)
+    """No markdown image survives: an image is fetched as soon as the answer is shown, so its address could carry
+    private text away (spec 023 FR-017). Every image marker becomes a plain link, which ``check`` then keeps or
+    drops like any other, whatever the alt text holds (Copilot, PR #17: nested brackets slipped past a regex)."""
+    return text.replace("![", "[")

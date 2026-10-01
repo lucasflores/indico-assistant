@@ -21,9 +21,14 @@ def client(fake):
     return GitHubClient(tokens.access, transport=fake.transport())
 
 
-def call(client, name, **arguments):
+def run(client, name, **arguments):
+    """(text, urls): what the tool returns."""
     (tool,) = [t for t in TOOLS if t.name == name]
     return tool.run(client, tool.args(tool=name, **arguments))
+
+
+def call(client, name, **arguments):
+    return run(client, name, **arguments)[0]
 
 
 def numbers(text):
@@ -135,3 +140,43 @@ def test_a_bare_name_the_app_cant_see_says_which_it_can(client):
     with pytest.raises(GitHubError) as error:
         call(client, "item", repo="secret-infra", number=3)
     assert error.value.status == 404 and "thoth-labs/indico-assistant" in error.value.message
+
+
+# --- Copilot's review of PR #17 ----------------------------------------------------------------------------
+
+def test_only_the_api_fields_give_addresses(client):
+    text, urls = run(client, "my_pull_requests")
+    assert urls == ["https://github.com/thoth-labs/indico-assistant/pull/17",
+                    "https://github.com/thoth-labs/indico-assistant/pull/16",
+                    "https://github.com/thoth-labs/ibis-routing/pull/30"]
+    text, urls = run(client, "item", repo="thoth-labs/indico-assistant", number=21)  # (its body links elsewhere)
+    assert urls == ["https://github.com/thoth-labs/indico-assistant/issues/21"] and "evil.example" in text
+
+
+def test_my_open_pull_requests_carry_their_review_decision(client, fake):
+    text = call(client, "my_pull_requests")
+    lines = {int(n): line for n, line in re.findall(r"^#(\d+) (.*)$", text, re.M)}
+    assert "changes requested" in lines[16] and "approved" in lines[30] and "no review decision yet" in lines[17]
+    assert set(fake.searches[-3:]) == {"is:pr author:@me is:open", "is:pr author:@me is:open review:approved",
+                                       "is:pr author:@me is:open review:changes_requested"}
+    assert "review decision" not in call(client, "my_pull_requests", state="merged")
+
+
+def test_a_list_reads_further_pages(client, fake):
+    assert "No more pull requests opened by the user (page 2)." == call(client, "my_pull_requests", page=2)
+    with pytest.raises(ValidationError):
+        github.MyIssuesArgs(tool="my_issues", page=11)
+
+
+def test_newest_reads_the_last_page_of_a_long_list():
+    import httpx
+
+    pages = {1: [{"n": i} for i in range(100)], 2: [{"n": i} for i in range(100, 200)], 3: [{"n": i} for i in (200, 201)]}
+
+    def handle(request):
+        page = int(request.url.params.get("page", 1))
+        headers = {"link": '<https://api.github.com/x?per_page=100&page=3>; rel="last"'} if page == 1 else {}
+        return httpx.Response(200, json=pages[page], headers=headers)
+
+    newest = GitHubClient("t", transport=httpx.MockTransport(handle)).newest("/x")
+    assert [i["n"] for i in newest] == list(range(192, 202))  # (the last 10 of 202, not 90-99 of the first page)

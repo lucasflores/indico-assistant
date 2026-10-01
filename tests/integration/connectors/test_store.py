@@ -152,3 +152,27 @@ def test_indicos_account_signals_reach_the_store(db, users, github_app, create_u
     assert row(other)
     _forget_connections(other, flushed=True)
     assert not Connection.query.filter_by(user_id=other.id).count()
+
+
+def test_a_refresh_github_doesnt_answer_keeps_the_connection(db, users, github_app, fake):
+    """(Copilot, PR #17) an outage near the expiry must not make the user reconnect."""
+    connected(db, users['makoto'], github_app, access=datetime.now(UTC))
+    fake.fail_next("/login/oauth/access_token", 503)
+    assert store.token(users['makoto'].id, github_app) == store.Access(None, store.UNAVAILABLE)
+    assert not row(users['makoto']).needs_renewal
+    assert store.token(users['makoto'].id, github_app).state == store.OK  # (the next try refreshes)
+
+
+def test_disconnect_without_the_apps_credentials_still_deletes(db, users, github_app):
+    """(Copilot, PR #17) GitHub turned off and its secret removed: nothing to revoke with, and never a 500."""
+    from indico_assistant.services.connectors.github import OAuthApp
+
+    connected(db, users['makoto'], github_app)
+    store.disconnect(users['makoto'].id, OAuthApp(None, None))
+    assert Connection.query.filter_by(user_id=users['makoto'].id).count() == 0
+
+
+def test_renew_marks_the_connection(db, users, github_app):
+    connected(db, users['makoto'], github_app)
+    store.renew(users['makoto'].id)
+    assert row(users['makoto']).needs_renewal

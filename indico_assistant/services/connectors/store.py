@@ -22,13 +22,13 @@ logger = logging.getLogger(__name__)
 KEY_ENV = "INDICO_ASSISTANT_CONNECTOR_KEY"
 #: An access token with less left than this is refreshed first: an answer's loop runs for up to a minute.
 MARGIN = timedelta(minutes=5)
-OK, NOT_CONNECTED, RENEW = "ok", "not connected", "renew"
+OK, NOT_CONNECTED, RENEW, UNAVAILABLE = "ok", "not connected", "renew", "unavailable"
 
 
 @dataclass(frozen=True)
 class Access:
     token: str | None
-    state: str  # OK | NOT_CONNECTED | RENEW
+    state: str  # OK | NOT_CONNECTED | RENEW | UNAVAILABLE (GitHub didn't answer the refresh: try again later)
 
 
 def fernet():
@@ -54,6 +54,17 @@ def _renew(row):
     row.needs_renewal = True
     db.session.commit()
     return Access(None, RENEW)
+
+
+def _transient(error):
+    """GitHub didn't answer, was overloaded or rate-limited: the refresh token may still be good."""
+    return error.status in (0, 429) or error.status >= 500
+
+
+def renew(user_id, service="github"):
+    """GitHub refused a token it had issued (401: the grant was revoked there): the user must connect again."""
+    if row := connection(user_id, service):
+        _renew(row)
 
 
 def save(user_id, service, account, tokens):
@@ -108,6 +119,11 @@ def token(user_id, app, service="github"):
     try:
         tokens = app.refresh(refresh)
     except GitHubError as error:
+        if _transient(error):  # (Copilot, PR #17: an outage must not make everyone reconnect)
+            logger.warning("GitHub didn't refresh a connection (%s %s): kept, try again later", error.status,
+                           error.message)
+            db.session.commit()  # (releases the lock)
+            return Access(None, UNAVAILABLE)
         logger.info("GitHub refused to refresh a connection (%s): it needs renewing", error.message)
         return _renew(row)
     save(user_id, service, Account(row.account_id, row.account_login), tokens)
@@ -129,12 +145,14 @@ def disconnect(user_id, app, service="github"):
         access = None
     db.session.delete(row)
     db.session.commit()
-    if access is None:
-        return
+    if access is None or not app.client_id:
+        return  # (no app configured any more: nothing to revoke with)
     try:
         app.revoke(access)
     except GitHubError as error:
         logger.warning("GitHub didn't revoke a disconnected grant (%s); the connection is deleted", error.message)
+    except Exception as error:  # noqa: BLE001 - best effort, after the delete (Copilot, PR #17): never a 500
+        logger.warning("Revoking a disconnected grant failed (%s); the connection is deleted", type(error).__name__)
 
 
 def merged(target_id, source_id):

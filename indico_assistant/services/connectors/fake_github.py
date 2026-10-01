@@ -109,6 +109,17 @@ EVENTS = {
 }
 
 
+def _decision(item):
+    """A pull request's review decision, as GitHub's review: qualifier reads it: each reviewer's latest review."""
+    latest = {}
+    for login, state, _, _ in sorted(item["reviews"], key=lambda r: -r[2]):  # (oldest first)
+        if state in ("APPROVED", "CHANGES_REQUESTED"):
+            latest[login] = state
+    if "CHANGES_REQUESTED" in latest.values():
+        return "changes_requested"
+    return "approved" if latest else "required"
+
+
 def _when(age):
     return (datetime.now(UTC) - timedelta(days=age)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -225,7 +236,7 @@ class FakeGitHub:
             return httpx.Response(200, json={"total_count": len(repos), "repositories": repos})
         if path == "/search/issues":
             self.searches.append(params.get("q", ""))
-            return self._search(params.get("q", ""), int(params.get("per_page") or 30))
+            return self._search(params.get("q", ""), int(params.get("per_page") or 30), int(params.get("page") or 1))
         if parts[0] == "repos" and len(parts) >= 4:
             repo = "/".join(parts[1:3])
             if not _visible(repo):
@@ -258,7 +269,7 @@ class FakeGitHub:
                 for n, (a, state, age, text) in enumerate(item["reviews"], 1)])
         return self._error(404, "Not Found")
 
-    def _search(self, q, per_page):
+    def _search(self, q, per_page, page=1):
         try:
             words = shlex.split(q)
         except ValueError:
@@ -273,7 +284,7 @@ class FakeGitHub:
                  and all(self._matches(i, w) for w in words if w != kind)]
         found.sort(key=lambda i: i["age"])
         return httpx.Response(200, json={"total_count": len(found), "incomplete_results": False,
-                                         "items": [_issue_json(i) for i in found[:per_page]]})
+                                         "items": [_issue_json(i) for i in found[(page - 1) * per_page:page * per_page]]})
 
     @staticmethod
     def _unsearchable(word):
@@ -304,6 +315,7 @@ class FakeGitHub:
             "user": lambda: item["repo"].split("/")[0] == value,
             "org": lambda: item["repo"].split("/")[0] == value,
             "label": lambda: value in item["labels"],
+            "review": lambda: _decision(item) == value,
         }
         return checks[key]() if key in checks else True  # (other qualifiers, e.g. sort:, are ignored)
 
