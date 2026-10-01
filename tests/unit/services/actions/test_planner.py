@@ -198,9 +198,16 @@ def test_a_failed_planning_call_was_not_understood(dummy_user, chat):
     assert turn(dummy_user, chat, llm).problem == 'not_understood'
 
 
-def test_no_steps_is_not_understood_even_with_the_models_own_reply(dummy_user, chat):
-    result = turn(dummy_user, chat, llm_returning(decision='new_request', reply='I am not sure what to change.'))
-    assert result.reply == 'I am not sure what to change.' and result.problem == 'not_understood'
+def test_no_steps_and_no_reply_is_not_understood(dummy_user, chat):
+    result = turn(dummy_user, chat, llm_returning(decision='new_request', reply=''))
+    assert result.reply == planner.NOT_UNDERSTOOD and result.problem == 'not_understood'
+
+
+def test_a_clarifying_question_is_no_problem(dummy_user, chat, shown):
+    # (second fresh review, PR #16: "How long should it be?" under a waiting plan carried a report offer)
+    result = turn(dummy_user, chat, llm_returning(decision='revise', reply='How long should it be?'), open_plan=shown,
+                  message='make it longer')
+    assert result.reply == 'How long should it be?' and result.problem is None
 
 
 @pytest.mark.parametrize('outcome', ['unsupported', 'refused', 'invalid'])

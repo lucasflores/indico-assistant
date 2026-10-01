@@ -243,9 +243,11 @@ def admin_update(admin, report_id: int, status: Any, note: Any, seen: Any) -> Is
     report = db.session.get(IssueReport, report_id)
     if report is None:
         raise ReportError(404, 'NOT_FOUND', 'Report not found')
+    # what a save leaves out (None) stays as it is: a PATCH of the status alone must not erase the note (fresh review)
+    status = report.status if status is None else status
     if status not in STATUSES:
         raise _invalid('status', 'Unknown status')
-    note = _text(note)
+    note = (report.note or '') if note is None else _text(note)
     if len(note) > NOTE_MAX:
         raise _invalid('note', f'The note is at most {NOTE_MAX} characters')
     if (seen or '') != (report.updated_at.isoformat() if report.updated_at else ''):

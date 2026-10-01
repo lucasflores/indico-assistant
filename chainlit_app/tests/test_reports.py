@@ -240,3 +240,12 @@ async def test_a_confirmed_plan_that_did_not_run_offers_a_report(chat, monkeypat
 
 async def _noop():
     return None
+
+
+
+async def test_a_sent_form_is_not_kept(chat):
+    # (second fresh review, PR #16: every form's message stayed in the session after a successful Send)
+    await app_chnlit.on_window_message({"source": "indico-assistant", "type": "report"})
+    key = props(chat)["form_key"]
+    await app_chnlit.on_report_submit(submitted(form_key=key))
+    assert key not in app_chnlit.cl.user_session.get("report_forms")

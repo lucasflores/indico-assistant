@@ -20,7 +20,7 @@ from indico.web.menu import SideMenuItem
 from werkzeug.exceptions import Forbidden, NotFound
 
 from indico_assistant.models import IssueReport
-from indico_assistant.models.report import LABELS
+from indico_assistant.models.report import CATEGORIES, LABELS, STATUSES
 from indico_assistant.services import reports
 from indico_assistant.views import WPReports, WPReportsAdmin
 
@@ -107,16 +107,14 @@ class RHAdminReports(RHAdminBase):
     """Every report, newest first, a page at a time, filtered by status and category."""
 
     def _process(self):
-        filters = {'status': request.args.get('status') or None, 'category': request.args.get('category') or None}
-        try:
-            rows, page, pages = reports.admin_list(filters['status'], filters['category'],
-                                                   request.args.get('page', 1, type=int))
-        except reports.ReportError:  # an unknown filter value: show everything instead
-            filters = {'status': None, 'category': None}
-            rows, page, pages = reports.admin_list(page=request.args.get('page', 1, type=int))
+        # an unknown value drops only itself (fresh review: it cleared both)
+        filters = {'status': request.args.get('status') if request.args.get('status') in STATUSES else None,
+                   'category': request.args.get('category') if request.args.get('category') in CATEGORIES else None}
+        rows, page, pages = reports.admin_list(filters['status'], filters['category'],
+                                               request.args.get('page', 1, type=int))
         return WPReportsAdmin.render_template(
             'admin_reports.html', MENU_ITEM, reports=rows, page=page, pages=pages, filters=filters, labels=LABELS,
-            open=reports.open_count(), people=reports.people(rows),
+            people=reports.people(rows),
             page_url=lambda n: url_for_plugin('assistant.admin_reports', page=n, **{k: v for k, v in filters.items() if v}),
             report_url=lambda report: url_for_plugin('assistant.admin_report', report_id=report.id))
 

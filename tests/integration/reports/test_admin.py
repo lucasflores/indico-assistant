@@ -131,3 +131,15 @@ def test_the_list_looks_its_people_up_in_one_query(db, users, monkeypatch):
     status, body = call(RHAdminReportList, users['lucas'], monkeypatch)
     assert status == 200 and {r['user']['name'] for r in body['reports']} == {users['makoto'].full_name,
                                                                               users['lucas'].full_name}
+
+
+def test_a_patch_keeps_what_it_leaves_out(db, users, monkeypatch):
+    # (second fresh review, PR #16: leaving out the note erased it; leaving out the status was refused)
+    row = filed(db, users['makoto'])
+    save(users, monkeypatch, row, status='under_review', note='Looking at it.', seen='')
+    status, _ = save(users, monkeypatch, row, status='closed', seen=row.updated_at.isoformat())
+    assert status == 200 and (row.status, row.note) == ('closed', 'Looking at it.')
+    status, _ = save(users, monkeypatch, row, note='Fixed in 1.3.', seen=row.updated_at.isoformat())
+    assert status == 200 and (row.status, row.note) == ('closed', 'Fixed in 1.3.')
+    save(users, monkeypatch, row, note='', seen=row.updated_at.isoformat())  # an empty note clears it
+    assert row.note is None
