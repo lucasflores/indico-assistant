@@ -197,7 +197,7 @@ requests, linked to GitHub.
 
 - [x] T035 [US4] `tests/unit/services/connectors/test_loop.py`, an addition: the history reaches every step's
   `generate(messages=…)`, so "the second one" can be worked out.
-- [ ] T036 [US4] Write the follow-up cases (6) for T043:
+- [x] T036 [US4] Write the follow-up cases (6) for T043:
   - "which of those is oldest?" expects chat, with no tool;
   - "what did the reviewer say on the second one?" expects connector, with `item` on the seed's second pull
     request.
@@ -219,7 +219,8 @@ requests, linked to GitHub.
 - [x] T039 (2026-09-30: 2131 passed, 27 skipped, 7 failed = the citation baseline; Chainlit 57; ruff: no new
   findings, and a planted token log fails the leak test.) The full suite: `pytest tests` (the baseline from T001, plus the new tests), the Chainlit suite, and
   `ruff check` on the touched files. Revert ruff's churn in code we didn't touch.
-- [ ] T040 (2026-09-30, first window: story 1 done live, the chat parts wait for Lucas's go on the spend.) Connect
+- [x] T040 (2026-09-30, two windows. First: story 1 live, free. Second, with Lucas's go: stories 2-4 through the eval (T043)
+  and the renew reply (1.0 s, no model call, the right link).) Connect
   through the fake sign-in, the page with 3 repositories (the uninstalled one hidden), the add link, CSRF-less POST =
   400, the admin view without repositories, an admin's Connect = 403, an admin's Disconnect through Indico's confirm
   dialog in Chrome, Connect by the button; ciphertext only in the DB, no token in the logs, page or API. Found and
@@ -237,10 +238,20 @@ requests, linked to GitHub.
 - [ ] T041 Real GitHub, optional, with Lucas. He registers the test GitHub App (as Indico's top admin; AI-Thoth or
   his own account) and enters its settings; then connect, and one question. This is skipped if he doesn't want it
   before the merge.
-- [ ] T042 Paid, only with Lucas's go: the router probe with `connector` (~$0.006), with the 30 GitHub questions
-  and the existing sets (SC-001).
-- [ ] T043 Paid, only with Lucas's go: the eval repo's `connector` set, run on the live window's fake mode, graded
-  by code (~$0.15; SC-002, SC-003, SC-005). The set goes on a branch in `~/indico-assistant/eval`.
+- [x] T042 Paid, only with Lucas's go: the router probe with `connector` (~$0.006), with the 30 GitHub questions
+  and the existing sets (SC-001). Done 2026-09-30 (thread D study, $0.017 in two runs). Probe 1: 23 of 30 GitHub
+  questions to the connector, so the criterion was sharpened (5f084fd). Probe 2: 28 of 30, and the existing 129
+  cases route as in thread E's v4 (124 right).
+- [x] T043 Paid, only with Lucas's go: the eval repo's `connector` set, run on the live window's fake mode, graded
+  by code (~$0.15; SC-002, SC-003, SC-005). The set goes on a branch in `~/indico-assistant/eval`. Done 2026-09-30:
+  eval branch `023-connector-eval`, 48 cases.
+  - Run 1 ($0.041): 36/48. It found a follow-up answered from memory (two invented reviewers), bare repository
+    names failing validation, and failed steps failing the answer: all fixed (3e724f7).
+  - Run 2 ($0.038): 41/48. GitHub questions 28/30 right (SC-002) and 28/30 routed (SC-001); safe 48/48 (SC-003);
+    7.2 s median and 19.5 s max (SC-005).
+  - Left: 2 ambiguous routings ("waiting for my review", "the cost snapshot issue"), and 1 follow-up after one of
+    them. Plus 4 right answers that a strict check fails: 2 follow-ups re-looked up instead of answering from the
+    list, 1 didn't repeat the PR number, and 1 described an injected request instead of obeying it.
 - [ ] T044 The ONE pull request, `023-github-connector` → main. Its description covers the routing note, the spec,
   the plan and the code. Add Copilot as reviewer once at open, by the API, login `Copilot`. If that doesn't
   register, Lucas requests it in the UI, or we use /fresh-review. Never merge.

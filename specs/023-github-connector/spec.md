@@ -220,7 +220,8 @@ that pull request's reviews.
 - **FR-012**: On the connector route, a user who isn't connected, or needs to renew, MUST get a fixed reply with
   the profile link, and no model or GitHub call is made.
 - **FR-013**: Otherwise, the tool loop answers. Each step is one `LLMService.generate` returning a validated step:
-  either one tool with its arguments, or the answer.
+  either one tool with its arguments, or the answer. The first step MUST be a tool call: the answer always rests on
+  something looked up.
 - **FR-014**: The loop MUST stop at 4 steps, at 60 s of wall time, or on a repeated identical call. Each tool result
   is cut to 4,000 characters.
 - **FR-015**: v1 has these read tools, each calling GitHub as the user. All are reads:
