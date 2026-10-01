@@ -6,6 +6,7 @@ Indico's plugin system to provide AI-powered assistant capabilities.
 
 import logging
 import os
+import secrets
 
 from indico.core.plugins import IndicoPlugin, IndicoPluginBlueprint
 from indico.core import signals
@@ -60,6 +61,7 @@ class AssistantPlugin(IndicoPlugin):
     def _setup_chat_widget(self):
         """One deferred, cacheable <script> for logged-in users; it fetches its config only when opened."""
         self.template_hook("html-head", self._render_widget_script)
+        self.connect(signals.users.logged_in, _new_login)  # each login starts the panel on a new chat
         # spec 021: the profile's "Assistant reports"
         self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
         self.connect(signals.menu.items, _admin_menu, sender='admin-sidemenu')
@@ -93,7 +95,7 @@ class AssistantPlugin(IndicoPlugin):
         uid = int(session.user.id)
         widths = self.PANEL_WIDTHS
         return (f'<script nonce="{get_csp_nonce()}">{self._PANEL_SNIPPET.format(uid=uid, **widths)}</script>'
-                f'<script src="{widget_script_url()}" data-user="{uid}" data-login="{_login_marker(session.sid)}" '
+                f'<script src="{widget_script_url()}" data-user="{uid}" data-login="{session.get(LOGIN_KEY, "")}" '
                 f'data-min-width="{widths["min"]}" data-default-width="{widths["default"]}" '
                 f'data-narrow="{widths["narrow"]}" defer></script>')
 
@@ -188,15 +190,16 @@ class AssistantPlugin(IndicoPlugin):
         return self.settings.get(key)
 
 
-def _login_marker(sid):
-    """What the panel compares to start each login on a new chat: Indico gives the session a new id at every login
-    (``set_session_user``), and the page gets a keyed hash of it, never the id itself, which signs the user in."""
-    import hmac
+#: Set at each login, and given to the panel's script tag: when it changes, the panel opens a new chat
+LOGIN_KEY = "assistant_login"
 
-    from indico.core.config import config
 
-    key = config.SECRET_KEY if isinstance(config.SECRET_KEY, bytes) else config.SECRET_KEY.encode()
-    return hmac.new(key, (sid or "").encode(), "sha256").hexdigest()[:16]
+def _new_login(user, **kwargs):
+    """Indico's own login signal, for a login or an admin impersonating the user (fresh-review of #19: a hash of the
+    session id also changed when Indico renewed the id for another reason, and carried a credential's trace)."""
+    from flask import session
+
+    session[LOGIN_KEY] = secrets.token_hex(8)
 
 
 _PENDING_INDEXING = 'indico_assistant_pending_indexing'

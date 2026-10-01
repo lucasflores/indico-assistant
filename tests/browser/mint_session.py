@@ -10,6 +10,8 @@ with app.test_request_context(base_url='http://127.0.0.1:8000'):
     from indico.modules.users import User
     assert User.get(user_id, is_deleted=False) is not None
     session['_user_id'] = user_id  # (set_session_user memoizes None outside a real request: spec 019 R1)
+    from indico.core import signals
+    signals.users.logged_in.send(User.get(user_id))  # (what a login ends with: the panel's new-chat token)
     session.modified = True
     response = Response()
     app.session_interface.save_session(app, session, response)

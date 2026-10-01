@@ -32,7 +32,7 @@ other side's origin and ignores anything else. The page learns the frame's origi
 
 ## Page state (per user, per browser)
 
-`localStorage["indico-assistant:<user id>"] = {open, width, threadId}` (see data-model.md). The page writes it on:
+`localStorage["indico-assistant:<user id>"] = {open, width, threadId, login}` (see data-model.md). The page writes it on:
 
 - open and close;
 - the end of a resize drag;
