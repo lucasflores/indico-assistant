@@ -13,7 +13,7 @@ from indico.web.forms.fields import IndicoSelectMultipleCheckboxField
 from indico_assistant.default_settings import IBIS_MODE_CHOICES, WRITE_ACTIONS
 
 
-SECRETS = ("llm_api_key", "jev_api_key", "chainlit_auth_secret")
+SECRETS = ("llm_api_key", "jev_api_key", "chainlit_auth_secret", "github_client_secret")
 CLEAR = "-"  # typed into a secret's field, removes it
 
 
@@ -199,6 +199,40 @@ class SettingsForm(IndicoForm):
                     "displayed; leave empty to keep it, \"-\" removes it)",
     )
 
+    # Connectors (spec 023)
+    github_enabled = BooleanField(
+        "Enable GitHub",
+        description="Users can connect their own GitHub account and ask the assistant about it (read-only). Needs "
+                    "the GitHub App's client ID and secret, and the INDICO_ASSISTANT_CONNECTOR_KEY environment "
+                    "variable (see docs/DEPLOYMENT.md).",
+    )
+
+    github_client_id = StringField("GitHub App client ID", validators=[Optional()])
+
+    github_client_secret = PasswordField(
+        "GitHub App client secret",
+        validators=[Optional()],
+        description="Never displayed; leave empty to keep it, \"-\" removes it.",
+    )
+
+    github_app_url = StringField(
+        "GitHub App page",
+        validators=[Optional(), URL(require_tld=False)],
+        description="The app's public page, https://github.com/apps/<name>: users add repositories there.",
+    )
+
+    github_timeout_seconds = FloatField(
+        "GitHub timeout (seconds)",
+        validators=[InputRequired(), NumberRange(min=1, max=30)],
+        description="For each call to GitHub (1-30 seconds).",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from indico_assistant.services.connectors.github import callback_url
+        self.github_client_id.description = (f"Register the GitHub App with the callback URL {callback_url()} and "
+                                             "read-only Metadata, Issues and Pull requests permissions.")
+
     @property
     def data(self):
         """What Indico saves (``settings.set_multi(form.data)``), without an empty secret: a password field is never
@@ -207,6 +241,21 @@ class SettingsForm(IndicoForm):
         data = {name: value for name, value in super().data.items() if name not in SECRETS or value}
         return {name: (None if name in SECRETS and value.strip() == CLEAR else value) for name, value in data.items()}
 
+    def validate_github_enabled(self, field):
+        """GitHub can't be turned on without the app's ID and secret and the tokens' key (spec 023 FR-002)."""
+        from indico_assistant.services.connectors.store import KEY_ENV, fernet
+
+        if not field.data:
+            return
+        secret = (self.github_client_secret.data or "").strip()
+        secret = None if secret == CLEAR else secret or _stored("github_client_secret")
+        missing = [what for what, there in (("the client ID", (self.github_client_id.data or "").strip()),
+                                            ("the client secret", secret),
+                                            (f"a valid {KEY_ENV} environment variable", fernet()))
+                   if not there]
+        if missing:
+            raise ValidationError("GitHub needs " + " and ".join(missing) + ".")
+
     def validate_nl2sql_allowed_tables(self, field):
         """Convert comma-separated string to list or None."""
         if field.data:
@@ -214,6 +263,16 @@ class SettingsForm(IndicoForm):
             field.data = tables if tables else None
         else:
             field.data = None
+
+
+def _stored(name):
+    """A setting as saved (a secret's field is never filled in), or None while the plugin isn't loaded."""
+    from indico_assistant.plugin import AssistantPlugin
+
+    try:
+        return AssistantPlugin.settings.get(name)
+    except RuntimeError:
+        return None
 
 
 class EventSettingsForm(IndicoForm):

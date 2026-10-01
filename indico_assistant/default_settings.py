@@ -84,6 +84,13 @@ DEFAULT_SETTINGS = {
     "actions_allowed": list(WRITE_ACTIONS),
     "actions_reminder_minutes": 15,
     "actions_outlook_freebusy": False,  # Outlook free/busy via Graph, once the tenant probe confirms it works
+    # Connectors (spec 023): GitHub, read-only, with each user's own token. Off until an admin registers the
+    # instance's GitHub App and enters its ID and secret; the tokens' key is INDICO_ASSISTANT_CONNECTOR_KEY.
+    "github_enabled": False,
+    "github_client_id": None,
+    "github_client_secret": None,
+    "github_app_url": None,  # the app's public page (https://github.com/apps/<slug>), for "add repositories"
+    "github_timeout_seconds": 10,
     # Citation settings (Feature 015)
     "base_url": "http://localhost:8000",  # Base URL for citation links (event pages, attachments)
 }

@@ -185,3 +185,58 @@ def test_an_empty_secret_keeps_the_stored_one(request_context):
     assert form.data["llm_api_key"] == "sk-new"
     cleared = SettingsForm(formdata=MultiDict({"jev_api_key": " - "}), meta={"csrf": False})
     assert cleared.data["jev_api_key"] is None  # (fresh review) "-" removes it: the router can be switched off
+
+
+# --- spec 023: GitHub ----------------------------------------------------------------------------------------
+
+def test_github_settings_are_off_and_empty_by_default():
+    from indico_assistant.default_settings import DEFAULT_SETTINGS
+    from indico_assistant.forms import SECRETS
+
+    assert DEFAULT_SETTINGS["github_enabled"] is False
+    assert all(DEFAULT_SETTINGS[k] is None for k in ("github_client_id", "github_client_secret", "github_app_url"))
+    assert DEFAULT_SETTINGS["github_timeout_seconds"] == 10
+    assert "github_client_secret" in SECRETS  # never displayed, empty keeps it, "-" removes it
+
+
+@pytest.fixture
+def github_form(request_context, monkeypatch):
+    """A settings form posting ``fields`` over a stored secret of ``stored``; the key is set unless ``key=False``."""
+    from cryptography.fernet import Fernet
+    from werkzeug.datastructures import MultiDict
+
+    import indico_assistant.forms as forms
+
+    def make(stored=None, key=True, **fields):
+        monkeypatch.setattr(forms, "_stored", lambda name: stored if name == "github_client_secret" else None)
+        if key:
+            monkeypatch.setenv("INDICO_ASSISTANT_CONNECTOR_KEY", Fernet.generate_key().decode())
+        else:
+            monkeypatch.delenv("INDICO_ASSISTANT_CONNECTOR_KEY", raising=False)
+        form = forms.SettingsForm(formdata=MultiDict({"github_enabled": "y", **fields}), meta={"csrf": False})
+        form.validate()
+        return form.errors.get("github_enabled")
+
+    return make
+
+
+def test_github_turns_on_with_its_id_secret_and_key(github_form):
+    assert github_form(github_client_id="Iv1.abc", github_client_secret="s3cret") is None
+    assert github_form(stored="s3cret", github_client_id="Iv1.abc") is None  # (empty keeps the stored secret)
+
+
+@pytest.mark.parametrize("missing, fields, stored, key", [
+    ("client ID", {"github_client_secret": "s3cret"}, None, True),
+    ("client secret", {"github_client_id": "Iv1.abc"}, None, True),
+    ("client secret", {"github_client_id": "Iv1.abc", "github_client_secret": "-"}, "s3cret", True),  # removed
+    ("INDICO_ASSISTANT_CONNECTOR_KEY", {"github_client_id": "Iv1.abc", "github_client_secret": "s3cret"}, None, False),
+])
+def test_github_does_not_turn_on_without_one_of_them(github_form, missing, fields, stored, key):
+    (error,) = github_form(stored=stored, key=key, **fields)
+    assert missing in error
+
+
+def test_the_callback_to_register_is_shown(request_context):
+    from indico_assistant.forms import SettingsForm
+
+    assert "/assistant/github/callback" in SettingsForm(meta={"csrf": False}).github_client_id.description

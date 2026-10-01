@@ -38,6 +38,8 @@ dependencies = [
     "pgvector>=0.2.0",
     # Chat widget dependencies (Feature 008)
     "PyJWT>=2.8.0",
+    # Connectors (spec 023): the stored tokens are encrypted with Fernet
+    "cryptography>=41",
 ]
 
 [project.optional-dependencies]
