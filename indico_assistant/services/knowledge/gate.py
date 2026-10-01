@@ -78,6 +78,8 @@ CONNECTOR = ("Anything on GitHub: pull requests (PRs), code reviews and review r
              "repository they name. PR, pull request, issue, repo, review request, release and owner/name all mean "
              "GitHub here.")
 #: ...and, with it, one sentence more for the two routes GitHub questions were mistaken for
+#: ...and the route question's instructions name GitHub among what the assistant can do (second review of #19)
+READS_GITHUB = " While GitHub is turned on, it also reads the user's own GitHub for them."
 ALSO = {"knowledge": " How to connect GitHub to the assistant, and what the assistant can do with GitHub (\"what "
                      "can you do with my GitHub?\"), are questions about the assistant: knowledge.",
         "out_of_scope": " A question about GitHub is never out of scope."}
@@ -88,7 +90,9 @@ def questions(connector=False):
     if not connector:
         return QUESTIONS
     criteria = {name: text + ALSO.get(name, "") for name, text in ROUTES.items()}
-    return {**QUESTIONS, "route": {**QUESTIONS["route"], "criteria": {**criteria, "connector": CONNECTOR}}}
+    route = {**QUESTIONS["route"], "criteria": {**criteria, "connector": CONNECTOR},
+             "instructions": QUESTIONS["route"]["instructions"] + READS_GITHUB}  # (a capability of its own)
+    return {**QUESTIONS, "route": route}
 
 
 @dataclass
