@@ -22,7 +22,8 @@ The decisions taken before this spec (2026-09-28):
   inside it. This replaces the floating chat bubble, which has no room for a sidebar.
 - **Where conversations live**: only in Indico, where they are stored today. The panel and its sidebar read and
   write that one store; nothing keeps a second copy.
-- **Which conversation comes back**: the one last open in this browser.
+- **Which conversation comes back**: the one last open in this browser, within the same login. Each login starts
+  on a new chat (Lucas, 2026-10-01).
 - **After navigating**: the panel reopens on the next page if it was open.
 - **"This event" in a message**: the page the user is on when they send it, not the page the conversation
   started on.

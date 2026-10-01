@@ -80,13 +80,13 @@ class TestWidgetDefaultSettings:
 class TestWidgetLoading:
     """Page views pay for the widget only when a logged-in user has it enabled, and then one cached file."""
 
-    def _script(self, user, enabled=True):
+    def _script(self, user, enabled=True, sid="s1d"):
         from indico_assistant.plugin import AssistantPlugin
 
         class Plugin(AssistantPlugin):
             settings = MagicMock(get={"chat_widget_enabled": enabled}.get)
 
-        with patch("flask.session", MagicMock(user=user)):
+        with patch("flask.session", MagicMock(user=user, sid=sid)):
             return Plugin.__new__(Plugin)._render_widget_script()
 
     def test_anonymous_and_disabled_get_nothing(self):
@@ -95,12 +95,21 @@ class TestWidgetLoading:
 
     def test_logged_in_gets_one_deferred_versioned_script(self):
         from indico_assistant.blueprint import widget_script_url
+        from indico_assistant.plugin import _login_marker
 
         with patch("indico_assistant.plugin.get_csp_nonce", return_value="N0NCE"):
             html = self._script(MagicMock(id=7))
-        assert (f'<script src="{widget_script_url()}" data-user="7" data-min-width="320" data-default-width="440" '
-                f'data-narrow="768" defer></script>') in html  # (the widths the inline snippet reserves)
-        assert "?v=" in widget_script_url()
+        assert (f'<script src="{widget_script_url()}" data-user="7" data-login="{_login_marker("s1d")}" '
+                f'data-min-width="320" data-default-width="440" data-narrow="768" defer></script>') in html
+        assert "?v=" in widget_script_url()  # (above: the widths the inline snippet reserves)
+
+    def test_each_login_has_its_own_marker_that_hides_the_session_id(self):
+        # a login gives the session a new id, so the panel opens a new chat (Lucas, 2026-10-01)
+        from indico_assistant.plugin import _login_marker
+
+        first, again, next_login = (self._script(MagicMock(id=7), sid=sid) for sid in ("s1d", "s1d", "n3w"))
+        assert first == again and _login_marker("s1d") != _login_marker("n3w") and _login_marker("n3w") in next_login
+        assert "s1d" not in first and len(_login_marker("s1d")) == 16
 
     def test_the_version_changes_with_the_stylesheet_too(self, tmp_path, monkeypatch):
         # the stylesheet is fetched with the script's ?v=: a CSS-only change must give a new one (review, PR #10)

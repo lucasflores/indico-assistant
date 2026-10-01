@@ -6,6 +6,8 @@
  * back open, on the same conversation, after every navigation:
  * - the per-user state is kept in the browser: open and width in localStorage, the open conversation per tab
  *   (sessionStorage), so two tabs keep their own; a new tab starts on the last one used;
+ * - each Indico login starts on a new chat: the script tag's data-login changes then (plugin.py), and a
+ *   conversation kept from an earlier login is not reopened;
  * - an inline <head> snippet (plugin.py) reserves an open panel's width before the page paints;
  * - the frame signs in with a fresh token for this page (it carries the page's event) sent by
  *   postMessage, never in a URL, and reports back: ready, the open conversation, Indico links, Esc.
@@ -19,6 +21,8 @@
   if (!USER) return;
   const STATE_KEY = `indico-assistant:${USER}`;
   const TAB_KEY = `indico-assistant-thread:${USER}`;  // this tab's conversation (review, PR #5)
+  const LOGIN = SCRIPT.dataset.login || "";  // changes at each Indico login: then a new chat (Lucas, 2026-10-01)
+  const TAB_LOGIN_KEY = `indico-assistant-login:${USER}`;  // the login this tab's conversation belongs to
   const CONFIG_URL = "/api/assistant/widget/config";
   // the panel's widths, from plugin.py (PANEL_WIDTHS), which reserves the same width before the page paints
   const DEFAULT_WIDTH = Number(SCRIPT.dataset.defaultWidth) || 440;
@@ -36,6 +40,15 @@
     let loaded = { open: false, width: DEFAULT_WIDTH, threadId: null };
     try {
       loaded = Object.assign(loaded, JSON.parse(localStorage.getItem(STATE_KEY) || "{}"));
+      if (LOGIN && loaded.login !== LOGIN) {  // the first page since logging in: a new chat, not the last one
+        loaded.threadId = null;
+        loaded.login = LOGIN;
+        localStorage.setItem(STATE_KEY, JSON.stringify(loaded));
+      }
+      if (LOGIN && sessionStorage.getItem(TAB_LOGIN_KEY) !== LOGIN) {  // a tab left open since an earlier login
+        sessionStorage.removeItem(TAB_KEY);
+        sessionStorage.setItem(TAB_LOGIN_KEY, LOGIN);
+      }
       const tab = sessionStorage.getItem(TAB_KEY);  // set once this tab has had a conversation, even a new chat
       if (tab !== null) loaded.threadId = tab || null;
     } catch (e) { /* private mode: nothing kept */ }

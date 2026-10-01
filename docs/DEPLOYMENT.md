@@ -1,8 +1,8 @@
 # Deployment Guide: Chat Panel
 
 The assistant is Chainlit's full app (Chainlit 2.12.0) in a panel docked to the right of every Indico page. The panel
-comes back open, on the same conversation, after every navigation, and its Past Chats sidebar lists the user's
-conversations. Conversations live in Indico's database: Chainlit keeps none of its own (spec 020).
+comes back open, on the same conversation, after every navigation; each login starts on a new chat; and its Past
+Chats sidebar lists the user's conversations. Conversations live in Indico's database: Chainlit keeps none of its own (spec 020).
 
 ## Prerequisites
 - The Indico Assistant plugin installed and enabled, with its migrations applied: `indico db --all-plugins upgrade`
