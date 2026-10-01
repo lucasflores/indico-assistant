@@ -32,6 +32,7 @@ class CapabilityList:
     event: dict | None  # {id, title, type, manages, locked}
     changes_enabled: bool
     github: str | None = None  # spec 023: None while GitHub is off; else their login, or "" when not connected
+    github_renew: bool = False  # their connection needs renewing (GitHub refused it)
 
     def render(self):
         lines = [f"You are talking to {self.user_name}{' (an Indico administrator)' if self.is_admin else ''}."]
@@ -65,7 +66,9 @@ class CapabilityList:
         else:
             lines.append("It can read their GitHub, read-only (their pull requests, the reviews waiting for them, "
                          "issues assigned to them, their repositories): "
-                         + (f"they are connected as @{self.github}." if self.github else "they have not connected it "
+                         + (f"their connection (@{self.github}) needs renewing, which they can do on the Connected "
+                            "accounts page of their profile." if self.github and self.github_renew else
+                            f"they are connected as @{self.github}." if self.github else "they have not connected it "
                             "yet, which they can do on the Connected accounts page of their profile."))
             lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It never changes anything on GitHub, and has "
                          "no access to email inboxes or calendars outside Indico.")
@@ -119,13 +122,14 @@ def capability_list(user, event=None, settings=None):
     if event is not None:
         event_info = {"id": event.id, "title": event.title, "type": getattr(event.type_, "name", str(event.type_)),
                       "manages": bool(event.can_manage(user)), "locked": bool(event.is_locked)}
-    github = None
+    github, github_renew = None, False
     if settings.get("github_enabled"):
         from indico_assistant.services.connectors.store import connection
 
         row = connection(user.id)
-        github = row.account_login if row is not None and not row.needs_renewal else ""
+        github = row.account_login if row is not None else ""
+        github_renew = bool(row is not None and row.needs_renewal)
     return CapabilityList(user_name=user.full_name, is_admin=bool(user.is_admin),
                           data_questions=bool(settings.get("nl2sql_enabled", True)), create_in=create_in,
                           propose_in=propose_in, can=can, cannot=cannot, event=event_info,
-                          changes_enabled=bool(enabled), github=github)
+                          changes_enabled=bool(enabled), github=github, github_renew=github_renew)

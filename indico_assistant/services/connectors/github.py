@@ -70,6 +70,14 @@ def _send(http, method, url, **kwargs):
     return response
 
 
+def _json(response):
+    """The body, or a GitHubError (502: treated as GitHub being unreachable) when it isn't JSON (a proxy's page)."""
+    try:
+        return response.json()
+    except ValueError:
+        raise GitHubError(502, "GitHub's answer wasn't JSON") from None
+
+
 def _last_page(link):
     """The last page's number in GitHub's ``Link`` header, or None."""
     found = re.search(r'[?&]page=(\d+)[^>]*>; rel="last"', link or "")
@@ -83,19 +91,20 @@ class GitHubClient:
         self._http = httpx.Client(base_url=API, timeout=timeout, transport=transport, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": API_VERSION})
+        self.cache = {}  # (for one answer: e.g. the repositories, once however many bare names it resolves)
 
     def get(self, path, params=None):
-        return _send(self._http, "GET", path, params=params).json()
+        return _json(_send(self._http, "GET", path, params=params))
 
     def newest(self, path, n=10):
         """The newest ``n`` of a list GitHub returns oldest first, a page of 100 at a time: from its last page (and
         the one before, when that is short), not from the first page (Copilot, PR #17)."""
         first = _send(self._http, "GET", path, params={"per_page": 100})
-        items, last = first.json(), _last_page(first.headers.get("link"))
+        items, last = _json(first), _last_page(first.headers.get("link"))
         if last and last > 1:
-            items = _send(self._http, "GET", path, params={"per_page": 100, "page": last}).json()
+            items = self.get(path, {"per_page": 100, "page": last})
             if len(items) < n:
-                items = _send(self._http, "GET", path, params={"per_page": 100, "page": last - 1}).json() + items
+                items = self.get(path, {"per_page": 100, "page": last - 1}) + items
         return items[-n:]
 
     def close(self):
@@ -140,8 +149,10 @@ class OAuthApp:
 
     def _tokens(self, fields):
         with httpx.Client(timeout=self._timeout, transport=self._transport) as http:
-            body = _send(http, "POST", f"{WEB}/login/oauth/access_token", headers={"Accept": "application/json"},
-                         data={"client_id": self.client_id, "client_secret": self._secret, **fields}).json()
+            body = _json(_send(http, "POST", f"{WEB}/login/oauth/access_token", headers={"Accept": "application/json"},
+                               data={"client_id": self.client_id, "client_secret": self._secret, **fields}))
+        if not isinstance(body, dict):
+            raise GitHubError(502, "GitHub's answer wasn't a token")
         if "error" in body or "access_token" not in body:  # (GitHub answers OAuth errors with a 200)
             raise GitHubError(400, body.get("error") or "no token")
         now = datetime.now(UTC)
@@ -180,12 +191,19 @@ def client_for(token, settings):
 
 def repositories(client, limit=100):
     """The repositories the app can see for this user (those of its installations the user can reach), capped at
-    ``limit``, and how many there are in all."""
+    ``limit``, and how many there are in all. Each installation's list is read a page of 100 at a time until
+    ``limit``."""
     found, total = [], 0
+    # ponytail: the first 100 installations only; a user reaching more is not a case yet
     for installation in client.get("/user/installations", {"per_page": 100})["installations"]:
-        page = client.get(f"/user/installations/{installation['id']}/repositories", {"per_page": 100})
-        total += page["total_count"]
-        found += page["repositories"]
+        for page in range(1, limit // 100 + 2):
+            batch = client.get(f"/user/installations/{installation['id']}/repositories",
+                               {"per_page": 100, "page": page})
+            total += batch["total_count"] if page == 1 else 0
+            if len(found) < limit:
+                found += batch["repositories"]
+            if len(found) >= limit or len(batch["repositories"]) < 100:
+                break
     return found[:limit], total
 
 
@@ -212,7 +230,9 @@ def _full(client, repo):
     """``repo`` as owner/name: a bare name is looked up among the repositories the app can see for this user."""
     if repo is None or "/" in repo:
         return repo
-    names = [r["full_name"] for r in repositories(client)[0]]
+    if "repositories" not in client.cache:  # (fresh-review: once per answer, and past the first 100)
+        client.cache["repositories"] = [r["full_name"] for r in repositories(client, limit=1000)[0]]
+    names = client.cache["repositories"]
     found = [name for name in names if name.split("/")[1].lower() == repo.lower()]
     if len(found) == 1:
         return found[0]
@@ -345,9 +365,14 @@ def _decisions(client, q):
     def found(qualifier):
         return {_where(item) for item in _find(client, f"{q} {qualifier}", per_page=100)[0]}
 
-    approved, changes = found("review:approved"), found("review:changes_requested")
-    return lambda items: {_where(i): ("changes requested" if _where(i) in changes else "approved" if _where(i) in
-                                      approved else "no review decision yet") for i in items}
+    def notes(items):  # (only when the list has items: GitHub allows 30 searches a minute)
+        if not items:
+            return {}
+        approved, changes = found("review:approved"), found("review:changes_requested")
+        return {_where(i): ("changes requested" if _where(i) in changes else "approved" if _where(i) in approved
+                            else "no review decision yet") for i in items}
+
+    return notes
 
 
 def _my_pull_requests(client, args):

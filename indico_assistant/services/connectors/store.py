@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from indico.core.db import db
 
 from indico_assistant.models import Connection
-from indico_assistant.services.connectors.github import Account, GitHubError
+from indico_assistant.services.connectors.github import GitHubError
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +74,18 @@ def save(user_id, service, account, tokens):
         raise RuntimeError(f"{KEY_ENV} is not set")
     row = connection(user_id, service) or Connection(user_id=user_id, service=service)
     row.account_id, row.account_login = account.id, account.login
-    row.access_token = box.encrypt(tokens.access.encode()).decode()
-    row.refresh_token = box.encrypt(tokens.refresh.encode()).decode() if tokens.refresh else None
-    row.access_expires_at, row.refresh_expires_at = tokens.access_expires_at, tokens.refresh_expires_at
-    row.connected_at, row.needs_renewal = datetime.now(UTC), False
+    _put(row, box, tokens)
+    row.connected_at = datetime.now(UTC)  # (a refresh keeps it: only connecting again moves it)
     db.session.add(row)
     db.session.flush()
     return row
+
+
+def _put(row, box, tokens):
+    row.access_token = box.encrypt(tokens.access.encode()).decode()
+    row.refresh_token = box.encrypt(tokens.refresh.encode()).decode() if tokens.refresh else None
+    row.access_expires_at, row.refresh_expires_at = tokens.access_expires_at, tokens.refresh_expires_at
+    row.needs_renewal = False
 
 
 def token(user_id, app, service="github"):
@@ -126,7 +131,7 @@ def token(user_id, app, service="github"):
             return Access(None, UNAVAILABLE)
         logger.info("GitHub refused to refresh a connection (%s): it needs renewing", error.message)
         return _renew(row)
-    save(user_id, service, Account(row.account_id, row.account_login), tokens)
+    _put(row, box, tokens)
     db.session.commit()
     return Access(tokens.access, OK)
 

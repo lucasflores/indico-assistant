@@ -94,9 +94,7 @@ class RHConnect(RHConnectionsBase):
     def _check_access(self):
         RHConnectionsBase._check_access(self)
         if not self.own:
-            raise Forbidden  # (no one connects GitHub for someone else)
-        if not self.settings.get('github_enabled'):
-            raise NotFound
+            raise Forbidden  # (no one connects GitHub for someone else; off, the base class already refused)
 
     def _process(self):
         state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
@@ -115,7 +113,7 @@ class RHGitHubCallback(RHProtected):
         state, code = request.args.get('state') or '', request.args.get('code')
         settings = _settings()
         if (not saved or saved.get('user_id') != session.user.id
-                or not hmac.compare_digest(saved.get('state', ''), state)):
+                or not hmac.compare_digest(saved.get('state', '').encode(), state.encode())):  # (bytes: any text)
             flash("GitHub wasn't connected: the sign-in couldn't be checked. Please try again.", 'error')
         elif request.args.get('error') or not code or not settings.get('github_enabled'):
             flash("GitHub wasn't connected.", 'warning')
