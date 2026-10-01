@@ -65,10 +65,13 @@ class CapabilityList:
                          "calendars outside Indico.")
         else:
             lines.append("It can read their GitHub, read-only (their pull requests, the reviews waiting for them, "
-                         "issues assigned to them, their repositories): "
-                         + (f"their connection (@{self.github}) needs renewing, which they can do on the Connected "
+                         "issues assigned to them, searches of issues and pull requests, one issue or pull request "
+                         "in full, a repository's recent activity, the repositories it can see). An organisation's "
+                         "repositories appear once they add the app to it, with the “Add repositories or "
+                         "organisations” link on the Connected accounts page. "
+                         + (f"Their connection (@{self.github}) needs renewing, which they can do on the Connected "
                             "accounts page of their profile." if self.github and self.github_renew else
-                            f"they are connected as @{self.github}." if self.github else "they have not connected it "
+                            f"They are connected as @{self.github}." if self.github else "They have not connected it "
                             "yet, which they can do on the Connected accounts page of their profile."))
             lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It never changes anything on GitHub, and has "
                          "no access to email inboxes or calendars outside Indico.")
