@@ -186,8 +186,8 @@ that pull request's reviews.
     says the copy is attached.
 - **Turned off:** while GitHub is off, the route isn't offered and stored connections are left alone. Their owners
   can still remove them. Turning it back on doesn't make everyone reconnect.
-- **Deleting an account:** when Indico deletes or anonymises an account, its connections are deleted and their
-  grants revoked on GitHub. Merging two accounts drops the merged one's connection without revoking it: the two
+- **Deleting an account:** when Indico deletes or anonymises an account, its connections are deleted, and their
+  grants are revoked on GitHub once Indico's transaction has committed (never inside it). Merging two accounts drops the merged one's connection without revoking it: the two
   are usually one person on the same GitHub account.
 
 ## Requirements *(mandatory)*

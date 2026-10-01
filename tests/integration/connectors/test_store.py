@@ -209,8 +209,25 @@ def test_disconnect_with_an_expired_token_refreshes_to_revoke(db, users, github_
     assert fake.state["tokens"] == {}  # (revoked: the grant and every token of it)
 
 
-def test_a_deleted_account_has_its_grant_revoked_too(db, users, github_app, fake):
+def test_a_deleted_account_has_its_grant_revoked_after_the_commit(db, users, github_app, fake, monkeypatch):
+    """(third review) forget only deletes; the grant is revoked once Indico's transaction has committed."""
+    from indico_assistant import plugin
+
     connected(db, users['makoto'], github_app)
-    store.forget(users['makoto'].id, github_app)
+    from indico_assistant.services.connectors import github
+
+    monkeypatch.setattr(github, "_transport", fake.transport)  # (the app is built from the settings: the fake's)
+    monkeypatch.setattr(plugin, "_plugin_settings", lambda: {"github_client_id": "Iv1.fake",
+                                                            "github_client_secret": "fake-secret"})
+    plugin._forget_connections(users['makoto'], flushed=True)
     assert Connection.query.filter_by(user_id=users['makoto'].id).count() == 0
+    assert ("DELETE", "/applications/Iv1.fake/grant") not in fake.calls  # (not inside the transaction)
+    plugin._revoke_forgotten(None)  # (Indico's after_commit)
     assert ("DELETE", "/applications/Iv1.fake/grant") in fake.calls and fake.state["tokens"] == {}
+
+
+def test_a_refresh_github_doesnt_answer_uses_the_token_while_it_still_works(db, users, github_app, fake):
+    """(third review) refreshed early, within the 5 minutes: the current token still answers."""
+    tokens = connected(db, users['makoto'], github_app, access=datetime.now(UTC) + timedelta(minutes=3))
+    fake.fail_next("/login/oauth/access_token", 503)
+    assert store.token(users['makoto'].id, github_app) == store.Access(tokens.access, store.OK)

@@ -115,9 +115,10 @@ class GitHubClient:
         first = self._get(path, {"per_page": 100})
         items, last = _json(first), _last_page(first.headers.get("link"))
         if last and last > 1:
+            before = items  # (page 1: when it is the page before the last, it is reused, not fetched again)
             items = self.get(path, {"per_page": 100, "page": last})
             if len(items) < n:
-                items = self.get(path, {"per_page": 100, "page": last - 1}) + items
+                items = (before if last == 2 else self.get(path, {"per_page": 100, "page": last - 1})) + items
         return items[-n:]
 
     def close(self):
@@ -363,8 +364,9 @@ def _listing(items, total, page, what, notes=None):
     if not items:
         return (f"No {what} found." if page == 1 else f"No more {what} (page {page})."), []
     first = (page - 1) * 20 + 1
-    shown = f" (showing {first}-{first + len(items) - 1}; ask for page {page + 1} for more)" if (
-        total > first + len(items) - 1) else ""
+    more = total > first + len(items) - 1
+    hint = f"; ask for page {page + 1} for more" if page < 10 else "; a list reads no further than page 10"
+    shown = f" (showing {first}-{first + len(items) - 1}{hint})" if more else ""
     lines = [_line(item, (notes or {}).get(_where(item))) for item in items]
     return "\n".join([f"{total} {what}{shown}:", *lines]), [item["html_url"] for item in items]
 

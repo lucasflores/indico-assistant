@@ -125,8 +125,13 @@ class RHGitHubCallback(RHProtected):
             except GitHubError as error:
                 flash(f"GitHub wasn't connected: {error.message}", 'error')
             else:
-                store.save(session.user.id, 'github', account, tokens)
-                flash(f'GitHub is connected as @{account.login}.', 'success')
+                try:
+                    store.save(session.user.id, 'github', account, tokens)
+                except RuntimeError:  # (the key is missing from this web server: third review, never a 500)
+                    flash("GitHub can't be connected right now: the server isn't set up to store it. Please tell "
+                          "an administrator.", 'error')
+                else:
+                    flash(f'GitHub is connected as @{account.login}.', 'success')
         return redirect(url_for_plugin('assistant.user_connections'))
 
 

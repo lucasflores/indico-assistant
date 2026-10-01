@@ -156,6 +156,9 @@ class ChatService:
         No database transaction stays open during the LLM calls: everything the pipeline needs is read
         first and committed, and the reply is written in a new short transaction.
         """
+        import time
+
+        started = time.monotonic()  # (the connector's budget counts from here, spec 023)
         session = self._session_manager.get_session(session_id)
         user = self._load_user(user_id)
         if session is None or user is None:
@@ -231,7 +234,8 @@ class ChatService:
         elif route == "chat":
             answer = self._chat(message, context)
         elif route == "connector":  # (its own history: no Indico answers, no page note)
-            answer = self._connector(user, message, self._context_builder.connector_history(session.id, up_to=message_id))
+            answer = self._connector(user, message, self._context_builder.connector_history(session.id, up_to=message_id),
+                                     started)
         plan = None
         if answer is not None:  # (a knowledge or chat answer that failed carries the report offer, spec 021 R4)
             response_text, metadata = answer.text, {"problem": "failed"} if answer.failed else {}
@@ -326,23 +330,20 @@ class ChatService:
         except RuntimeError:  # the plugin is not active (tests, scripts)
             return False
 
-    def _connector(self, user, message, context):
+    def _connector(self, user, message, context, started=None):
         """The connector answer (spec 023): the user's GitHub, read with their own token."""
+        from celery.exceptions import SoftTimeLimitExceeded
         from indico.core.plugins import url_for_plugin
 
         from indico_assistant.plugin import AssistantPlugin
-        from indico_assistant.services.connectors.loop import answer
-
-        from celery.exceptions import SoftTimeLimitExceeded
-
-        from indico_assistant.services.connectors.loop import ConnectorResult
+        from indico_assistant.services.connectors.loop import ConnectorResult, answer
         from indico_assistant.services.knowledge.answer import NOT_ANSWERED
 
         plugin = AssistantPlugin.instance
         try:
             return answer(user.id, message, _history(context), llm=plugin.llm_service,
                           settings=plugin.settings.get_all(), base_url=self._get_base_url(),
-                          profile_url=url_for_plugin("assistant.user_connections", _external=True))
+                          profile_url=url_for_plugin("assistant.user_connections", _external=True), started=started)
         except SoftTimeLimitExceeded:  # (the task reports the timeout)
             raise
         except Exception:  # (an unexpected failure: a plain failed answer with the report offer, as _knowledge does)
