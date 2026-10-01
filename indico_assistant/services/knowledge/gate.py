@@ -72,15 +72,22 @@ QUESTIONS = {
 }
 
 #: Spec 023: offered as a sixth route only while an admin has GitHub turned on (the questions are otherwise today's).
-CONNECTOR = ("A question about the user's own GitHub account: their pull requests, the reviews waiting for them, "
-             "issues assigned to them, their repositories, or recent activity on GitHub.")
+#: The router probe (thread D study) found GitHub words read as Indico data, "coding help" or chat without these hints.
+CONNECTOR = ("Anything on GitHub: pull requests (PRs), code reviews and review requests, issues, repositories "
+             "(named like owner/name), releases, commits or a repository's recent activity, the user's own or in a "
+             "repository they name. PR, pull request, issue, repo, review request, release and owner/name all mean "
+             "GitHub here.")
+#: ...and, with it, one sentence more for the two routes GitHub questions were mistaken for
+ALSO = {"knowledge": " How to connect GitHub to the assistant is a question about Indico: knowledge.",
+        "out_of_scope": " A question about GitHub is never out of scope."}
 
 
 def questions(connector=False):
     """What Jev is asked: ``QUESTIONS`` itself, or (GitHub on) a copy whose routes add ``connector``."""
     if not connector:
         return QUESTIONS
-    return {**QUESTIONS, "route": {**QUESTIONS["route"], "criteria": {**ROUTES, "connector": CONNECTOR}}}
+    criteria = {name: text + ALSO.get(name, "") for name, text in ROUTES.items()}
+    return {**QUESTIONS, "route": {**QUESTIONS["route"], "criteria": {**criteria, "connector": CONNECTOR}}}
 
 
 @dataclass

@@ -143,7 +143,9 @@ def test_connector_is_offered_only_when_asked_for():
     assert gate.questions() is gate.QUESTIONS and "connector" not in gate.QUESTIONS["route"]["criteria"]
     offered = gate.questions(connector=True)
     assert "GitHub" in offered["route"]["criteria"]["connector"]
-    assert {k: v for k, v in offered["route"]["criteria"].items() if k != "connector"} == gate.ROUTES
+    criteria = offered["route"]["criteria"]
+    assert set(criteria) == {*gate.ROUTES, "connector"}
+    assert all(criteria[k] == gate.ROUTES[k] + gate.ALSO.get(k, "") for k in gate.ROUTES)
     assert offered["intent"] == gate.QUESTIONS["intent"]
     assert json.dumps(gate.QUESTIONS, sort_keys=True) == json.dumps(gate.questions(False), sort_keys=True)
 
