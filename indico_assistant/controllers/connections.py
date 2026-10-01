@@ -77,6 +77,7 @@ class RHConnections(RHConnectionsBase):
                         repos, repo_count = github.repositories(client)
                 except GitHubError:
                     failed = True
+            failed = failed or access.state == store.UNAVAILABLE
             self.connection = store.connection(self.user.id)  # (a refused refresh: it needs renewing now)
         app_url = (self.settings.get('github_app_url') or '').rstrip('/')
         return WPConnections.render_template(

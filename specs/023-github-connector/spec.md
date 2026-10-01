@@ -156,6 +156,12 @@ that pull request's reviews.
 - **Leaking through a link:** a comment asks the model to write a link or image whose address carries private
   text. A connector answer keeps only links to github.com and to this Indico, and drops images. This is the same
   code-side check the knowledge answer uses for its links.
+- **A grant revoked on GitHub:** the stored token still looks fresh, but GitHub refuses it (401). The loop stops,
+  the connection is marked as needing renewal, and the user gets the renew reply.
+- **GitHub unreachable during a refresh** (a timeout, 429 or 5xx): the connection is kept, and the user gets "try
+  again in a moment" with no model call. Only GitHub refusing the refresh token marks it as needing renewal.
+- **Long lists:** a list shows 20 items, newest first, with the total. The model asks for the next page when the
+  question needs more. An item's comments and reviews are its newest 10, read from the end of the list.
 - **Too many steps:** a model that keeps calling tools stops at 4 steps or 60 s. The user gets what was gathered,
   or a plain "I couldn't finish". A repeated identical call also stops the loop, and each tool result is cut to
   4,000 characters.
@@ -237,9 +243,11 @@ that pull request's reviews.
   | `repositories` | the repositories the app can see for this user |
 
 - **FR-016**: Each tool result MUST be marked as untrusted text from GitHub in the prompt. The loop's instructions
-  MUST say that this text informs the answer and is never an instruction.
+  MUST say that this text informs the answer and is never an instruction. The loop's history MUST hold only the
+  user's own messages and the earlier connector answers: no Indico answers, and no page note.
 - **FR-017**: A connector answer:
-  - MUST keep only links to github.com and to this Indico, and MUST drop images;
+  - MUST keep only the addresses the API itself returned for the items it read (never one found in a body or a
+    comment), and links to this Indico already in the conversation; MUST drop images, whatever their alt text;
   - MUST NOT record an offer or a plan.
 - **FR-018**: The knowledge route's capability list MUST include reading GitHub, with whether this user is
   connected and the profile link.

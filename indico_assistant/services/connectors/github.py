@@ -70,6 +70,12 @@ def _send(http, method, url, **kwargs):
     return response
 
 
+def _last_page(link):
+    """The last page's number in GitHub's ``Link`` header, or None."""
+    found = re.search(r'[?&]page=(\d+)[^>]*>; rel="last"', link or "")
+    return int(found.group(1)) if found else None
+
+
 class GitHubClient:
     """GitHub's REST API as one user. One per answer: ``with GitHubClient(...) as client``."""
 
@@ -80,6 +86,17 @@ class GitHubClient:
 
     def get(self, path, params=None):
         return _send(self._http, "GET", path, params=params).json()
+
+    def newest(self, path, n=10):
+        """The newest ``n`` of a list GitHub returns oldest first, a page of 100 at a time: from its last page (and
+        the one before, when that is short), not from the first page (Copilot, PR #17)."""
+        first = _send(self._http, "GET", path, params={"per_page": 100})
+        items, last = first.json(), _last_page(first.headers.get("link"))
+        if last and last > 1:
+            items = _send(self._http, "GET", path, params={"per_page": 100, "page": last}).json()
+            if len(items) < n:
+                items = _send(self._http, "GET", path, params={"per_page": 100, "page": last - 1}).json() + items
+        return items[-n:]
 
     def close(self):
         self._http.close()
@@ -203,16 +220,23 @@ def _full(client, repo):
                       f"no repository named {repo} that the app can see (it sees: {', '.join(names) or 'none'})")
 
 
+#: Which page of a list (20 each): a list beyond 20 items is read a page at a time (Copilot, PR #17).
+Page = Annotated[int, Field(ge=1, le=10, description="Which page of 20 results, for more; 1 is the newest")]
+
+
 class MyPullRequestsArgs(BaseModel):
-    """Pull requests the user opened: open by default, or closed (not merged), merged, or all."""
+    """Pull requests the user opened: open by default (with each one's review decision), or closed (not merged),
+    merged, or all."""
     tool: Literal["my_pull_requests"]
     state: Literal["open", "closed", "merged", "all"] = "open"
     repo: Repo | None = None
+    page: Page = 1
 
 
 class ReviewRequestsArgs(BaseModel):
     """Open pull requests waiting for the user's review."""
     tool: Literal["review_requests"]
+    page: Page = 1
 
 
 class MyIssuesArgs(BaseModel):
@@ -220,6 +244,7 @@ class MyIssuesArgs(BaseModel):
     tool: Literal["my_issues"]
     state: Literal["open", "closed", "all"] = "open"
     repo: Repo | None = None
+    page: Page = 1
 
 
 class SearchArgs(BaseModel):
@@ -228,11 +253,12 @@ class SearchArgs(BaseModel):
     tool: Literal["search"]
     kind: Literal["issue", "pull_request"]
     query: str = Field(..., max_length=200)
+    page: Page = 1
 
 
 class ItemArgs(BaseModel):
-    """One issue or pull request in full: its state, labels, description, recent comments and, for a pull request,
-    its reviews."""
+    """One issue or pull request in full: its state, labels, description, its newest comments and, for a pull
+    request, its newest reviews."""
     tool: Literal["item"]
     repo: Repo
     number: int = Field(..., gt=0)
@@ -268,13 +294,19 @@ def _ago(iso):
     return f"{int(days // 7)} weeks ago" if days < 60 else f"{int(days // 30)} months ago"
 
 
-def _line(item):
+def _where(item):
+    return item["repository_url"].split("/repos/", 1)[1], item["number"]
+
+
+def _line(item, note=None):
     """One issue or pull request from a search or an item, on one line, with its own address."""
     pull = item.get("pull_request")
     state = "merged" if pull and pull.get("merged_at") else item.get("state", "?")
-    bits = [f"#{item['number']} {item['repository_url'].split('/repos/', 1)[1]}", f'"{_cut(item.get("title"), 120)}"',
-            state + (" (draft)" if item.get("draft") else ""),
+    repo, number = _where(item)
+    bits = [f"#{number} {repo}", f'"{_cut(item.get("title"), 120)}"', state + (" (draft)" if item.get("draft") else ""),
             f"opened {_ago(item.get('created_at'))} by {(item.get('user') or {}).get('login', '?')}"]
+    if note:
+        bits.append(note)
     if item.get("labels"):
         bits.append("labels: " + ", ".join(label["name"] for label in item["labels"]))
     if item.get("comments"):
@@ -282,38 +314,66 @@ def _line(item):
     return " · ".join(bits) + f" · {item['html_url']}"
 
 
-def _search(client, q, what):
-    data = client.get("/search/issues", {"q": q, "per_page": 20, "sort": "created", "order": "desc"})
-    items, total = data.get("items") or [], data.get("total_count", 0)
+def _find(client, q, page=1, per_page=20):
+    data = client.get("/search/issues", {"q": q, "per_page": per_page, "page": page, "sort": "created",
+                                         "order": "desc"})
+    return data.get("items") or [], data.get("total_count", 0)
+
+
+def _listing(items, total, page, what, notes=None):
+    """(text, the items' own addresses): only these, from the API's fields, may be linked (Copilot, PR #17)."""
     if not items:
-        return f"No {what} found."
-    shown = f" (the newest {len(items)} shown)" if total > len(items) else ""
-    return "\n".join([f"{total} {what}{shown}:", *map(_line, items)])
+        return (f"No {what} found." if page == 1 else f"No more {what} (page {page})."), []
+    first = (page - 1) * 20 + 1
+    shown = f" (showing {first}-{first + len(items) - 1}; ask for page {page + 1} for more)" if (
+        total > first + len(items) - 1) else ""
+    lines = [_line(item, (notes or {}).get(_where(item))) for item in items]
+    return "\n".join([f"{total} {what}{shown}:", *lines]), [item["html_url"] for item in items]
+
+
+def _search(client, q, what, page=1, notes=None):
+    items, total = _find(client, q, page)
+    return _listing(items, total, page, what, notes(items) if notes else None)
 
 
 def _query(*parts):
     return " ".join(p for p in parts if p)
 
 
+def _decisions(client, q):
+    """Each open pull request's review decision, from two more searches (a search result carries none)."""
+    def found(qualifier):
+        return {_where(item) for item in _find(client, f"{q} {qualifier}", per_page=100)[0]}
+
+    approved, changes = found("review:approved"), found("review:changes_requested")
+    return lambda items: {_where(i): ("changes requested" if _where(i) in changes else "approved" if _where(i) in
+                                      approved else "no review decision yet") for i in items}
+
+
 def _my_pull_requests(client, args):
     state = {"open": "is:open", "closed": "is:closed is:unmerged", "merged": "is:merged", "all": ""}[args.state]
     repo = _full(client, args.repo)
-    return _search(client, _query("is:pr author:@me", state, repo and f"repo:{repo}"), "pull requests opened by the user")
+    q = _query("is:pr author:@me", state, repo and f"repo:{repo}")
+    return _search(client, q, "pull requests opened by the user", args.page,
+                   _decisions(client, q) if args.state == "open" else None)
 
 
 def _review_requests(client, args):
-    return _search(client, "is:pr is:open review-requested:@me", "open pull requests waiting for the user's review")
+    return _search(client, "is:pr is:open review-requested:@me", "open pull requests waiting for the user's review",
+                   args.page)
 
 
 def _my_issues(client, args):
     state = {"open": "is:open", "closed": "is:closed", "all": ""}[args.state]
     repo = _full(client, args.repo)
-    return _search(client, _query("is:issue assignee:@me", state, repo and f"repo:{repo}"), "issues assigned to the user")
+    return _search(client, _query("is:issue assignee:@me", state, repo and f"repo:{repo}"),
+                   "issues assigned to the user", args.page)
 
 
 def _search_tool(client, args):
     kind = "is:pr" if args.kind == "pull_request" else "is:issue"
-    return _search(client, f"{kind} {args.query}", "pull requests" if args.kind == "pull_request" else "issues")
+    return _search(client, f"{kind} {args.query}", "pull requests" if args.kind == "pull_request" else "issues",
+                   args.page)
 
 
 def _item(client, args):
@@ -330,17 +390,18 @@ def _item(client, args):
         lines.append("Assigned to " + ", ".join(a["login"] for a in issue["assignees"]))
     if issue.get("body"):
         lines.append("Description: " + _cut(issue["body"], 300))
-    if is_pull and (reviews := client.get(f"{base}/pulls/{args.number}/reviews", {"per_page": 100})):
-        lines += ["Reviews:", *(f"- {r['user']['login']}: {r['state']} {_ago(r.get('submitted_at'))}"
-                                + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews[-10:])]
+    if is_pull and (reviews := client.newest(f"{base}/pulls/{args.number}/reviews")):
+        lines += ["Newest reviews:", *(f"- {r['user']['login']}: {r['state']} {_ago(r.get('submitted_at'))}"
+                                       + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews)]
     if issue.get("comments"):
-        comments = client.get(f"{base}/issues/{args.number}/comments", {"per_page": 100})
-        lines += ["Recent comments:", *(f"- {c['user']['login']} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
-                                        for c in comments[-10:])]
-    return "\n".join(lines)
+        comments = client.newest(f"{base}/issues/{args.number}/comments")
+        lines += ["Newest comments:", *(f"- {c['user']['login']} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
+                                        for c in comments)]
+    return "\n".join(lines), [issue["html_url"]]
 
 
 def _event(event):
+    """One event on one line, and its address from the API's own fields (or None)."""
     p, who, kind = event.get("payload") or {}, (event.get("actor") or {}).get("login", "?"), event.get("type", "")
     url = None
     if kind == "PushEvent":
@@ -362,27 +423,28 @@ def _event(event):
         what = f"{'created' if kind == 'CreateEvent' else 'deleted'} {p.get('ref_type', '')} {p.get('ref') or ''}".strip()
     else:
         what = kind.removesuffix("Event").lower() or "did something"
-    return f"{_ago(event.get('created_at'))} · {who} {what}" + (f" · {url}" if url else "")
+    return f"{_ago(event.get('created_at'))} · {who} {what}" + (f" · {url}" if url else ""), url
 
 
 def _repo_activity(client, args):
     repo = _full(client, args.repo)
-    events = client.get(f"/repos/{repo}/events", {"per_page": 30})
+    events = [_event(e) for e in client.get(f"/repos/{repo}/events", {"per_page": 30})]
     if not events:
-        return f"No recent activity in {repo}."
-    return "\n".join([f"Recent activity in {repo}, newest first:", *map(_event, events)])
+        return f"No recent activity in {repo}.", []
+    return ("\n".join([f"Recent activity in {repo}, newest first:", *(line for line, _ in events)]),
+            [url for _, url in events if url])
 
 
 def _repositories(client, args):
     repos, total = repositories(client)
     if not repos:
         return ("The app can't see any repository yet: the user can add some from the Connected accounts page of "
-                "their Indico profile.")
+                "their Indico profile."), []
     listed = f" (the first {len(repos)} listed)" if total > len(repos) else ""
     return "\n".join([f"The app can see {total} repositories{listed}:", *(
         r["full_name"] + (" (private)" if r.get("private") else "")
         + (f" · {_cut(r['description'], 100)}" if r.get("description") else "") + f" · {r['html_url']}"
-        for r in repos)])
+        for r in repos)]), [r["html_url"] for r in repos]
 
 
 TOOLS = (

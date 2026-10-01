@@ -58,7 +58,7 @@ def routed():
                 patch("indico_assistant.services.chat.service.db"):
             result = service.answer(1, session_id, message, message_id=uuid4())
         return result, manager.add_assistant_message.call_args.args[2]["route"]
-    s.manager = manager
+    s.manager, s.context = manager, context
     return run, s
 
 
@@ -388,3 +388,13 @@ def test_a_failed_connector_answer_offers_a_report(routed):
     s.connector.return_value = ConnectorResult("Sorry.", failed=True)
     run("which of my PRs are open?")
     assert s.manager.add_assistant_message.call_args.args[2]["problem"] == "failed"
+
+
+def test_the_connector_gets_its_own_history_without_indico_answers(routed):
+    """(Copilot, PR #17) the loop is given connector_history, never the whole context with its page note."""
+    run, s = routed
+    s.github_on.return_value = True
+    s.decide.return_value = jev("connector")
+    run("which of my PRs are open?")
+    history = s.connector.call_args.args[2]
+    assert history is s.context.connector_history.return_value

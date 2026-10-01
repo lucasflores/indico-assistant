@@ -125,6 +125,11 @@
 | `item(repo, number)` | `/repos/{repo}/issues/{n}`, plus its last 10 comments. For a pull request, also `/pulls/{n}` and `/pulls/{n}/reviews` |
 | `repo_activity(repo)` | `/repos/{repo}/events`, the last 30, summarised by type |
 
+Each tool returns `(text, urls)`: `urls` are the items' `html_url`s from the API's fields, the only GitHub links the
+answer may keep. List tools take a `page` (1-10, 20 each). My open pull requests carry their review decision, from
+two more searches (`review:approved`, `review:changes_requested`). An item's comments and reviews come from
+`GitHubClient.newest()`: the last page, by the `Link` header (Copilot, PR #17).
+
 A `repo` is `owner/name` or a bare name. A bare name is resolved among the repositories the app can see for this user
 (live run 1: "in ibis-routing"). Several matches, or none, come back as a GitHub error naming them.
 | `repositories()` | `/user/installations`, then `/user/installations/{id}/repositories` (capped at 100) |
@@ -142,7 +147,9 @@ A `repo` is `owner/name` or a bare name. A bare name is resolved among the repos
 ### 5. The loop (`services/connectors/loop.py`)
 
 `run(message, history, tools, client, llm, now=time.monotonic) -> ConnectorResult(text, tools, failed,
-llm_calls, urls)`.
+llm_calls, urls, unauthorized)`. Its `history` is `ContextBuilder.connector_history()`: the user's messages and the
+earlier connector answers only. A 401 stops the loop (`unauthorized`); `answer()` then marks the connection and
+gives the renew reply.
 
 **Each step is one `llm.generate(prompt, Step, system_prompt=RULES, messages=history)`:**
 - The prompt holds the tools' descriptions, everything looked up so far, and the latest message.

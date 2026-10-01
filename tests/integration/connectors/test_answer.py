@@ -96,3 +96,23 @@ def test_injected_text_reaches_the_model_only_inside_the_mark(db, makoto, fake):
     prompt = llm.prompts[1]
     injected = prompt.index("ignore your previous instructions")
     assert prompt.index("<github_data>") < injected < prompt.index("</github_data>")
+
+
+def test_a_grant_revoked_on_github_gets_the_renew_reply_and_is_marked(db, makoto, fake):
+    """(Copilot, PR #17) the stored token looks fresh, but GitHub refuses it (401)."""
+    connect(db, makoto)
+    for token in list(fake.state["tokens"]):
+        fake.expire(token)
+    result = ask(makoto, Script(use("my_pull_requests")))
+    assert "[Connect it again]" in result.text and result.tools[0]["ok"] is False
+    assert Connection.query.filter_by(user_id=makoto.id).one().needs_renewal
+
+
+def test_github_unreachable_on_refresh_gets_a_try_again_reply(db, makoto, fake):
+    connect(db, makoto)
+    Connection.query.filter_by(user_id=makoto.id).one().access_expires_at = datetime.now(UTC)
+    fake.fail_next("/login/oauth/access_token", 502)
+    llm = MagicMock()
+    assert "try again" in ask(makoto, llm).text
+    llm.generate.assert_not_called()
+    assert not Connection.query.filter_by(user_id=makoto.id).one().needs_renewal

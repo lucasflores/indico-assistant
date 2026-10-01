@@ -20,3 +20,19 @@ def test_context_stops_at_the_bound_message(db, dummy_user):
     builder = ContextBuilder()
     assert [m['content'] for m in builder.build_context(session.id, up_to=first.id)] == ['first question']
     assert [m['content'] for m in builder.build_context(session.id)] == ['first question', 'second question']
+
+
+def test_the_connector_sees_only_the_users_messages_and_githubs_answers(db, dummy_user):
+    """Spec 023 (Copilot, PR #17): no Indico data in the connector's loop, not even from earlier answers."""
+    session = ChatSession(user_id=dummy_user.id)
+    db.session.add(session)
+    db.session.flush()
+    start = datetime.now(timezone.utc)
+    turns = [('user', 'when is the sync?', None), ('assistant', 'Thursday at 10, in room 4.', 'data'),
+             ('user', 'my open PRs?', None), ('assistant', '#16 and #17.', 'connector'), ('user', 'the oldest?', None)]
+    db.session.add_all([ChatMessage(session_id=session.id, role=role, content=text, created_at=start + timedelta(seconds=i),
+                                    metadata_json={'route': {'route': route}} if route else None)
+                        for i, (role, text, route) in enumerate(turns)])
+    db.session.flush()
+    assert [m['content'] for m in ContextBuilder().connector_history(session.id)] == [
+        'when is the sync?', 'my open PRs?', '#16 and #17.', 'the oldest?']
