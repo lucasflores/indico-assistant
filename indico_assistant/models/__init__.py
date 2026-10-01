@@ -7,10 +7,12 @@ Feature: 005-langfuse-observability (T007)
 Feature: 006-vector-search-rag (T006)
 Feature: 019-chat-actions
 Feature: 021-issue-reports
+Feature: 023-github-connector
 """
 
 from indico_assistant.models.action_plan import ActionPlan
 from indico_assistant.models.audit import QueryAuditLog
+from indico_assistant.models.connection import Connection
 from indico_assistant.models.document import (
     DocumentSyncLog,
     ExtractedDocument,
@@ -33,6 +35,7 @@ from indico_assistant.models.session import ChatSession
 __all__ = [
     "ActionPlan",
     "QueryAuditLog",
+    "Connection",
     "ChatSession",
     "ChatMessage",
     "FeedbackEntry",
