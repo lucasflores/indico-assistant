@@ -173,20 +173,34 @@ def repositories(client, limit=100):
 
 
 # --- the read tools (FR-015) ---------------------------------------------------------------------------------
-# Each tool's docstring is what the model reads about it. A repository name is checked to be owner/name, so a name
-# the model was steered to write can't reach another endpoint ("../user").
+# Each tool's docstring is what the model reads about it. A repository name is checked to be owner/name or a bare
+# name, so a name the model was steered to write can't reach another endpoint ("../user"); a bare name (live run 1:
+# "in ibis-routing") is resolved among the user's own repositories.
 
 _NAME = re.compile(r"[A-Za-z0-9_.-]+")
 
 
 def _repo(value):
     parts = value.split("/")
-    if len(parts) != 2 or any(part in (".", "..") or not _NAME.fullmatch(part) for part in parts):
-        raise ValueError("a repository is owner/name")
+    if len(parts) > 2 or any(part in (".", "..") or not _NAME.fullmatch(part) for part in parts):
+        raise ValueError("a repository is owner/name, or the name of one of the user's repositories")
     return value
 
 
-Repo = Annotated[str, AfterValidator(_repo), Field(description="owner/name, e.g. octo-org/hello-world")]
+Repo = Annotated[str, AfterValidator(_repo), Field(
+    description="owner/name, e.g. octo-org/hello-world, or just the name of one of the user's repositories")]
+
+
+def _full(client, repo):
+    """``repo`` as owner/name: a bare name is looked up among the repositories the app can see for this user."""
+    if repo is None or "/" in repo:
+        return repo
+    names = [r["full_name"] for r in repositories(client)[0]]
+    found = [name for name in names if name.split("/")[1].lower() == repo.lower()]
+    if len(found) == 1:
+        return found[0]
+    raise GitHubError(404, f"{repo} could be any of: {', '.join(found)}" if found else
+                      f"no repository named {repo} that the app can see (it sees: {', '.join(names) or 'none'})")
 
 
 class MyPullRequestsArgs(BaseModel):
@@ -283,8 +297,8 @@ def _query(*parts):
 
 def _my_pull_requests(client, args):
     state = {"open": "is:open", "closed": "is:closed is:unmerged", "merged": "is:merged", "all": ""}[args.state]
-    return _search(client, _query("is:pr author:@me", state, args.repo and f"repo:{args.repo}"),
-                   "pull requests opened by the user")
+    repo = _full(client, args.repo)
+    return _search(client, _query("is:pr author:@me", state, repo and f"repo:{repo}"), "pull requests opened by the user")
 
 
 def _review_requests(client, args):
@@ -293,8 +307,8 @@ def _review_requests(client, args):
 
 def _my_issues(client, args):
     state = {"open": "is:open", "closed": "is:closed", "all": ""}[args.state]
-    return _search(client, _query("is:issue assignee:@me", state, args.repo and f"repo:{args.repo}"),
-                   "issues assigned to the user")
+    repo = _full(client, args.repo)
+    return _search(client, _query("is:issue assignee:@me", state, repo and f"repo:{repo}"), "issues assigned to the user")
 
 
 def _search_tool(client, args):
@@ -303,7 +317,7 @@ def _search_tool(client, args):
 
 
 def _item(client, args):
-    base = f"/repos/{args.repo}"
+    base = f"/repos/{_full(client, args.repo)}"
     issue = client.get(f"{base}/issues/{args.number}")
     is_pull = bool(issue.get("pull_request"))
     lines = [_line(issue)]
@@ -352,10 +366,11 @@ def _event(event):
 
 
 def _repo_activity(client, args):
-    events = client.get(f"/repos/{args.repo}/events", {"per_page": 30})
+    repo = _full(client, args.repo)
+    events = client.get(f"/repos/{repo}/events", {"per_page": 30})
     if not events:
-        return f"No recent activity in {args.repo}."
-    return "\n".join([f"Recent activity in {args.repo}, newest first:", *map(_event, events)])
+        return f"No recent activity in {repo}."
+    return "\n".join([f"Recent activity in {repo}, newest first:", *map(_event, events)])
 
 
 def _repositories(client, args):

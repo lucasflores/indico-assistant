@@ -77,7 +77,7 @@ def test_a_lookup_then_the_answer_takes_two_calls():
     llm = Script(use("echo", key="pr16"), say("Open: #16."))
     result = run(llm)
     assert result.text == "Open: #16." and not result.failed and len(llm.seen) == 2
-    assert [s["model"] for s in llm.seen] == ["Step", "Step"]
+    assert [s["model"] for s in llm.seen] == ["Lookup", "Step"]
     assert result.tools == [{"name": "echo", "ms": 0, "ok": True}]
     assert result.urls == {"https://github.com/o/r/pull/16"}
 
@@ -85,21 +85,21 @@ def test_a_lookup_then_the_answer_takes_two_calls():
 def test_after_three_lookups_the_fourth_call_must_answer():
     llm = Script(use("echo", key="a"), use("echo", key="b"), use("echo", key="c"), say("Done."))
     result = run(llm)
-    assert [s["model"] for s in llm.seen] == ["Step", "Step", "Step", "Final"] and result.text == "Done."
+    assert [s["model"] for s in llm.seen] == ["Lookup", "Step", "Step", "Final"] and result.text == "Done."
     assert len(result.tools) == 3
 
 
 def test_a_repeated_call_is_not_run_again_and_the_next_call_answers():
     llm = Script(use("echo", key="a"), use("echo", key="a"), say("From what I have: a."))
     result = run(llm)
-    assert len(result.tools) == 1 and [s["model"] for s in llm.seen] == ["Step", "Step", "Final"]
+    assert len(result.tools) == 1 and [s["model"] for s in llm.seen] == ["Lookup", "Step", "Final"]
 
 
 def test_past_the_time_budget_the_next_call_answers():
     clock = Clock()
     llm = Script(use("echo", key="a"), say("Late answer."), clock=clock, tick=61)
     result = run(llm, clock)
-    assert [s["model"] for s in llm.seen] == ["Step", "Final"] and result.text == "Late answer."
+    assert [s["model"] for s in llm.seen] == ["Lookup", "Final"] and result.text == "Late answer."
 
 
 def test_a_step_gets_at_most_the_time_left_and_the_answer_its_usual_timeout():
@@ -110,7 +110,7 @@ def test_a_step_gets_at_most_the_time_left_and_the_answer_its_usual_timeout():
     clock = Clock()
     llm = Script(use("echo", key="a"), say("ok"), clock=clock, tick=57)
     run(llm, clock)
-    assert [(s["model"], s["timeout"]) for s in llm.seen] == [("Step", 30), ("Final", None)]  # (3 s left: answer)
+    assert [(s["model"], s["timeout"]) for s in llm.seen] == [("Lookup", 30), ("Final", None)]  # (3 s left: answer)
 
 
 def test_a_long_result_is_cut():
@@ -145,9 +145,27 @@ def test_a_tool_that_breaks_fails_its_lookup_not_the_answer(monkeypatch):
     assert result.text == "I couldn't look that up."
 
 
-def test_a_failed_model_call_fails_the_answer():
-    result = run(Script(None))
+def test_a_failed_step_still_gets_an_answer_from_what_is_there(caplog):
+    """Live run 1: a step whose output never validated failed the whole answer; now the next call answers."""
+    llm = Script(use("echo", key="a"), None, say("From what I have: a."))
+    result = run(llm)
+    assert [s["model"] for s in llm.seen] == ["Lookup", "Step", "Final"] and not result.failed
+    assert result.text == "From what I have: a." and "A connector step failed" in caplog.text
+
+
+def test_the_answer_fails_only_when_the_last_call_fails_too():
+    result = run(Script(None, None))
     assert result.failed and result.text == NOT_ANSWERED and result.tools == []
+
+
+def test_the_first_step_must_look_something_up():
+    """Live run 1: a follow-up answered from memory, inventing two reviewers. The router sent it to GitHub: so the
+    first call is a lookup, never an answer."""
+    lookup = loop.lookup_model(TOOLS)
+    with pytest.raises(ValidationError):
+        lookup(answer="Alice approved it.")
+    assert lookup(call={"tool": "echo", "key": "a"}).call.key == "a"
+    assert "answer" not in lookup.model_json_schema()["properties"]
 
 
 def test_the_conversation_reaches_every_step():
