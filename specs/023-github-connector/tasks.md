@@ -23,8 +23,8 @@ runs (T042, T043) happen only after Lucas says go.
   - `pytest tests/unit tests/contract`: 1350 passed, 1 skipped;
   - `pytest tests`: 2008 passed, 27 skipped, 7 failed. All 7 failures are in `test_chat_citations.py`, the known
     baseline on main.
-- [ ] T002 [P] `pyproject.toml`: declare `cryptography` (the plugin imports it).
-- [ ] T003 [P] Settings (plan, Design 1).
+- [x] T002 [P] `pyproject.toml`: declare `cryptography` (the plugin imports it).
+- [x] T003 [P] Settings (plan, Design 1).
   - `default_settings.py`: `github_enabled`, `github_client_id`, `github_client_secret`, `github_app_url`,
     `github_timeout_seconds`.
   - `forms.py`:
@@ -37,7 +37,7 @@ runs (T042, T043) happen only after Lucas says go.
   Test first, in `tests/unit/test_forms.py` or the settings test that exists:
   - an empty secret keeps the stored one, and `-` removes it;
   - "on" is refused without each of the three.
-- [ ] T004 `models/connection.py` + `migrations/010_create_connections.py` (down revision
+- [x] T004 `models/connection.py` + `migrations/010_create_connections.py` (down revision
   `009_create_issue_reports`), with `UNIQUE (user_id, service)`. Export it from `models/__init__.py`.
 
   Test first, in `tests/integration/connectors/test_model.py`: the unique pair; a second row for the same user and
@@ -47,18 +47,18 @@ runs (T042, T043) happen only after Lucas says go.
 
 ### Tests first
 
-- [ ] T005 [P] `tests/unit/services/connectors/test_fake_github.py`. The fake's seed loads, and every method the
+- [x] T005 [P] `tests/unit/services/connectors/test_fake_github.py`. The fake's seed loads, and every method the
   client has exists on the fake with the same signature (`inspect.signature`). Also:
   - `fail_next` raises `GitHubError` once;
   - `expire` and `refuse_refresh` behave as named;
   - state survives a reload from its JSON file.
-- [ ] T006 [P] `tests/unit/services/connectors/test_github_client.py`, with `httpx.MockTransport`:
+- [x] T006 [P] `tests/unit/services/connectors/test_github_client.py`, with `httpx.MockTransport`:
   - the headers;
   - a 4xx or 5xx becomes `GitHubError(status, message)`, and the message doesn't contain the token;
   - `authorize_url` carries `client_id`, `redirect_uri`, `state`, `code_challenge` and `S256`;
   - `exchange` and `refresh` post the right fields and parse the expiries;
   - `revoke` uses basic auth with the client ID and secret.
-- [ ] T007 `tests/integration/connectors/test_store.py`, on the test database with `FakeGitHub`:
+- [x] T007 `tests/integration/connectors/test_store.py`, on the test database with `FakeGitHub`:
   - `save` then `token` returns the access token, and the database holds only ciphertext;
   - an access token with less than 5 minutes left is refreshed once, and the new pair is saved;
   - two concurrent `token` calls, in two sessions or threads, refresh once: the second sees the new expiry under
@@ -72,13 +72,13 @@ runs (T042, T043) happen only after Lucas says go.
 
 ### Code
 
-- [ ] T008 `services/connectors/github.py`: `GitHubClient` and `GitHubError`, with the OAuth class methods (plan,
+- [x] T008 `services/connectors/github.py`: `GitHubClient` and `GitHubError`, with the OAuth class methods (plan,
   Design 4). No tools yet. This makes T006 pass.
-- [ ] T009 `services/connectors/fake_github.py`, with the seed (3 repositories, pull requests, issues, reviews,
+- [x] T009 `services/connectors/fake_github.py`, with the seed (3 repositories, pull requests, issues, reviews,
   comments, events, and the 10 injection items). `client_for(token)` returns the fake when
   `INDICO_ASSISTANT_FAKE_GITHUB=1` and `config.DEBUG`. This makes T005 pass.
-- [ ] T010 `services/connectors/store.py` (plan, Design 3). This makes T007 pass.
-- [ ] T011 `plugin.py`: connect `users.merged`, `users.db_deleted` and `users.anonymized` to the store.
+- [x] T010 `services/connectors/store.py` (plan, Design 3). This makes T007 pass.
+- [x] T011 `plugin.py`: connect `users.merged`, `users.db_deleted` and `users.anonymized` to the store.
 
 **Checkpoint:** `pytest tests/unit tests/contract` + `tests/integration/connectors` pass.
 

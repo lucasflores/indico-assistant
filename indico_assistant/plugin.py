@@ -64,6 +64,10 @@ class AssistantPlugin(IndicoPlugin):
         self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
         self.connect(signals.menu.items, _admin_menu, sender='admin-sidemenu')
         self.connect(signals.users.merged, _merge_reports)
+        # spec 023: a user's connected accounts follow their Indico account
+        self.connect(signals.users.merged, _merge_connections)
+        self.connect(signals.users.db_deleted, _forget_connections)
+        self.connect(signals.users.anonymized, _forget_connections)
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
@@ -256,3 +260,15 @@ def _merge_reports(target, source, **kwargs):
     from indico_assistant.models import IssueReport
     IssueReport.query.filter_by(user_id=source.id).update({IssueReport.user_id: target.id})
     IssueReport.query.filter_by(updated_by_id=source.id).update({IssueReport.updated_by_id: target.id})
+
+
+def _merge_connections(target, source, **kwargs):
+    from indico_assistant.services.connectors import store
+    store.merged(target.id, source.id)
+
+
+def _forget_connections(user, flushed=False, **kwargs):
+    """Called before and after the deletion or anonymisation is flushed: only after, once it is sure to happen."""
+    if flushed:
+        from indico_assistant.services.connectors import store
+        store.forget(user.id)
