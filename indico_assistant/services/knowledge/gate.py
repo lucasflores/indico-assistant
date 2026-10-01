@@ -78,7 +78,8 @@ CONNECTOR = ("Anything on GitHub: pull requests (PRs), code reviews and review r
              "repository they name. PR, pull request, issue, repo, review request, release and owner/name all mean "
              "GitHub here.")
 #: ...and, with it, one sentence more for the two routes GitHub questions were mistaken for
-ALSO = {"knowledge": " How to connect GitHub to the assistant is a question about Indico: knowledge.",
+ALSO = {"knowledge": " How to connect GitHub to the assistant, and what the assistant can do with GitHub (\"what "
+                     "can you do with my GitHub?\"), are questions about the assistant: knowledge.",
         "out_of_scope": " A question about GitHub is never out of scope."}
 
 

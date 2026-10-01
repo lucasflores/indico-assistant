@@ -23,7 +23,8 @@ from indico_assistant.services.llm.models import LLMResponse, QueryClassificatio
 
 #: Spec 023: the intent's line, in the prompt only while GitHub is on.
 CONNECTOR_INTENT = """- **connector**: About the user's own GitHub account: their pull requests, reviews waiting for them, issues
-  assigned to them, their repositories or recent activity on GitHub ("which of my PRs are open?").
+  assigned to them, their repositories or recent activity on GitHub ("which of my PRs are open?"). How to connect
+  GitHub, or what the assistant can do with it, is knowledge.
 """
 
 # Classification prompt template (T039: extended for multi-entity queries)
