@@ -275,7 +275,7 @@ class ReviewRequestsArgs(BaseModel):
 
 class MyIssuesArgs(BaseModel):
     """Issues assigned to the user: open by default, or closed, or all. Only those: a repository's issues in general
-    are a search ("repo:owner/name")."""
+    are a search ("repo:name is:open")."""
     tool: Literal["my_issues"]
     state: Literal["open", "closed", "all"] = "open"
     repo: Repo | None = None
@@ -317,11 +317,12 @@ def _cut(text, limit):
 
 #: GitHub's review states in words: a bare "COMMENTED" was read as a change request (real-GitHub check, T041)
 _REVIEW = {"approved": "approved", "changes_requested": "requested changes",
-           "commented": "commented, without approving or requesting changes", "dismissed": "review dismissed"}
+           "commented": "commented, without approving or requesting changes", "dismissed": "review dismissed",
+           "pending": "a draft review, not submitted yet"}
 
 
 def _review(state):
-    return _REVIEW.get((state or "").lower(), (state or "").lower())
+    return _REVIEW.get(s, s) if (s := (state or "").lower()) else "state unknown"
 
 
 def _ago(iso):
@@ -403,8 +404,8 @@ def _decisions(client, q, page=1):
         if not items:
             return {}
         approved, changes = found("review:approved"), found("review:changes_requested")
-        return {_where(i): ("changes requested" if _where(i) in changes else "approved" if _where(i) in approved
-                            else "no review decision yet") for i in items}
+        return {_where(i): _review("changes_requested") if _where(i) in changes else _review("approved")
+                if _where(i) in approved else "no review decision yet" for i in items}
 
     return notes
 
@@ -429,9 +430,14 @@ def _my_issues(client, args):
                    "issues assigned to the user", args.page)
 
 
+#: A ``repo:`` qualifier without an owner, which GitHub's search refuses
+_BARE_REPO = re.compile(r"\brepo:([\w.-]+)(?![\w./-])")
+
+
 def _search_tool(client, args):
     kind = "is:pr" if args.kind == "pull_request" else "is:issue"
-    return _search(client, f"{kind} {args.query}", "pull requests" if args.kind == "pull_request" else "issues",
+    query = _BARE_REPO.sub(lambda m: "repo:" + _full(client, m.group(1)), args.query)  # (fresh-review: as my_issues)
+    return _search(client, f"{kind} {query}", "pull requests" if args.kind == "pull_request" else "issues",
                    args.page)
 
 
@@ -450,8 +456,9 @@ def _item(client, args):
     if issue.get("body"):
         lines.append("Description: " + _cut(issue["body"], 300))
     if is_pull and (reviews := client.newest(f"{base}/pulls/{args.number}/reviews")):
-        lines += ["Newest reviews:", *(f"- {_login(r.get('user'))} {_ago(r.get('submitted_at'))}: {_review(r['state'])}"
-                                       + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews)]
+        lines.append("Newest reviews:")
+        lines += [f"- {_login(r.get('user'))} {_ago(r.get('submitted_at'))}: {_review(r.get('state'))}"
+                  + (f'; review text: "{_cut(r["body"], 300)}"' if r.get("body") else "") for r in reviews]
     if issue.get("comments"):
         comments = client.newest(f"{base}/issues/{args.number}/comments")
         lines += ["Newest comments:", *(f"- {_login(c.get('user'))} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
@@ -470,7 +477,8 @@ def _event(event):
         pull, url = p["pull_request"], p["pull_request"].get("html_url")
         action = "merged" if p.get("action") == "closed" and pull.get("merged") else p.get("action", "")
         if kind == "PullRequestReviewEvent":
-            action = f"reviewed ({_review((p.get('review') or {}).get('state'))})"
+            state = (p.get("review") or {}).get("state")
+            action = f"reviewed ({_review(state)})" if state else "reviewed"
         what = f'{action} pull request #{pull.get("number")} "{_cut(pull.get("title"), 120)}"'
     elif kind in ("IssuesEvent", "IssueCommentEvent") and p.get("issue"):
         issue, url = p["issue"], p["issue"].get("html_url")

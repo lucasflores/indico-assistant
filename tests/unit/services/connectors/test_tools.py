@@ -87,7 +87,7 @@ def test_nothing_found_says_so(client):
 def test_a_pull_request_in_full(client):
     text = call(client, "item", repo="thoth-labs/indico-assistant", number=16)
     assert "Issue reports from the chat" in text and "open" in text
-    assert "makoto-k yesterday: requested changes" in text and "Please split the migration" in text  # (the reviews)
+    assert 'makoto-k yesterday: requested changes; review text: "Please split the migration' in text  # (reviews)
     assert "lucas-f today: commented, without approving or requesting changes" in text
     assert "The form looks good on desktop." in text  # (the comments)
 
@@ -138,6 +138,18 @@ def test_a_bare_repository_name_is_one_of_the_users_repositories(client, fake):
     assert "Recent activity in thoth-labs/ibis-routing" in call(client, "repo_activity", repo="IBIS-routing")
 
 
+def test_a_search_resolves_a_bare_repository_name(client, fake):  # (fresh-review of #18: GitHub refuses repo:name)
+    assert numbers(call(client, "search", kind="issue", query="repo:ibis-routing is:open")) == [40]
+    assert fake.searches[-1] == "is:issue repo:thoth-labs/ibis-routing is:open"
+    call(client, "search", kind="issue", query="repo:thoth-labs/ibis-routing repo:dotfiles")
+    assert fake.searches[-1] == "is:issue repo:thoth-labs/ibis-routing repo:octo-dev/dotfiles"
+
+
+def test_review_states_are_words():
+    assert github._review("CHANGES_REQUESTED") == "requested changes" and github._review("pending").startswith("a draft")
+    assert github._review(None) == github._review("") == "state unknown" and github._review("NEW_STATE") == "new_state"
+
+
 def test_a_bare_name_the_app_cant_see_says_which_it_can(client):
     with pytest.raises(GitHubError) as error:
         call(client, "item", repo="secret-infra", number=3)
@@ -158,7 +170,7 @@ def test_only_the_api_fields_give_addresses(client):
 def test_my_open_pull_requests_carry_their_review_decision(client, fake):
     text = call(client, "my_pull_requests")
     lines = {int(n): line for n, line in re.findall(r"^#(\d+) (.*)$", text, re.M)}
-    assert "changes requested" in lines[16] and "approved" in lines[30] and "no review decision yet" in lines[17]
+    assert "requested changes" in lines[16] and "approved" in lines[30] and "no review decision yet" in lines[17]
     assert set(fake.searches[-3:]) == {"is:pr author:@me is:open", "is:pr author:@me is:open review:approved",
                                        "is:pr author:@me is:open review:changes_requested"}
     assert "review decision" not in call(client, "my_pull_requests", state="merged")
@@ -229,7 +241,7 @@ def test_review_decisions_reach_the_listed_page(monkeypatch):
     assert {(qualifier, page) for qualifier, page, per in asked if per == 100} == {
         ("review:approved", 1), ("review:approved", 2), ("review:changes_requested", 1),
         ("review:changes_requested", 2)}
-    assert notes == {("o/r", 120): "changes requested"}
+    assert notes == {("o/r", 120): "requested changes"}
 
 
 def test_the_last_page_asks_for_no_further_page():
