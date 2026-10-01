@@ -183,7 +183,7 @@ requests, linked to GitHub.
   - `NotConnected` gives the fixed reply with the profile link, and `Renew` gives the renew reply;
   - neither makes a model call;
   - both are recorded as route `connector` with `tools: []`.
-- [ ] T032 [P] [US3] `tests/unit/services/knowledge/test_capabilities.py`, additions:
+- [x] T032 [P] [US3] `tests/unit/services/knowledge/test_capabilities.py`, additions:
   - GitHub off: the "no access to GitHub" line stays;
   - on and not connected: "once they connect it", with the page;
   - on and connected: "connected as @login".
@@ -191,7 +191,7 @@ requests, linked to GitHub.
 ### Code
 
 - [x] T033 [US3] The fixed replies in `_connector` (FR-012), and `last_used_at` set on use. This makes T031 pass.
-- [ ] T034 [US3] `capabilities.py`: the GitHub line (plan, Design 8). This makes T032 pass.
+- [x] T034 [US3] `capabilities.py`: the GitHub line (plan, Design 8). This makes T032 pass.
 
 ## Phase 6: User Story 4 — follow-ups (P2)
 
@@ -206,7 +206,7 @@ requests, linked to GitHub.
 
 ## Phase 7: Polish and checks
 
-- [ ] T037 The leak test, `tests/integration/connectors/test_no_token_leak.py` (SC-004). With a known fake token,
+- [x] T037 The leak test, in `tests/integration/connectors/test_pages.py` (it shares the page helpers; SC-004). With a known fake token,
   it runs connect, the page, the API, a chat answer through the loop (with a mocked model that records its
   prompts), a refresh and a disconnect. Then the token and the refresh token appear in none of these:
   - `caplog`;
@@ -214,9 +214,10 @@ requests, linked to GitHub.
   - the route records;
   - the prompts;
   - the page HTML.
-- [ ] T038 [P] `README.md`: one section on connectors (what GitHub can answer, connecting, read-only, the key).
+- [x] T038 [P] `README.md`: one section on connectors (what GitHub can answer, connecting, read-only, the key).
   `.github/agents/copilot-instructions.md` if it lists the routes.
-- [ ] T039 The full suite: `pytest tests` (the baseline from T001, plus the new tests), the Chainlit suite, and
+- [x] T039 (2026-09-30: 2131 passed, 27 skipped, 7 failed = the citation baseline; Chainlit 57; ruff: no new
+  findings, and a planted token log fails the leak test.) The full suite: `pytest tests` (the baseline from T001, plus the new tests), the Chainlit suite, and
   `ruff check` on the touched files. Revert ruff's churn in code we didn't touch.
 - [ ] T040 The live window. Tell the other sessions first, and check `ps` for a `PYTHONPATH` override.
   1. Switch the web server and the worker to `PYTHONPATH=~/indico-assistant/plugin-d`, with

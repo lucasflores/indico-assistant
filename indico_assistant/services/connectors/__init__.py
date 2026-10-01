@@ -1,8 +1,9 @@
 """Connectors (spec 023): the user's own accounts elsewhere, read with their own token. GitHub is the first."""
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel
 

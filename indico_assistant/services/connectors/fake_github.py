@@ -46,15 +46,15 @@ INSTALLATIONS = {1: "thoth-labs", 2: "octo-dev"}
 
 def _pr(repo, number, title, author, age, state="open", merged=False, draft=False, requested=(), reviews=(),
         comments=(), body="", labels=()):
-    return dict(repo=repo, number=number, pr=True, title=title, author=author, age=age, state=state, merged=merged,
-                draft=draft, requested=list(requested), reviews=list(reviews), comments=list(comments), body=body,
-                labels=list(labels), assignees=[])
+    return {"repo": repo, "number": number, "pr": True, "title": title, "author": author, "age": age, "state": state,
+            "merged": merged, "draft": draft, "requested": list(requested), "reviews": list(reviews),
+            "comments": list(comments), "body": body, "labels": list(labels), "assignees": []}
 
 
 def _issue(repo, number, title, author, age, assignees=(), state="open", comments=(), body="", labels=()):
-    return dict(repo=repo, number=number, pr=False, title=title, author=author, age=age, state=state, merged=False,
-                draft=False, requested=[], reviews=[], comments=list(comments), body=body, labels=list(labels),
-                assignees=list(assignees))
+    return {"repo": repo, "number": number, "pr": False, "title": title, "author": author, "age": age, "state": state,
+            "merged": False, "draft": False, "requested": [], "reviews": [], "comments": list(comments), "body": body,
+            "labels": list(labels), "assignees": list(assignees)}
 
 
 IA, IR = "thoth-labs/indico-assistant", "thoth-labs/ibis-routing"
