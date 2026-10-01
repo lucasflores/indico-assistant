@@ -195,8 +195,8 @@ LOGIN_KEY = "assistant_login"
 
 
 def _new_login(user, **kwargs):
-    """Indico's own login signal, for a login or an admin impersonating the user (fresh-review of #19: a hash of the
-    session id also changed when Indico renewed the id for another reason, and carried a credential's trace)."""
+    """Indico's ``logged_in`` signal: every ``login_user`` call, an admin impersonating a user too (the admin's own
+    token comes back with the rest of their session when they stop). The panel opens a new chat when it changes."""
     from flask import session
 
     session[LOGIN_KEY] = secrets.token_hex(8)
