@@ -154,3 +154,14 @@ def app_for(settings):
 
 def client_for(token, settings):
     return GitHubClient(token, timeout=float(settings.get("github_timeout_seconds") or 10), transport=_transport())
+
+
+def repositories(client, limit=100):
+    """The repositories the app can see for this user (those of its installations the user can reach), capped at
+    ``limit``, and how many there are in all."""
+    found, total = [], 0
+    for installation in client.get("/user/installations", {"per_page": 100})["installations"]:
+        page = client.get(f"/user/installations/{installation['id']}/repositories", {"per_page": 100})
+        total += page["total_count"]
+        found += page["repositories"]
+    return found[:limit], total

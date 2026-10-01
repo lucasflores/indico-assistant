@@ -64,7 +64,8 @@ class AssistantPlugin(IndicoPlugin):
         self.connect(signals.menu.items, _profile_menu, sender='user-profile-sidemenu')
         self.connect(signals.menu.items, _admin_menu, sender='admin-sidemenu')
         self.connect(signals.users.merged, _merge_reports)
-        # spec 023: a user's connected accounts follow their Indico account
+        # spec 023: the profile's "Connected accounts"; a user's connected accounts follow their Indico account
+        self.connect(signals.menu.items, _connections_menu, sender='user-profile-sidemenu')
         self.connect(signals.users.merged, _merge_connections)
         self.connect(signals.users.db_deleted, _forget_connections)
         self.connect(signals.users.anonymized, _forget_connections)
@@ -260,6 +261,11 @@ def _merge_reports(target, source, **kwargs):
     from indico_assistant.models import IssueReport
     IssueReport.query.filter_by(user_id=source.id).update({IssueReport.user_id: target.id})
     IssueReport.query.filter_by(updated_by_id=source.id).update({IssueReport.updated_by_id: target.id})
+
+
+def _connections_menu(sender, user, **kwargs):
+    from indico_assistant.controllers.connections import profile_menu_item
+    return profile_menu_item(user)
 
 
 def _merge_connections(target, source, **kwargs):

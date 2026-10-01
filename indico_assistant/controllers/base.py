@@ -292,3 +292,18 @@ class RHChatBase(RHAssistantBase):
             None,
             500
         )
+
+
+class RHSessionCSRFBase(RHChatBase):
+    """An endpoint that writes: Indico's CSRF check for requests made with the Indico session (spec 021 R10).
+
+    The assistant's API turns CSRF off because the chat panel's server calls it with a token
+    (``X-Assistant-Auth``), which a malicious page cannot send. But it also accepts Indico's session cookie,
+    which a same-site page could ride on: a write carried by that cookie must bring the CSRF token.
+    """
+
+    CSRF_ENABLED = True
+
+    def _check_csrf(self):
+        if session.user is not None:  # the Indico cookie came with it (a token call carries none)
+            super()._check_csrf()

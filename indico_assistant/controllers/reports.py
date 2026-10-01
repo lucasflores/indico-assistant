@@ -8,27 +8,16 @@ Someone else's report, and one that does not exist, get the same 404, so the API
 
 from __future__ import annotations
 
-from flask import jsonify, request, session
+from flask import jsonify, request
 from indico.core.db import db
 
-from indico_assistant.controllers.base import RHChatBase
+from indico_assistant.controllers.base import RHSessionCSRFBase
 from indico_assistant.models import IssueReport
 from indico_assistant.services import reports
 
 
-class RHReportsAPI(RHChatBase):
-    """Base of the report endpoints: Indico's CSRF check for requests made with the Indico session (R10).
-
-    The assistant's API turns CSRF off because the chat panel's server calls it with a token
-    (``X-Assistant-Auth``), which a malicious page cannot send. But it also accepts Indico's session cookie,
-    which a same-site page could ride on: a report write carried by that cookie must bring the CSRF token.
-    """
-
-    CSRF_ENABLED = True
-
-    def _check_csrf(self):
-        if session.user is not None:  # the Indico cookie came with it (a token call carries none)
-            super()._check_csrf()
+class RHReportsAPI(RHSessionCSRFBase):
+    """Base of the report endpoints: CSRF when the Indico session is used (R10)."""
 
     def _refused(self, error):
         """A ReportError as the API answers it (a 429 is raised, with its Retry-After)."""
