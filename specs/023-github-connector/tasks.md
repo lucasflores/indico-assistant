@@ -219,7 +219,11 @@ requests, linked to GitHub.
 - [x] T039 (2026-09-30: 2131 passed, 27 skipped, 7 failed = the citation baseline; Chainlit 57; ruff: no new
   findings, and a planted token log fails the leak test.) The full suite: `pytest tests` (the baseline from T001, plus the new tests), the Chainlit suite, and
   `ruff check` on the touched files. Revert ruff's churn in code we didn't touch.
-- [ ] T040 The live window. Tell the other sessions first, and check `ps` for a `PYTHONPATH` override.
+- [ ] T040 (2026-09-30, first window: story 1 done live, the chat parts wait for Lucas's go on the spend.) Connect
+  through the fake sign-in, the page with 3 repositories (the uninstalled one hidden), the add link, CSRF-less POST =
+  400, the admin view without repositories, an admin's Connect = 403, an admin's Disconnect through Indico's confirm
+  dialog in Chrome, Connect by the button; ciphertext only in the DB, no token in the logs, page or API. Found and
+  fixed: the list's bullets (4eb9d3c). Indico's downgrade asks for YES on stdin. The live window. Tell the other sessions first, and check `ps` for a `PYTHONPATH` override.
   1. Switch the web server and the worker to `PYTHONPATH=~/indico-assistant/plugin-d`, with
      `INDICO_ASSISTANT_FAKE_GITHUB=1` and a dev key.
   2. Migrate to 010.
