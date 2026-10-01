@@ -102,10 +102,10 @@ def test_a_changed_key_needs_renewal_not_an_error(db, users, github_app, monkeyp
     assert store.token(users['makoto'].id, github_app).state == store.RENEW
 
 
-def test_no_key_is_not_connected(db, users, github_app, monkeypatch):
+def test_no_key_is_unavailable_not_unconnected(db, users, github_app, monkeypatch):
     connected(db, users['makoto'], github_app)
     monkeypatch.delenv(store.KEY_ENV)
-    assert store.token(users['makoto'].id, github_app).state == store.NOT_CONNECTED
+    assert store.token(users['makoto'].id, github_app).state == store.UNAVAILABLE  # (not "connect it": they are)
     assert not row(users['makoto']).needs_renewal  # (the key comes back: the connection works again)
 
 

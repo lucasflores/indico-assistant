@@ -58,7 +58,7 @@ cookies only when the frame is on the same *site* as the page, meaning the same 
 
 ### 3. GitHub (optional, spec 023)
 Users connect their own GitHub account from their profile ("Connected accounts"), then ask the assistant about
-their pull requests, reviews and issues. It only reads.
+their pull requests, reviews, issues and repositories. It only reads.
 - **Register a GitHub App.** This is done by whoever has top admin rights on this Indico, under the account or
   organisation that will own it (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
   - Homepage URL: any address; nothing reads it.
