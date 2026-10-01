@@ -87,7 +87,8 @@ def test_nothing_found_says_so(client):
 def test_a_pull_request_in_full(client):
     text = call(client, "item", repo="thoth-labs/indico-assistant", number=16)
     assert "Issue reports from the chat" in text and "open" in text
-    assert "makoto-k: CHANGES_REQUESTED" in text and "Please split the migration" in text  # (the reviews)
+    assert "makoto-k yesterday: requested changes" in text and "Please split the migration" in text  # (the reviews)
+    assert "lucas-f today: commented, without approving or requesting changes" in text
     assert "The form looks good on desktop." in text  # (the comments)
 
 
@@ -106,6 +107,7 @@ def test_a_repository_the_app_cant_see_raises(client):
 def test_a_repositorys_recent_activity(client):
     text = call(client, "repo_activity", repo="thoth-labs/indico-assistant")
     assert "opened pull request #17" in text and "v0.9.0" in text and "pushed 4 commits" in text
+    assert "reviewed (requested changes) pull request #16" in text
     assert "https://github.com/thoth-labs/indico-assistant/pull/17" in text
 
 

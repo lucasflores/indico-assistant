@@ -61,8 +61,12 @@ Users connect their own GitHub account from their profile ("Connected accounts")
 their pull requests, reviews and issues. It only reads.
 - **Register a GitHub App.** This is done by whoever has top admin rights on this Indico, under the account or
   organisation that will own it (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App):
-  - Callback URL: the one shown on the plugin's settings page, `<BASE_URL>/assistant/github/callback`.
-  - "Expire user authorization tokens": on (GitHub's default). Webhook: off.
+  - Homepage URL: any address; nothing reads it.
+  - Redirect URI (GitHub's docs call it the callback URL): the one shown on the plugin's settings page,
+    `<BASE_URL>/assistant/github/callback`. Leave the Setup URL empty.
+  - "Expire user authorization tokens": on (GitHub's default). "Request user authorization (OAuth) during
+    installation" and "Enable Device Flow": off.
+  - Webhook: untick "Active", and the Webhook URL is no longer required.
   - Repository permissions: **Metadata**, **Issues** and **Pull requests**, all read-only. No account
     permissions, and nothing with write access.
   - "Where can this GitHub App be installed": any account, so users can add their own repositories.
