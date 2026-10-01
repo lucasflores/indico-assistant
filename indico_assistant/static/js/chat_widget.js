@@ -57,9 +57,12 @@
 
   function saveState() {
     try {
-      const stored = JSON.parse(localStorage.getItem(STATE_KEY) || "{}").login;
-      if (!LOGIN || !stored || stored === LOGIN)  // (fresh-review: a tab from an earlier login keeps only its own)
-        localStorage.setItem(STATE_KEY, JSON.stringify(state));  // (its threadId: where a new tab starts)
+      // open and width are the browser's; threadId (where a new tab starts) and login belong to the current login,
+      // so a tab from an earlier login leaves them, and a page without a token keeps whose they are (fresh-review)
+      const stored = JSON.parse(localStorage.getItem(STATE_KEY) || "{}");
+      const stale = LOGIN && stored.login && stored.login !== LOGIN;
+      const kept = stale ? stored : Object.assign({}, state, LOGIN ? {} : { login: stored.login });
+      localStorage.setItem(STATE_KEY, JSON.stringify(Object.assign(kept, { open: state.open, width: state.width })));
       sessionStorage.setItem(TAB_KEY, state.threadId || "");
     } catch (e) { /* private mode: not kept */ }
   }

@@ -12,8 +12,10 @@ const results = [];
 const check = (name, ok, detail = "") => { results.push(ok); console.log(`${ok ? "ok  " : "FAIL"} ${name} ${detail}`); };
 const USER = Number(process.env.WALK_USER || 6);
 const THREAD = execFileSync("psql", ["-d", "indico", "-Atc",
-  `select id from plugin_assistant.chat_sessions where user_id = ${USER} order by updated_at desc limit 1`]).toString().trim();
-if (!THREAD) throw new Error(`user ${USER} has no conversation to reopen`);
+  `select s.id from plugin_assistant.chat_sessions s where s.user_id = ${USER} and exists
+     (select 1 from plugin_assistant.chat_messages m where m.session_id = s.id) order by s.updated_at desc limit 1`])
+  .toString().trim();  // (one with messages: an empty one may not resume)
+if (!THREAD) throw new Error(`user ${USER} has no conversation with messages to reopen`);
 const { browser, page } = await browserAs(USER, { headless: !process.argv.includes("--headful") });
 const chat = () => page.frames().find((f) => f.url().startsWith("http://127.0.0.1:8001") && !f.url().includes("login"));
 async function until(pred, ms = 10000) {

@@ -115,6 +115,16 @@ class TestWidgetLoading:
         assert len(first) == 16 and session[LOGIN_KEY] != first
         assert 'data-login=""' in self._script(MagicMock(id=7), login=None)  # (a session from before: no token yet)
 
+    def test_the_token_is_wired_to_indicos_login_signal(self):  # (second review of #19: the connect line itself)
+        from indico.core import signals
+
+        from indico_assistant.plugin import AssistantPlugin, _new_login
+
+        plugin = AssistantPlugin.__new__(AssistantPlugin)
+        plugin.template_hook, plugin.connect = MagicMock(), MagicMock()
+        plugin._setup_chat_widget()
+        assert (signals.users.logged_in, _new_login) in [c.args for c in plugin.connect.call_args_list]
+
     def test_the_version_changes_with_the_stylesheet_too(self, tmp_path, monkeypatch):
         # the stylesheet is fetched with the script's ?v=: a CSS-only change must give a new one (review, PR #10)
         from indico_assistant import blueprint
