@@ -176,3 +176,25 @@ def test_renew_marks_the_connection(db, users, github_app):
     connected(db, users['makoto'], github_app)
     store.renew(users['makoto'].id)
     assert row(users['makoto']).needs_renewal
+
+
+# --- the independent review of PR #17 ---------------------------------------------------------------------
+
+def test_a_refresh_keeps_when_the_user_connected(db, users, github_app):
+    connected(db, users['makoto'], github_app, access=datetime.now(UTC))
+    first = row(users['makoto']).connected_at = datetime.now(UTC) - timedelta(days=3)
+    assert store.token(users['makoto'].id, github_app).state == store.OK
+    assert row(users['makoto']).connected_at == first
+
+
+def test_a_refresh_answered_with_a_page_not_json_keeps_the_connection(db, users, github_app):
+    """A proxy's HTML page with a 200: GitHub unreachable, not a refused token, and the lock is released."""
+    import httpx
+
+    from indico_assistant.services.connectors.github import OAuthApp
+
+    connected(db, users['makoto'], github_app, access=datetime.now(UTC))
+    proxy = OAuthApp("Iv1.fake", "fake-secret",
+                     transport=httpx.MockTransport(lambda request: httpx.Response(200, text="<html>Down</html>")))
+    assert store.token(users['makoto'].id, proxy).state == store.UNAVAILABLE
+    assert not row(users['makoto']).needs_renewal

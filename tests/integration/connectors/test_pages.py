@@ -175,7 +175,7 @@ def test_the_callback_stores_the_connection(app, db, users, rendered):
     pages.flash.assert_called_with(f'GitHub is connected as @{USER}.', 'success')
 
 
-@pytest.mark.parametrize('case', ['wrong state', 'no state', 'reused', 'another user', 'refused'])
+@pytest.mark.parametrize('case', ['wrong state', 'no state', 'reused', 'another user', 'refused', 'not ascii'])
 def test_a_callback_that_doesnt_check_out_stores_nothing(app, db, users, rendered, case):
     _, saved = run(app, pages.RHConnect, users['makoto'], method='POST')
     state = saved[pages.OAUTH_KEY]['state']
@@ -191,6 +191,8 @@ def test_a_callback_that_doesnt_check_out_stores_nothing(app, db, users, rendere
         who = users['lucas']  # (Makoto's sign-in, finished in Lucas's session)
     elif case == 'refused':
         query = {'error': 'access_denied', 'state': state}
+    elif case == 'not ascii':  # (fresh-review: compare_digest refused non-ASCII text with a TypeError, a 500)
+        query['state'] = 'é' + state
     run(app, pages.RHGitHubCallback, who, query=query, keep=saved)
     assert Connection.query.count() == 0
 

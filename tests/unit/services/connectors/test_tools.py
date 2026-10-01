@@ -44,7 +44,7 @@ def test_there_are_seven_tools_each_described_with_a_literal_name():
 
 def test_my_open_pull_requests(client, fake):
     text = call(client, "my_pull_requests")
-    assert numbers(text) == [16, 17, 30] and fake.searches[-1] == "is:pr author:@me is:open"
+    assert numbers(text) == [16, 17, 30] and "is:pr author:@me is:open" in fake.searches[-3:]
     assert "https://github.com/thoth-labs/indico-assistant/pull/16" in text and "(draft)" in text  # (#17)
 
 
@@ -59,7 +59,7 @@ def test_my_pull_requests_by_state(client, fake, state, expected, query):
 
 def test_one_repository_only(client, fake):
     assert numbers(call(client, "my_pull_requests", repo="thoth-labs/ibis-routing")) == [30]
-    assert fake.searches[-1] == "is:pr author:@me is:open repo:thoth-labs/ibis-routing"
+    assert "is:pr author:@me is:open repo:thoth-labs/ibis-routing" in fake.searches[-3:]
 
 
 def test_reviews_waiting_on_me(client, fake):
@@ -180,3 +180,29 @@ def test_newest_reads_the_last_page_of_a_long_list():
 
     newest = GitHubClient("t", transport=httpx.MockTransport(handle)).newest("/x")
     assert [i["n"] for i in newest] == list(range(192, 202))  # (the last 10 of 202, not 90-99 of the first page)
+
+
+# --- the independent review of PR #17 ---------------------------------------------------------------------
+
+def test_a_bare_name_resolves_past_the_first_100_repositories_once_per_answer():
+    import httpx
+
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.path)
+        if request.url.path == "/user/installations":
+            return httpx.Response(200, json={"installations": [{"id": 1}]})
+        page = int(request.url.params.get("page", 1))
+        names = [f"o/r{i}" for i in range(100)] if page == 1 else ["o/target"]
+        return httpx.Response(200, json={"total_count": 101, "repositories": [{"full_name": n} for n in names]})
+
+    client = GitHubClient("t", transport=httpx.MockTransport(handle))
+    assert github._full(client, "target") == "o/target"
+    calls = len(seen)
+    assert github._full(client, "r7") == "o/r7" and len(seen) == calls  # (cached for the answer)
+
+
+def test_no_review_searches_without_pull_requests(client, fake):
+    call(client, "my_pull_requests", page=2)
+    assert not any("review:" in q for q in fake.searches)

@@ -177,6 +177,8 @@ that pull request's reviews.
   - When an Indico account is deleted or anonymised (Indico's `db-deleted` and `anonymized` signals), its
     connections are deleted.
 - **Sharing a GitHub account:** two Indico users may connect the same GitHub account. Each stores its own tokens.
+  Disconnecting revokes the app's authorisation on GitHub (FR-007), which ends the other one's tokens too: their next
+  question gets the renew reply. This is deliberate: a user who disconnects expects GitHub to show the app gone.
 - **Where GitHub text ends up:**
   - The answer is saved in the user's own chat history, like every answer.
   - If they send an issue report with the conversation copy ticked (spec 021), the admins see it. The form already

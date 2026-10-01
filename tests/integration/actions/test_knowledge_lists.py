@@ -144,3 +144,6 @@ def test_github_on_says_whether_this_user_is_connected(people, monkeypatch):
     store.save(people["manager"].id, "github", Account(1001, "octo-dev"), Tokens("ghu_x", None, None, None))
     db.session.flush()
     assert "connected as @octo-dev" in _caps(people["manager"], settings=on).render()
+    store.renew(people["manager"].id)  # (fresh-review: not "not connected", but needing renewal)
+    text = _caps(people["manager"], settings=on).render()
+    assert "(@octo-dev) needs renewing" in text and "not connected" not in text

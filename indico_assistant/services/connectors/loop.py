@@ -10,6 +10,7 @@ What GitHub returned goes back marked as untrusted text: it informs the answer a
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from functools import cache
@@ -28,6 +29,9 @@ BUDGET_SECONDS = 60.0
 MIN_STEP_SECONDS = 5.0  # with less left, the loop answers instead of looking up more
 MAX_RESULT_CHARS = 4_000
 MARK = "github_data"
+_MARK = re.compile(MARK, re.I)  # (any case: "</GITHUB_DATA>" can't close it either; fresh-review)
+#: The whole answer stays under the worker's 120 s soft limit: the last call gets what is left of this, at least 10 s.
+ANSWER_SECONDS = 100.0
 
 RULES = """You are the assistant built into Indico, the event management system. The user has connected their GitHub
 account and asks about it. You can look things up on GitHub as this user with the tools, one call per step. You only
@@ -94,7 +98,7 @@ def step_model(tools):
 
 def _mark(text):
     """GitHub's text inside the mark, unable to close it early."""
-    return f"<{MARK}>\n{text[:MAX_RESULT_CHARS].replace(MARK, 'github-data')}\n</{MARK}>"
+    return f"<{MARK}>\n{_MARK.sub('github-data', text[:MAX_RESULT_CHARS])}\n</{MARK}>"
 
 
 def _prompt(message, tools, done, final=False):
@@ -102,7 +106,7 @@ def _prompt(message, tools, done, final=False):
     if not done:
         lines.append("(nothing yet)")
     for n, (call, text) in enumerate(done, 1):
-        arguments = call.model_dump_json(exclude={"tool"}).replace(MARK, "github-data")  # (the model wrote them)
+        arguments = _MARK.sub("github-data", call.model_dump_json(exclude={"tool"}))  # (the model wrote them)
         lines += [f"{n}. {call.tool} {arguments}", _mark(text)]
     if final:
         lines += ["", "No more lookups: answer now from what was looked up."]
@@ -154,7 +158,8 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
             done.append((call, text))
         if not answered and not result.unauthorized:  # (three lookups, the budget, a repeat or a failed step)
             response = llm.generate(_prompt(message, tools, done, final=True), Final, system_prompt=RULES,
-                                    messages=history)
+                                    messages=history,
+                                    timeout=min(step_timeout, max(10.0, ANSWER_SECONDS - (now() - started))))
             if response.success:
                 result.text = response.result.reply
             else:
