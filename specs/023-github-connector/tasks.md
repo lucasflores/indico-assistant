@@ -235,9 +235,19 @@ requests, linked to GitHub.
      - an admin disconnecting Makoto;
      - the knowledge answer to "how do I connect GitHub?".
   4. Afterwards: roll back to 009 (main doesn't know 010), and switch the stack back to the main checkout.
-- [ ] T041 Real GitHub, optional, with Lucas. He registers the test GitHub App (as Indico's top admin; AI-Thoth or
+- [x] T041 Real GitHub, optional, with Lucas. He registers the test GitHub App (as Indico's top admin; AI-Thoth or
   his own account) and enters its settings; then connect, and one question. This is skipped if he doesn't want it
-  before the merge.
+  before the merge. Done 2026-10-01, after the merge (thread D study, under $0.01):
+  - Lucas registered the app under AI-Thoth and installed it there. Connecting through the real callback worked;
+    the page showed his account and the 15 repositories. The database held only ciphertext, and the logs and the
+    page held no token.
+  - Five questions as Lucas: all five went to the connector route, every lookup succeeded, 6–16 s each, and every
+    link was a GitHub address a lookup returned. The renew reply came in 1.0 s.
+  - Right: his open pull requests, reviews waiting (none), and a repository's activity.
+  - Two misses, fixed in the follow-up: "what open issues are there in ibis-routing?" used `my_issues` (assigned
+    issues only) and missed an unassigned one; a follow-up read a review's bare `COMMENTED` as "requested
+    changes". `my_issues` now points to search for a repository's issues, and review states are in words.
+  - The registration form now says "Redirect URI" for the callback URL; `docs/DEPLOYMENT.md` follows it.
 - [x] T042 Paid, only with Lucas's go: the router probe with `connector` (~$0.006), with the 30 GitHub questions
   and the existing sets (SC-001). Done 2026-09-30 (thread D study, $0.017 in two runs). Probe 1: 23 of 30 GitHub
   questions to the connector, so the criterion was sharpened (5f084fd). Probe 2: 28 of 30, and the existing 129

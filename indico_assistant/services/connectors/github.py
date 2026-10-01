@@ -274,7 +274,8 @@ class ReviewRequestsArgs(BaseModel):
 
 
 class MyIssuesArgs(BaseModel):
-    """Issues assigned to the user: open by default, or closed, or all."""
+    """Issues assigned to the user: open by default, or closed, or all. Only those: a repository's issues in general
+    are a search ("repo:owner/name")."""
     tool: Literal["my_issues"]
     state: Literal["open", "closed", "all"] = "open"
     repo: Repo | None = None
@@ -312,6 +313,15 @@ class RepositoriesArgs(BaseModel):
 def _cut(text, limit):
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+#: GitHub's review states in words: a bare "COMMENTED" was read as a change request (real-GitHub check, T041)
+_REVIEW = {"approved": "approved", "changes_requested": "requested changes",
+           "commented": "commented, without approving or requesting changes", "dismissed": "review dismissed"}
+
+
+def _review(state):
+    return _REVIEW.get((state or "").lower(), (state or "").lower())
 
 
 def _ago(iso):
@@ -440,7 +450,7 @@ def _item(client, args):
     if issue.get("body"):
         lines.append("Description: " + _cut(issue["body"], 300))
     if is_pull and (reviews := client.newest(f"{base}/pulls/{args.number}/reviews")):
-        lines += ["Newest reviews:", *(f"- {_login(r.get('user'))}: {r['state']} {_ago(r.get('submitted_at'))}"
+        lines += ["Newest reviews:", *(f"- {_login(r.get('user'))} {_ago(r.get('submitted_at'))}: {_review(r['state'])}"
                                        + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews)]
     if issue.get("comments"):
         comments = client.newest(f"{base}/issues/{args.number}/comments")
@@ -460,7 +470,7 @@ def _event(event):
         pull, url = p["pull_request"], p["pull_request"].get("html_url")
         action = "merged" if p.get("action") == "closed" and pull.get("merged") else p.get("action", "")
         if kind == "PullRequestReviewEvent":
-            action = f"reviewed ({(p.get('review') or {}).get('state', '')})"
+            action = f"reviewed ({_review((p.get('review') or {}).get('state'))})"
         what = f'{action} pull request #{pull.get("number")} "{_cut(pull.get("title"), 120)}"'
     elif kind in ("IssuesEvent", "IssueCommentEvent") and p.get("issue"):
         issue, url = p["issue"], p["issue"].get("html_url")
