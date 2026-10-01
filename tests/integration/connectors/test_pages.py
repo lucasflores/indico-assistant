@@ -121,11 +121,16 @@ def test_an_admin_sees_another_users_connection_but_not_their_repositories(app, 
     assert rendered['repos'] is None and fake.calls[before:] == []  # (the admin never reads GitHub as the user)
 
 
-def test_github_off_hides_the_page_unless_an_admin_has_a_connection_to_remove(app, db, users, rendered, settings):
+def test_github_off_keeps_the_page_only_for_a_connection_to_remove(app, db, users, rendered, settings, fake):
+    """(fresh-review) off, the user can still see and remove their own connection; nothing is read from GitHub."""
     connect(app, users['makoto'])
     settings['github_enabled'] = False
+    before = len(fake.calls)
+    run(app, pages.RHConnections, users['makoto'])
+    assert rendered['connection'] and rendered['disconnect_url'] and not rendered['enabled'] and rendered['repos'] is None
+    assert fake.calls[before:] == []
     with pytest.raises(NotFound):
-        run(app, pages.RHConnections, users['makoto'])
+        run(app, pages.RHConnect, users['makoto'], method='POST')  # (and can't connect again while it's off)
     run(app, pages.RHConnections, users['lucas'], user_id=users['makoto'].id)
     assert rendered['connection'] and rendered['disconnect_url']
     with pytest.raises(NotFound):
@@ -243,8 +248,9 @@ def test_the_menu_item(app, db, users, rendered, settings):
     connect(app, users['makoto'])
     assert item(users['lucas'], users['makoto']) is not None
     settings['github_enabled'] = False
-    assert item(users['makoto'], users['makoto']) is None
+    assert item(users['makoto'], users['makoto']) is not None  # (fresh-review: theirs to remove)
     assert item(users['lucas'], users['makoto']) is not None  # (an admin can still remove it)
+    assert item(users['lucas'], users['lucas']) is None  # (off, and nothing to remove)
 
 
 # --- no token anywhere (SC-004, T037) ----------------------------------------------------------------------

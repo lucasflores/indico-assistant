@@ -274,7 +274,12 @@ def _merge_connections(target, source, **kwargs):
 
 
 def _forget_connections(user, flushed=False, **kwargs):
-    """Called before and after the deletion or anonymisation is flushed: only after, once it is sure to happen."""
+    """Called before and after the deletion or anonymisation is flushed: only after, once it is sure to happen. The
+    grants are revoked on GitHub too, while the instance's app is configured."""
     if flushed:
-        from indico_assistant.services.connectors import store
-        store.forget(user.id)
+        from indico_assistant.services.connectors import github, store
+        try:
+            settings = AssistantPlugin.settings.get_all()
+        except RuntimeError:  # (the plugin isn't loaded: tests, scripts)
+            settings = {}
+        store.forget(user.id, github.app_for(settings) if settings.get("github_client_id") else None)

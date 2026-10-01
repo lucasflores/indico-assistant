@@ -136,23 +136,27 @@ def token(user_id, app, service="github"):
     return Access(tokens.access, OK)
 
 
-def disconnect(user_id, app, service="github"):
-    """Delete the connection now, then ask GitHub to revoke the grant (best effort: the delete stands either way)."""
+def _held(row, box):
+    """(access, refresh, expired) of a row, decrypted, for revoking it; Nones when it can't be read."""
     from cryptography.fernet import InvalidToken
 
-    row = connection(user_id, service)
-    if row is None:
-        return
-    box = fernet()
     try:
         access = box.decrypt(row.access_token.encode()).decode() if box else None
+        refresh = box.decrypt(row.refresh_token.encode()).decode() if box and row.refresh_token else None
     except InvalidToken:
-        access = None
-    db.session.delete(row)
-    db.session.commit()
+        return None, None, False
+    return access, refresh, bool(row.access_expires_at and row.access_expires_at <= datetime.now(UTC))
+
+
+def _revoke(app, held):
+    """Revoke a grant on GitHub, best effort: an expired access token is refreshed first, since GitHub refuses to
+    revoke with it (fresh-review). Nothing here touches the database."""
+    access, refresh, expired = held
     if access is None or not app.client_id:
         return  # (no app configured any more: nothing to revoke with)
     try:
+        if expired and refresh:
+            access = app.refresh(refresh).access
         app.revoke(access)
     except GitHubError as error:
         logger.warning("GitHub didn't revoke a disconnected grant (%s); the connection is deleted", error.message)
@@ -160,9 +164,21 @@ def disconnect(user_id, app, service="github"):
         logger.warning("Revoking a disconnected grant failed (%s); the connection is deleted", type(error).__name__)
 
 
+def disconnect(user_id, app, service="github"):
+    """Delete the connection now, then ask GitHub to revoke the grant (best effort: the delete stands either way)."""
+    row = connection(user_id, service)
+    if row is None:
+        return
+    held = _held(row, fernet())
+    db.session.delete(row)
+    db.session.commit()
+    _revoke(app, held)
+
+
 def merged(target_id, source_id):
     """Merged accounts (Indico's ``users.merged``): the merged account's connections move to the one that remains,
-    unless it already has one for that service."""
+    unless it already has one for that service. That dropped one's grant is not revoked: two merged accounts are
+    usually one person's, on the same GitHub account, and revoking it would end the remaining connection too."""
     for row in Connection.query.filter_by(user_id=source_id).all():
         if connection(target_id, row.service):
             db.session.delete(row)
@@ -171,10 +187,18 @@ def merged(target_id, source_id):
     db.session.flush()
 
 
-def forget(user_id):
-    """A deleted or anonymised account (Indico's ``users.db_deleted`` / ``users.anonymized``)."""
-    Connection.query.filter_by(user_id=user_id).delete()
+def forget(user_id, app=None):
+    """A deleted or anonymised account (Indico's ``users.db_deleted`` / ``users.anonymized``): its connections go, and
+    with ``app`` their grants are revoked on GitHub too (fresh-review). Runs inside Indico's own transaction: it only
+    flushes, and the revoking is HTTP only."""
+    rows = Connection.query.filter_by(user_id=user_id).all()
+    box = fernet()
+    held = [_held(row, box) for row in rows]
+    for row in rows:
+        db.session.delete(row)
     db.session.flush()
+    for each in held if app is not None else ():
+        _revoke(app, each)
 
 
 def used(user_id, service="github"):

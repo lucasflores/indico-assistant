@@ -198,3 +198,19 @@ def test_a_refresh_answered_with_a_page_not_json_keeps_the_connection(db, users,
                      transport=httpx.MockTransport(lambda request: httpx.Response(200, text="<html>Down</html>")))
     assert store.token(users['makoto'].id, proxy).state == store.UNAVAILABLE
     assert not row(users['makoto']).needs_renewal
+
+
+def test_disconnect_with_an_expired_token_refreshes_to_revoke(db, users, github_app, fake):
+    """(fresh-review) GitHub won't revoke with an expired token: the grant would stay."""
+    tokens = connected(db, users['makoto'], github_app, access=datetime.now(UTC) - timedelta(hours=1))
+    fake.expire(tokens.access)
+    store.disconnect(users['makoto'].id, github_app)
+    assert fake.calls[-2:] == [("POST", "/login/oauth/access_token"), ("DELETE", "/applications/Iv1.fake/grant")]
+    assert fake.state["tokens"] == {}  # (revoked: the grant and every token of it)
+
+
+def test_a_deleted_account_has_its_grant_revoked_too(db, users, github_app, fake):
+    connected(db, users['makoto'], github_app)
+    store.forget(users['makoto'].id, github_app)
+    assert Connection.query.filter_by(user_id=users['makoto'].id).count() == 0
+    assert ("DELETE", "/applications/Iv1.fake/grant") in fake.calls and fake.state["tokens"] == {}

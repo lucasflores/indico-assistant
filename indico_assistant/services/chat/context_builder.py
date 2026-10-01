@@ -15,6 +15,15 @@ from uuid import UUID
 from indico_assistant.models.message import ChatMessage
 
 
+#: An Indico answer's place in the connector's history: the turns still alternate, and the model knows one is missing
+#: (fresh-review: some providers refuse two user turns in a row).
+HIDDEN = "(An answer about Indico, not shown here.)"
+
+
+def _route(msg):
+    return ((msg.metadata_json or {}).get("route") or {}).get("route")
+
+
 class ContextBuilder:
     """Builds conversation context for LLM prompts.
     
@@ -65,10 +74,8 @@ class ContextBuilder:
         #17): the user's own messages, and only the answers that came from GitHub. Never Indico's answers, nor the
         page note."""
         return [
-            {"role": msg.role, "content": msg.content}
-            for msg in self._recent(session_id, up_to)
-            if msg.role == "user"
-            or (msg.role == "assistant" and ((msg.metadata_json or {}).get("route") or {}).get("route") == "connector")
+            {"role": msg.role, "content": msg.content if msg.role == "user" or _route(msg) == "connector" else HIDDEN}
+            for msg in self._recent(session_id, up_to) if msg.role in ("user", "assistant")
         ]
 
     def _recent(self, session_id: UUID, up_to: UUID | None = None) -> list:
