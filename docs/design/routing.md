@@ -24,6 +24,10 @@
 3. **Without Jev** (no key, too slow, or an error), the LLM classifier routes instead.
 4. **When the planner cannot plan a change**, the message gets the knowledge answer.
 
+Issue reports (spec 021) are not a route: the user files one with the form, opened from "Report a problem" or the
+panel's flag button. Today "can I report an issue?" gets the chat answer, which files nothing. Whether to send that
+question to the form is Lucas's call, still open; this note doesn't change it.
+
 Three of the handoff's four routes, data, changes and knowledge, already exist. Connectors are the one left. Today a
 GitHub question goes to data, where it becomes SQL, or gets the out-of-scope refusal.
 
