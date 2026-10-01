@@ -108,9 +108,8 @@ GitHub question goes to data, where it becomes SQL, or gets the out-of-scope ref
   - a new routing set of connector questions and their negatives;
   - the existing 24 routing negatives must stay at 24 out of 24.
 
-## For Lucas to agree before the spec
+## Agreed (Lucas, 2026-09-30)
 
-1. One `connector` route (option A), rather than one route per service.
-2. The loop runs as structured steps under the abstraction, rather than native tool calls with a constitution
-   exception.
+1. One `connector` route (option A), as the sixth Jev choice.
+2. The loop runs as structured steps under the abstraction.
 3. No Indico data in the connector loop in v1.
