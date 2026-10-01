@@ -310,3 +310,12 @@ def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fak
     assert len(issued) >= 4  # (the first pair, then the refreshed pair)
     for token in issued:
         assert all(token not in text for text in seen), "a token leaked"
+
+
+def test_the_callback_without_the_key_says_so_instead_of_failing(app, db, users, rendered, monkeypatch):
+    """(third review) the key missing from the web server: a message, not a 500."""
+    _, saved = run(app, pages.RHConnect, users['makoto'], method='POST')
+    monkeypatch.delenv(store.KEY_ENV)
+    run(app, pages.RHGitHubCallback, users['makoto'], query={'code': 'fake-code',
+                                                           'state': saved[pages.OAUTH_KEY]['state']}, keep=saved)
+    assert Connection.query.count() == 0 and pages.flash.call_args.args[1] == 'error'

@@ -127,8 +127,11 @@ def token(user_id, app, service="github"):
         if _transient(error):  # (Copilot, PR #17: an outage must not make everyone reconnect)
             logger.warning("GitHub didn't refresh a connection (%s %s): kept, try again later", error.status,
                            error.message)
+            still = row.access_expires_at and row.access_expires_at > datetime.now(UTC)
+            access = box.decrypt(row.access_token.encode()).decode() if still else None
             db.session.commit()  # (releases the lock)
-            return Access(None, UNAVAILABLE)
+            # (third review: refreshed early, within MARGIN, the current token still answers)
+            return Access(access, OK) if access else Access(None, UNAVAILABLE)
         logger.info("GitHub refused to refresh a connection (%s): it needs renewing", error.message)
         return _renew(row)
     _put(row, box, tokens)
@@ -187,17 +190,22 @@ def merged(target_id, source_id):
     db.session.flush()
 
 
-def forget(user_id, app=None):
-    """A deleted or anonymised account (Indico's ``users.db_deleted`` / ``users.anonymized``): its connections go, and
-    with ``app`` their grants are revoked on GitHub too (fresh-review). Runs inside Indico's own transaction: it only
-    flushes, and the revoking is HTTP only."""
+def forget(user_id):
+    """A deleted or anonymised account (Indico's ``users.db_deleted`` / ``users.anonymized``): its connections go.
+    Runs inside Indico's own transaction, so it only flushes; it returns what is needed to revoke the grants, which
+    the plugin does once that transaction has committed (third review: a rollback must not leave a dead grant)."""
     rows = Connection.query.filter_by(user_id=user_id).all()
     box = fernet()
     held = [_held(row, box) for row in rows]
     for row in rows:
         db.session.delete(row)
     db.session.flush()
-    for each in held if app is not None else ():
+    return held
+
+
+def revoke(app, held):
+    """Revoke the grants ``forget`` returned, best effort (HTTP only)."""
+    for each in held:
         _revoke(app, each)
 
 

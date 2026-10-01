@@ -228,3 +228,26 @@ def test_review_decisions_reach_the_listed_page(monkeypatch):
         ("review:approved", 1), ("review:approved", 2), ("review:changes_requested", 1),
         ("review:changes_requested", 2)}
     assert notes == {("o/r", 120): "changes requested"}
+
+
+def test_the_last_page_asks_for_no_further_page():
+    item = {"number": 1, "repository_url": "https://api.github.com/repos/o/r", "html_url": "https://github.com/o/r/pull/1",
+            "title": "t", "state": "open", "created_at": None, "user": None}
+    text, _ = github._listing([item], 500, 10, "pull requests")
+    assert "page 11" not in text and "no further than page 10" in text
+    assert "ask for page 3" in github._listing([item], 500, 2, "pull requests")[0]
+
+
+def test_newest_reuses_the_first_page_as_the_one_before_the_last():
+    import httpx
+
+    seen = []
+
+    def handle(request):
+        page = int(request.url.params.get("page", 1))
+        seen.append(page)
+        headers = {"link": '<https://api.github.com/x?per_page=100&page=2>; rel="last"'} if page == 1 else {}
+        return httpx.Response(200, json=[{"n": i} for i in (range(100) if page == 1 else (100, 101))], headers=headers)
+
+    assert [i["n"] for i in GitHubClient("t", transport=httpx.MockTransport(handle)).newest("/x")] == list(range(92, 102))
+    assert seen == [1, 2]

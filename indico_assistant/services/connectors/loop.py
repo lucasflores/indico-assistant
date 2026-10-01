@@ -30,7 +30,10 @@ BUDGET_SECONDS = 60.0
 MIN_STEP_SECONDS = 5.0  # with less left, the loop answers instead of looking up more
 MAX_RESULT_CHARS = 4_000
 MARK = "github_data"
-_MARK = re.compile(MARK, re.I)  # (any case: "</GITHUB_DATA>" can't close it either; fresh-review)
+#: The mark's tags, in any case and spacing: "<" becomes "‹", so GitHub's text can't open or close one (fresh-review),
+#: while addresses and names holding "github_data" stay as they are (third review)
+_TAG = re.compile(rf"<(\s*/?\s*{MARK})", re.I)
+_GITHUB_URL = re.compile(r"https://github\.com/[^\s<>()\[\]\"'`]+")
 #: The whole answer stays under the worker's 120 s soft limit: the last call gets what is left of this, at least 10 s.
 ANSWER_SECONDS = 100.0
 
@@ -63,7 +66,7 @@ class ConnectorResult(KnowledgeResult):
 class _Step(BaseModel):
     @model_validator(mode="after")
     def _one(self):
-        if (self.call is None) == (not self.answer):
+        if (self.call is None) == (not (self.answer or "").strip()):  # (a blank answer is no answer)
             raise ValueError("give either one tool call or the answer")
         return self
 
@@ -99,7 +102,8 @@ def step_model(tools):
 
 def _mark(text):
     """GitHub's text inside the mark, unable to close it early."""
-    return f"<{MARK}>\n{_MARK.sub('github-data', text[:MAX_RESULT_CHARS])}\n</{MARK}>"
+    body = _TAG.sub("‹\\1", text[:MAX_RESULT_CHARS])
+    return f"<{MARK}>\n{body}\n</{MARK}>"
 
 
 def _prompt(message, tools, done, final=False):
@@ -107,22 +111,23 @@ def _prompt(message, tools, done, final=False):
     if not done:
         lines.append("(nothing yet)")
     for n, (call, text) in enumerate(done, 1):
-        arguments = _MARK.sub("github-data", call.model_dump_json(exclude={"tool"}))  # (the model wrote them)
+        arguments = _TAG.sub("‹\\1", call.model_dump_json(exclude={"tool"}))  # (the model wrote them)
         lines += [f"{n}. {call.tool} {arguments}", _mark(text)]
     if final:
         lines += ["", "No more lookups: answer now from what was looked up."]
     return "\n".join([*lines, "", "## The latest message", message])
 
 
-def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeout=30.0):
+def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeout=30.0, started=None):
     """Answer ``message`` with ``tools`` over ``client`` (a GitHubClient); ``history`` is the conversation before it."""
     from indico_assistant.services.llm.service import collect_calls
 
     tools = tuple(tools)
     by_name, first, step = {t.name: t for t in tools}, lookup_model(tools), step_model(tools)
-    started, done, seen = now(), [], set()
+    # ``started``: when the answer began (``now``'s clock), so routing and the token's refresh count too (third review)
+    started, done, seen = (now() if started is None else started), [], set()
     if isinstance(client, GitHubClient):  # (every GitHub call inside the budget, however many one tool makes)
-        client.deadline = time.monotonic() + BUDGET_SECONDS
+        client.deadline = time.monotonic() + BUDGET_SECONDS - (now() - started)
     result, answered = ConnectorResult(NOT_ANSWERED), False
     with collect_calls() as calls:
         for n in range(MAX_TOOL_STEPS):
@@ -180,7 +185,7 @@ RENEW_REPLY = ("GitHub no longer accepts your connection, so I can't read it rig
 UNAVAILABLE_REPLY = "GitHub couldn't be reached just now, so I can't read it. Please try again in a moment."
 
 
-def answer(user_id, message, history, *, llm, settings, base_url, profile_url):
+def answer(user_id, message, history, *, llm, settings, base_url, profile_url, started=None):
     """The connector route's answer (FR-012, FR-013, FR-017): a fixed reply while the user isn't connected or must
     renew (no model call); otherwise the loop over their GitHub, with its links checked."""
     from indico_assistant.services.connectors import github, store
@@ -193,13 +198,17 @@ def answer(user_id, message, history, *, llm, settings, base_url, profile_url):
     store.used(user_id)  # (commits: no transaction stays open through the model calls)
     with github.client_for(access.token, settings) as client:
         result = run(message, history, github.TOOLS, client=client, llm=llm,
-                     step_timeout=float(settings.get("timeout_seconds") or 30))
+                     step_timeout=float(settings.get("timeout_seconds") or 30), started=started)
     if result.unauthorized:  # (the grant was revoked on GitHub: the stored token looked fine until now)
         store.renew(user_id)
         result.text = RENEW_REPLY.format(url=profile_url)
     elif not result.failed:  # links only to what GitHub returned, or the conversation already had; no images
         paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
-        result.text = _clean(result.text, sorted(paths), guide, base_url, result.urls) or NOT_ANSWERED
+        # and the GitHub items of earlier connector answers (their history holds no other answers: already checked)
+        earlier = {u.rstrip(".,;:!?") for m in history if m.get("role") == "assistant"
+                   for u in _GITHUB_URL.findall(m.get("content") or "")}
+        result.text = (_clean(result.text, sorted(paths), guide, base_url, result.urls | earlier) or "").strip() \
+            or NOT_ANSWERED
     return result
 
 

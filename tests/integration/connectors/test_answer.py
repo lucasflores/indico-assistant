@@ -116,3 +116,13 @@ def test_github_unreachable_on_refresh_gets_a_try_again_reply(db, makoto, fake):
     assert "try again" in ask(makoto, llm).text
     llm.generate.assert_not_called()
     assert not Connection.query.filter_by(user_id=makoto.id).one().needs_renewal
+
+
+def test_an_earlier_connector_answers_github_links_stay_links(db, makoto, fake):
+    """(third review) the history holds only connector answers, already checked: their items may be linked again."""
+    connect(db, makoto)
+    history = [{"role": "user", "content": "my open PRs?"}, {"role": "assistant", "content": f"[#16]({PR16})"}]
+    llm = Script(use("item", repo="thoth-labs/indico-assistant", number=8), say(f"Unlike [#16]({PR16}), #8 is a bug."))
+    result = loop.answer(makoto.id, "and issue 8?", history, llm=llm, settings=SETTINGS, base_url=BASE,
+                         profile_url=PROFILE)
+    assert f"[#16]({PR16})" in result.text

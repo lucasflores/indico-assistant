@@ -69,6 +69,7 @@ class AssistantPlugin(IndicoPlugin):
         self.connect(signals.users.merged, _merge_connections)
         self.connect(signals.users.db_deleted, _forget_connections)
         self.connect(signals.users.anonymized, _forget_connections)
+        self.connect(signals.core.after_commit, _revoke_forgotten)
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
     # later. Runs under Indico's CSP with the page's nonce. localStorage may throw: then nothing is reserved.
@@ -273,13 +274,34 @@ def _merge_connections(target, source, **kwargs):
     store.merged(target.id, source.id)
 
 
+_PENDING_REVOKES = 'assistant_pending_revokes'
+
+
 def _forget_connections(user, flushed=False, **kwargs):
     """Called before and after the deletion or anonymisation is flushed: only after, once it is sure to happen. The
-    grants are revoked on GitHub too, while the instance's app is configured."""
+    grants are revoked on GitHub once the transaction commits (_revoke_forgotten), never inside it."""
     if flushed:
-        from indico_assistant.services.connectors import github, store
-        try:
-            settings = AssistantPlugin.settings.get_all()
-        except RuntimeError:  # (the plugin isn't loaded: tests, scripts)
-            settings = {}
-        store.forget(user.id, github.app_for(settings) if settings.get("github_client_id") else None)
+        from flask import g
+
+        from indico_assistant.services.connectors import store
+        g.setdefault(_PENDING_REVOKES, []).extend(store.forget(user.id))
+
+
+def _revoke_forgotten(sender, **kwargs):
+    from flask import g, has_app_context
+
+    held = g.pop(_PENDING_REVOKES, None) if has_app_context() else None
+    if not held:
+        return
+    from indico_assistant.services.connectors import github, store
+    settings = _plugin_settings()
+    if settings.get("github_client_id"):
+        store.revoke(github.app_for(settings), held)
+
+
+def _plugin_settings():
+    """The plugin's settings, or none while it isn't loaded (tests, scripts)."""
+    try:
+        return AssistantPlugin.settings.get_all()
+    except RuntimeError:
+        return {}
