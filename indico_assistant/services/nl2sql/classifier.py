@@ -21,6 +21,11 @@ from indico_assistant.services.llm import LLMService
 from indico_assistant.services.llm.models import LLMResponse, QueryClassification, TimeRange
 
 
+#: Spec 023: the intent's line, in the prompt only while GitHub is on.
+CONNECTOR_INTENT = """- **connector**: About the user's own GitHub account: their pull requests, reviews waiting for them, issues
+  assigned to them, their repositories or recent activity on GitHub ("which of my PRs are open?").
+"""
+
 # Classification prompt template (T039: extended for multi-entity queries)
 CLASSIFICATION_PROMPT = """You are a query classifier for the Indico event management system.
 Analyze the user's question and classify it into one of these intents:
@@ -48,7 +53,7 @@ Analyze the user's question and classify it into one of these intents:
   translate or explain the last answer: "thanks!", "summarise that", "what does that term mean?". A follow-up asking
   about events, people, talks or dates ("which of those is earliest?", "and the ones next month?") is a data question,
   never chat.
-- **out_of_scope**: Questions not related to events/registrations/contributions/documents
+{connector}- **out_of_scope**: Questions not related to events/registrations/contributions/documents
 
 ## CLASSIFICATION HINTS
 
@@ -214,19 +219,21 @@ class QueryClassifier:
         """
         self._llm_service = llm_service
 
-    def classify(self, question: str) -> LLMResponse[QueryClassification]:
+    def classify(self, question: str, connector: bool = False) -> LLMResponse[QueryClassification]:
         """
         Classify a natural language question.
 
         Args:
             question: The user's question in natural language.
+            connector: GitHub is on (spec 023), so ``connector`` is one of the intents.
 
         Returns:
             LLMResponse containing QueryClassification with intent and entities.
         """
         # Build the prompt with today's date for time reference resolution
         today = datetime.now().strftime("%Y-%m-%d")
-        prompt = CLASSIFICATION_PROMPT.format(question=question, today=today)
+        prompt = CLASSIFICATION_PROMPT.format(question=question, today=today,
+                                              connector=CONNECTOR_INTENT if connector else "")
 
         # Use LLM service to generate classification
         response = self._llm_service.generate(

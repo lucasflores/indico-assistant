@@ -128,12 +128,12 @@ runs (T042, T043) happen only after Lucas says go.
 
 ### Tests first
 
-- [ ] T020 [P] [US2] `tests/unit/services/connectors/test_tools.py`, against `FakeGitHub`. For each of the 7 tools:
+- [x] T020 [P] [US2] `tests/unit/services/connectors/test_tools.py`, against `FakeGitHub`. For each of the 7 tools:
   - the query it sends (`is:pr author:@me is:open`, the `repo:` filter, `is:merged`, one kind per `search`);
   - its text: one line per item, with `html_url`, and the 300-character cut;
   - `item` on a pull request adds its reviews;
   - `repositories` is capped at 100.
-- [ ] T021 [P] [US2] `tests/unit/services/connectors/test_loop.py`, with a scripted `LLMService` mock and a fake
+- [x] T021 [P] [US2] `tests/unit/services/connectors/test_loop.py`, with a scripted `LLMService` mock and a fake
   clock:
   - a call, then an answer, makes 2 model calls and runs 1 tool;
   - three calls, then a forced `Final` on the 4th;
@@ -145,17 +145,17 @@ runs (T042, T043) happen only after Lucas says go.
   - a failed `generate` gives `failed=True`;
   - each tool's record is `{name, ms, ok}`, with no arguments;
   - `urls` collects the `html_url`s.
-- [ ] T022 [P] [US2] `tests/unit/services/knowledge/test_links.py`, additions:
+- [x] T022 [P] [US2] `tests/unit/services/knowledge/test_links.py`, additions:
   - `urls=` keeps an exact GitHub URL, ignoring its fragment, and drops one that isn't in the list;
   - `strip_images` turns `![x](https://evil/?q=secret)` into `x`;
   - nothing else changes (the existing tests still pass).
-- [ ] T023 [P] [US2] `tests/unit/services/knowledge/test_gate.py`, additions:
+- [x] T023 [P] [US2] `tests/unit/services/knowledge/test_gate.py`, additions:
   - `questions(connector=True)` offers `connector`, and the default doesn't;
   - an answer of `connector` when it wasn't offered is `invalid`;
   - the `QUESTIONS` sent today stay byte-for-byte the same with `connector=False`.
-- [ ] T024 [P] [US2] Classifier tests: the prompt has the `connector` bullet only with `connector=True`. A
+- [x] T024 [P] [US2] Classifier tests: the prompt has the `connector` bullet only with `connector=True`. A
   `connector` classification exits with `connector_request` and makes no SQL call.
-- [ ] T025 [US2] `tests/unit/services/chat/test_routing.py`, additions:
+- [x] T025 [US2] `tests/unit/services/chat/test_routing.py`, additions:
   - Jev's `connector` goes to `_connector`, and the classifier's `connector_request` goes there too;
   - `connector=` is passed only while GitHub is on;
   - the route record has `tools` and `offer: None`;
@@ -164,12 +164,12 @@ runs (T042, T043) happen only after Lucas says go.
 
 ### Code
 
-- [ ] T026 [US2] The 7 tools in `services/connectors/github.py` (plan, Design 4). This makes T020 pass.
-- [ ] T027 [US2] `services/connectors/loop.py` (plan, Design 5). This makes T021 pass.
-- [ ] T028 [US2] `links.py`: `urls=` and `strip_images`. This makes T022 pass.
-- [ ] T029 [US2] `gate.py`: `questions()` and `decide(connector=)`. The classifier gets `{connector}`,
+- [x] T026 [US2] The 7 tools in `services/connectors/github.py` (plan, Design 4). This makes T020 pass.
+- [x] T027 [US2] `services/connectors/loop.py` (plan, Design 5). This makes T021 pass.
+- [x] T028 [US2] `links.py`: `urls=` and `strip_images`. This makes T022 pass.
+- [x] T029 [US2] `gate.py`: `questions()` and `decide(connector=)`. The classifier gets `{connector}`,
   `PipelineResult.connector_request` and `schema.py`. This makes T023 and T024 pass.
-- [ ] T030 [US2] `chat/service.py`: `_connector`, `_route_of`, `_route_record.tools`, and passing `connector=` to Jev
+- [x] T030 [US2] `chat/service.py`: `_connector`, `_route_of`, `_route_record.tools`, and passing `connector=` to Jev
   and the pipeline. This makes T025 pass.
 
 **Checkpoint:** the MVP. In dev mode (T040), "which of my pull requests are still open?" lists the seed's open pull
@@ -179,7 +179,7 @@ requests, linked to GitHub.
 
 ### Tests first
 
-- [ ] T031 [US3] `tests/unit/services/chat/test_routing.py`, additions:
+- [x] T031 [US3] `tests/unit/services/chat/test_routing.py`, additions:
   - `NotConnected` gives the fixed reply with the profile link, and `Renew` gives the renew reply;
   - neither makes a model call;
   - both are recorded as route `connector` with `tools: []`.
@@ -190,12 +190,12 @@ requests, linked to GitHub.
 
 ### Code
 
-- [ ] T033 [US3] The fixed replies in `_connector` (FR-012), and `last_used_at` set on use. This makes T031 pass.
+- [x] T033 [US3] The fixed replies in `_connector` (FR-012), and `last_used_at` set on use. This makes T031 pass.
 - [ ] T034 [US3] `capabilities.py`: the GitHub line (plan, Design 8). This makes T032 pass.
 
 ## Phase 6: User Story 4 — follow-ups (P2)
 
-- [ ] T035 [US4] `tests/unit/services/connectors/test_loop.py`, an addition: the history reaches every step's
+- [x] T035 [US4] `tests/unit/services/connectors/test_loop.py`, an addition: the history reaches every step's
   `generate(messages=…)`, so "the second one" can be worked out.
 - [ ] T036 [US4] Write the follow-up cases (6) for T043:
   - "which of those is oldest?" expects chat, with no tool;

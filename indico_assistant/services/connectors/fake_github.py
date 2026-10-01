@@ -141,6 +141,7 @@ class FakeGitHub:
         self.path = Path(path) if path else None
         self.state = {"tokens": {}, "refresh": {}, "refuse_refresh": False}
         self.calls = []
+        self.searches = []  # each search's q
         self._fail = {}
         if self.path and self.path.exists():
             self.state = json.loads(self.path.read_text())
@@ -219,6 +220,7 @@ class FakeGitHub:
                      for name, (owner, private, description) in REPOS.items() if owner and owner == account]
             return httpx.Response(200, json={"total_count": len(repos), "repositories": repos})
         if path == "/search/issues":
+            self.searches.append(params.get("q", ""))
             return self._search(params.get("q", ""), int(params.get("per_page") or 30))
         if parts[0] == "repos" and len(parts) >= 4:
             repo = "/".join(parts[1:3])

@@ -7,12 +7,15 @@ from uuid import uuid4
 import pytest
 
 from indico_assistant.services.chat.service import ChatService
+from indico_assistant.services.connectors.loop import ConnectorResult
 from indico_assistant.services.knowledge.answer import KnowledgeResult
 from indico_assistant.services.knowledge.gate import Decision
 from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 
 KNOWLEDGE = KnowledgeResult("Use the gear menu, then Lock.", guide_commit="e7e0016")
 CHAT = KnowledgeResult("The earliest is the Sync.")
+GITHUB = ConnectorResult("Open: [#16](https://github.com/o/r/pull/16).", tools=[{"name": "my_pull_requests", "ms": 412,
+                                                                                 "ok": True}])
 PLAN = ("Here is the plan.", {"plan_id": "p1", "cannot_plan": False}, {"id": "p1"})
 CANNOT = ("I could not work out what to change.", {"plan_id": None, "cannot_plan": True}, None)
 
@@ -42,12 +45,15 @@ def routed():
     s.nl2sql.return_value = ("An answer", {})
     s.knowledge.return_value = KNOWLEDGE
     s.chat.return_value = CHAT
+    s.connector.return_value = GITHUB
+    s.github_on.return_value = False
 
     def run(message="hi", waiting_plan=None):
         with patch.object(service, "_load_user", return_value=MagicMock(id=1, is_admin=False)), \
                 patch.object(service, "_decide", s.decide), patch.object(service, "_plan", s.plan), \
                 patch.object(service, "_process_with_nl2sql", s.nl2sql), \
                 patch.object(service, "_knowledge", s.knowledge), patch.object(service, "_chat", s.chat), \
+                patch.object(service, "_connector", s.connector), patch.object(service, "_github_on", s.github_on), \
                 patch("indico_assistant.services.actions.executor.open_plan", return_value=waiting_plan), \
                 patch("indico_assistant.services.chat.service.db"):
             result = service.answer(1, session_id, message, message_id=uuid4())
@@ -174,7 +180,7 @@ def test_any_other_reply_to_an_offer_goes_to_jev_with_both_notes(routed):
     s.plan.return_value = PLAN
     waiting = MagicMock()
     run("yes, but only for next week's", waiting_plan=waiting)
-    assert s.decide.call_args.kwargs == {"plan_waiting": True, "offer": OFFER}
+    assert s.decide.call_args.kwargs == {"plan_waiting": True, "offer": OFFER, "connector": False}
     assert s.plan.call_args.args[2] == "yes, but only for next week's" and s.plan.call_args.args[4] is waiting
 
 
@@ -338,3 +344,47 @@ def test_with_a_waiting_plan_the_planners_problem_stands(routed):
                            {"plan_id": None, "cannot_plan": True, "problem": "not_understood"}, None)
     run("hmm, make it better", waiting_plan=MagicMock())
     assert stored(s)["problem"] == "not_understood"
+
+
+# --- spec 023: the connector route -------------------------------------------------------------------------
+
+def test_jev_offers_the_connector_route_only_while_github_is_on(routed):
+    run, s = routed
+    run("which of my PRs are open?")
+    assert s.decide.call_args.kwargs["connector"] is False and s.nl2sql.call_args.kwargs["connector"] is False
+    s.github_on.return_value = True
+    run("which of my PRs are open?")
+    assert s.decide.call_args.kwargs["connector"] is True and s.nl2sql.call_args.kwargs["connector"] is True
+
+
+def test_jev_sends_a_github_question_to_the_connector(routed):
+    run, s = routed
+    s.github_on.return_value = True
+    s.decide.return_value = jev("connector")
+    result, route = run("which of my PRs are open?")
+    assert result.response == GITHUB.text and route["route"] == "connector" and route["offer"] is None
+    assert route["tools"] == [{"name": "my_pull_requests", "ms": 412, "ok": True}]
+    s.nl2sql.assert_not_called() and s.plan.assert_not_called() and s.knowledge.assert_not_called()
+
+
+def test_without_jev_the_classifier_sends_it_to_the_connector(routed):
+    run, s = routed
+    s.github_on.return_value = True
+    s.nl2sql.return_value = ("", {"connector_request": True})
+    result, route = run("which of my PRs are open?")
+    assert result.response == GITHUB.text and route["route"] == "connector" and route["fallback"] == "classifier"
+
+
+def test_other_routes_record_no_tools(routed):
+    run, s = routed
+    s.decide.return_value = jev("knowledge")
+    assert run("How do I lock my event?")[1]["tools"] is None
+
+
+def test_a_failed_connector_answer_offers_a_report(routed):
+    run, s = routed
+    s.github_on.return_value = True
+    s.decide.return_value = jev("connector")
+    s.connector.return_value = ConnectorResult("Sorry.", failed=True)
+    run("which of my PRs are open?")
+    assert s.manager.add_assistant_message.call_args.args[2]["problem"] == "failed"

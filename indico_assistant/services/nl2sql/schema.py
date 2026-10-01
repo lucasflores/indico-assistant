@@ -93,6 +93,7 @@ class SchemaContext:
         "out_of_scope": [],
         "knowledge": [],  # spec 022: answered from the user guide, never with SQL
         "chat": [],  # spec 022: answered from the conversation
+        "connector": [],  # spec 023: answered from the user's GitHub
     }
 
     # JOIN hints for multi-table queries (T042)

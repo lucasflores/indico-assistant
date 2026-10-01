@@ -152,3 +152,10 @@ def forget(user_id):
     """A deleted or anonymised account (Indico's ``users.db_deleted`` / ``users.anonymized``)."""
     Connection.query.filter_by(user_id=user_id).delete()
     db.session.flush()
+
+
+def used(user_id, service="github"):
+    """The connection was just used for an answer (the page shows when): committed before the loop's model calls."""
+    if row := connection(user_id, service):
+        row.last_used_at = datetime.now(UTC)
+    db.session.commit()

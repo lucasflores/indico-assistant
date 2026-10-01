@@ -407,6 +407,24 @@ class TestNL2SQLPipelineRoutedByJev:
         assert result.success is True and result.chat_request is True and result.generated_sql is None
         pipeline._generator.generate.assert_not_called()
 
+    def test_the_connector_intent_stops_after_classification_when_github_is_on(
+        self,
+        pipeline: NL2SQLPipeline,
+        mock_classification: MagicMock,
+        mock_classification_response: MagicMock,
+    ) -> None:
+        """Spec 023: the classifier is offered the intent only while GitHub is on, and is told so."""
+        mock_classification.intent = "connector"
+        mock_classification_response.data = mock_classification
+        pipeline._classifier.classify = MagicMock(return_value=mock_classification_response)
+        pipeline._generator.generate = MagicMock()
+
+        result = pipeline.process("which of my PRs are open?", user_id=1, connector=True)
+
+        assert result.success is True and result.connector_request is True and result.generated_sql is None
+        assert pipeline._classifier.classify.call_args.kwargs == {"connector": True}
+        pipeline._generator.generate.assert_not_called()
+
 
 class TestNL2SQLPipelineOutOfScope:
     """Test handling of out-of-scope queries."""

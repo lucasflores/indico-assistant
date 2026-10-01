@@ -5,11 +5,16 @@ send their secrets in the request body, not the query string.
 """
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal
 from urllib.parse import urlencode
 
 import httpx
+from pydantic import AfterValidator, BaseModel, Field
+
+from indico_assistant.services.connectors import Tool
 
 API = "https://api.github.com"
 WEB = "https://github.com"
@@ -165,3 +170,212 @@ def repositories(client, limit=100):
         total += page["total_count"]
         found += page["repositories"]
     return found[:limit], total
+
+
+# --- the read tools (FR-015) ---------------------------------------------------------------------------------
+# Each tool's docstring is what the model reads about it. A repository name is checked to be owner/name, so a name
+# the model was steered to write can't reach another endpoint ("../user").
+
+_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _repo(value):
+    parts = value.split("/")
+    if len(parts) != 2 or any(part in (".", "..") or not _NAME.fullmatch(part) for part in parts):
+        raise ValueError("a repository is owner/name")
+    return value
+
+
+Repo = Annotated[str, AfterValidator(_repo), Field(description="owner/name, e.g. octo-org/hello-world")]
+
+
+class MyPullRequestsArgs(BaseModel):
+    """Pull requests the user opened: open by default, or closed (not merged), merged, or all."""
+    tool: Literal["my_pull_requests"]
+    state: Literal["open", "closed", "merged", "all"] = "open"
+    repo: Repo | None = None
+
+
+class ReviewRequestsArgs(BaseModel):
+    """Open pull requests waiting for the user's review."""
+    tool: Literal["review_requests"]
+
+
+class MyIssuesArgs(BaseModel):
+    """Issues assigned to the user: open by default, or closed, or all."""
+    tool: Literal["my_issues"]
+    state: Literal["open", "closed", "all"] = "open"
+    repo: Repo | None = None
+
+
+class SearchArgs(BaseModel):
+    """Issues or pull requests (one kind per call) matching a GitHub search, e.g. "involves:@me timezone" or
+    "repo:owner/name label:bug"."""
+    tool: Literal["search"]
+    kind: Literal["issue", "pull_request"]
+    query: str = Field(..., max_length=200)
+
+
+class ItemArgs(BaseModel):
+    """One issue or pull request in full: its state, labels, description, recent comments and, for a pull request,
+    its reviews."""
+    tool: Literal["item"]
+    repo: Repo
+    number: int = Field(..., gt=0)
+
+
+class ActivityArgs(BaseModel):
+    """A repository's recent activity: pushes, pull requests, issues, reviews, comments and releases."""
+    tool: Literal["repo_activity"]
+    repo: Repo
+
+
+class RepositoriesArgs(BaseModel):
+    """The repositories the assistant can see for the user (those where the app is installed)."""
+    tool: Literal["repositories"]
+
+
+def _cut(text, limit):
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _ago(iso):
+    """How long ago, in words: the model is given ages, not dates to subtract."""
+    if not iso:
+        return "at an unknown time"
+    days = (datetime.now(UTC) - datetime.fromisoformat(iso.replace("Z", "+00:00"))).total_seconds() / 86400
+    if days < 1:
+        return "today"
+    if days < 2:
+        return "yesterday"
+    if days < 14:
+        return f"{int(days)} days ago"
+    return f"{int(days // 7)} weeks ago" if days < 60 else f"{int(days // 30)} months ago"
+
+
+def _line(item):
+    """One issue or pull request from a search or an item, on one line, with its own address."""
+    pull = item.get("pull_request")
+    state = "merged" if pull and pull.get("merged_at") else item.get("state", "?")
+    bits = [f"#{item['number']} {item['repository_url'].split('/repos/', 1)[1]}", f'"{_cut(item.get("title"), 120)}"',
+            state + (" (draft)" if item.get("draft") else ""),
+            f"opened {_ago(item.get('created_at'))} by {(item.get('user') or {}).get('login', '?')}"]
+    if item.get("labels"):
+        bits.append("labels: " + ", ".join(label["name"] for label in item["labels"]))
+    if item.get("comments"):
+        bits.append(f"{item['comments']} comments")
+    return " · ".join(bits) + f" · {item['html_url']}"
+
+
+def _search(client, q, what):
+    data = client.get("/search/issues", {"q": q, "per_page": 20, "sort": "created", "order": "desc"})
+    items, total = data.get("items") or [], data.get("total_count", 0)
+    if not items:
+        return f"No {what} found."
+    shown = f" (the newest {len(items)} shown)" if total > len(items) else ""
+    return "\n".join([f"{total} {what}{shown}:", *map(_line, items)])
+
+
+def _query(*parts):
+    return " ".join(p for p in parts if p)
+
+
+def _my_pull_requests(client, args):
+    state = {"open": "is:open", "closed": "is:closed is:unmerged", "merged": "is:merged", "all": ""}[args.state]
+    return _search(client, _query("is:pr author:@me", state, args.repo and f"repo:{args.repo}"),
+                   "pull requests opened by the user")
+
+
+def _review_requests(client, args):
+    return _search(client, "is:pr is:open review-requested:@me", "open pull requests waiting for the user's review")
+
+
+def _my_issues(client, args):
+    state = {"open": "is:open", "closed": "is:closed", "all": ""}[args.state]
+    return _search(client, _query("is:issue assignee:@me", state, args.repo and f"repo:{args.repo}"),
+                   "issues assigned to the user")
+
+
+def _search_tool(client, args):
+    kind = "is:pr" if args.kind == "pull_request" else "is:issue"
+    return _search(client, f"{kind} {args.query}", "pull requests" if args.kind == "pull_request" else "issues")
+
+
+def _item(client, args):
+    base = f"/repos/{args.repo}"
+    issue = client.get(f"{base}/issues/{args.number}")
+    is_pull = bool(issue.get("pull_request"))
+    lines = [_line(issue)]
+    if is_pull:
+        pull = client.get(f"{base}/pulls/{args.number}")
+        asked = ", ".join(r["login"] for r in pull.get("requested_reviewers") or [])
+        lines.append(f"From {pull['head']['ref']} into {pull['base']['ref']}"
+                     + (f"; review requested from {asked}" if asked else ""))
+    if issue.get("assignees"):
+        lines.append("Assigned to " + ", ".join(a["login"] for a in issue["assignees"]))
+    if issue.get("body"):
+        lines.append("Description: " + _cut(issue["body"], 300))
+    if is_pull and (reviews := client.get(f"{base}/pulls/{args.number}/reviews", {"per_page": 100})):
+        lines += ["Reviews:", *(f"- {r['user']['login']}: {r['state']} {_ago(r.get('submitted_at'))}"
+                                + (f": {_cut(r['body'], 300)}" if r.get("body") else "") for r in reviews[-10:])]
+    if issue.get("comments"):
+        comments = client.get(f"{base}/issues/{args.number}/comments", {"per_page": 100})
+        lines += ["Recent comments:", *(f"- {c['user']['login']} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
+                                        for c in comments[-10:])]
+    return "\n".join(lines)
+
+
+def _event(event):
+    p, who, kind = event.get("payload") or {}, (event.get("actor") or {}).get("login", "?"), event.get("type", "")
+    url = None
+    if kind == "PushEvent":
+        branch = (p.get("ref") or "").removeprefix("refs/heads/")
+        what = f"pushed {p['size']} commits to {branch}" if p.get("size") else f"pushed to {branch}"
+    elif kind in ("PullRequestEvent", "PullRequestReviewEvent") and p.get("pull_request"):
+        pull, url = p["pull_request"], p["pull_request"].get("html_url")
+        action = "merged" if p.get("action") == "closed" and pull.get("merged") else p.get("action", "")
+        if kind == "PullRequestReviewEvent":
+            action = f"reviewed ({(p.get('review') or {}).get('state', '')})"
+        what = f'{action} pull request #{pull.get("number")} "{_cut(pull.get("title"), 120)}"'
+    elif kind in ("IssuesEvent", "IssueCommentEvent") and p.get("issue"):
+        issue, url = p["issue"], p["issue"].get("html_url")
+        action = "commented on" if kind == "IssueCommentEvent" else p.get("action", "")
+        what = f'{action} issue #{issue.get("number")} "{_cut(issue.get("title"), 120)}"'
+    elif kind == "ReleaseEvent" and p.get("release"):
+        what, url = f"published release {p['release'].get('tag_name')}", p["release"].get("html_url")
+    elif kind in ("CreateEvent", "DeleteEvent"):
+        what = f"{'created' if kind == 'CreateEvent' else 'deleted'} {p.get('ref_type', '')} {p.get('ref') or ''}".strip()
+    else:
+        what = kind.removesuffix("Event").lower() or "did something"
+    return f"{_ago(event.get('created_at'))} · {who} {what}" + (f" · {url}" if url else "")
+
+
+def _repo_activity(client, args):
+    events = client.get(f"/repos/{args.repo}/events", {"per_page": 30})
+    if not events:
+        return f"No recent activity in {args.repo}."
+    return "\n".join([f"Recent activity in {args.repo}, newest first:", *map(_event, events)])
+
+
+def _repositories(client, args):
+    repos, total = repositories(client)
+    if not repos:
+        return ("The app can't see any repository yet: the user can add some from the Connected accounts page of "
+                "their Indico profile.")
+    listed = f" (the first {len(repos)} listed)" if total > len(repos) else ""
+    return "\n".join([f"The app can see {total} repositories{listed}:", *(
+        r["full_name"] + (" (private)" if r.get("private") else "")
+        + (f" · {_cut(r['description'], 100)}" if r.get("description") else "") + f" · {r['html_url']}"
+        for r in repos)])
+
+
+TOOLS = (
+    Tool("my_pull_requests", MyPullRequestsArgs, _my_pull_requests),
+    Tool("review_requests", ReviewRequestsArgs, _review_requests),
+    Tool("my_issues", MyIssuesArgs, _my_issues),
+    Tool("search", SearchArgs, _search_tool),
+    Tool("item", ItemArgs, _item),
+    Tool("repo_activity", ActivityArgs, _repo_activity),
+    Tool("repositories", RepositoriesArgs, _repositories),
+)

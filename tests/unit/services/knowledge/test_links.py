@@ -81,3 +81,27 @@ def test_menu_paths_are_relative_to_base_url(app, monkeypatch):
     monkeypatch.setattr("indico.web.menu.build_menu_structure", lambda menu_id, **kwargs: [entry])
     with app.test_request_context(base_url="https://host/indico"):
         assert list(pages._menu("top-menu")) == [("", "Settings", "/event/5/manage/")]
+
+
+# --- spec 023: a connector answer keeps only the GitHub addresses its tools returned (FR-017) ----------------
+
+GITHUB = {"https://github.com/thoth-labs/indico-assistant/pull/16"}
+
+
+def test_a_returned_github_address_is_kept_whatever_its_fragment():
+    text = ("[#16](https://github.com/thoth-labs/indico-assistant/pull/16) and "
+            "[a comment](https://github.com/thoth-labs/indico-assistant/pull/16#issuecomment-2)")
+    assert check(text, PAGES, GUIDE, BASE, urls=GITHUB) == text
+
+
+def test_any_other_link_loses_its_address_even_on_github():
+    text = ("[#99](https://github.com/thoth-labs/indico-assistant/pull/99) "
+            "[verify](https://evil.example/login) https://github.com/attacker/repo/issues/new?body=secret")
+    assert check(text, PAGES, GUIDE, BASE, urls=GITHUB) == "#99 verify"
+
+
+def test_images_are_dropped_to_their_text():
+    from indico_assistant.services.knowledge.links import strip_images
+
+    assert strip_images("![status](https://evil.example/c?q=private) ok") == "status ok"
+    assert strip_images("![x][1] and [link](https://github.com/a/b)") == "x and [link](https://github.com/a/b)"

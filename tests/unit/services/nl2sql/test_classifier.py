@@ -657,3 +657,16 @@ def test_chat_has_its_own_intent():
     from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
     assert '**chat**' in CLASSIFICATION_PROMPT
 
+
+def test_the_connector_intent_is_offered_only_while_github_is_on(
+    classifier: QueryClassifier, mock_llm_service: MagicMock
+) -> None:
+    """Spec 023: without GitHub the prompt is today's."""
+    from indico_assistant.services.nl2sql.classifier import CLASSIFICATION_PROMPT
+
+    classifier.classify("which of my PRs are open?")
+    without = mock_llm_service.generate.call_args.kwargs["prompt"]
+    classifier.classify("which of my PRs are open?", connector=True)
+    with_github = mock_llm_service.generate.call_args.kwargs["prompt"]
+    assert "**connector**" not in without and "**connector**" in with_github and "GitHub" in with_github
+    assert without.count("\n") == CLASSIFICATION_PROMPT.count("\n")  # (no line left behind)
