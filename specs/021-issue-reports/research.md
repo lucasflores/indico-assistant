@@ -120,9 +120,9 @@ cannot recognise a failure from the text (spec FR-010). A planner answer stores 
 **Alternatives considered**: matching `NOT_UNDERSTOOD` in the app. It misses every reply the model writes
 itself.
 
-**Judgement call**: a planner answer with no steps but with its own reply (`planner.py:143`), such as a
-clarifying question, counts as `not_understood`. The change did not go through, and the offer is only a button.
-Narrow it to `not draft.reply` if the offers turn out to be noise.
+**Judgement call, narrowed**: a planner answer with no steps but with its own reply (`planner.py:143`) is mostly a
+clarifying question, so it gets no `problem`. Only the planner's own `NOT_UNDERSTOOD` (no reply) does. This was
+narrowed after the second fresh review: the offer showed under "How long should it be?".
 
 ## R5. The evidence is recorded with the answer, and only admins see it
 

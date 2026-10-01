@@ -182,3 +182,13 @@ def test_the_triage_page_tells_others_nothing_about_which_reports_exist(app, db,
         for report_id in (row.id, row.id + 1000):
             with pytest.raises(Forbidden):
                 run(app, pages.RHAdminReport, viewer, report_id=report_id)
+
+
+def test_an_unknown_filter_value_drops_only_itself(app, db, users, rendered):
+    # (second fresh review, PR #16: one bad value cleared both filters)
+    closed = filed(db, users['makoto'])
+    closed.status = 'closed'
+    filed(db, users['makoto'])
+    db.session.flush()
+    run(app, pages.RHAdminReports, users['lucas'], query={'status': 'closed', 'category': 'typo'})
+    assert rendered['filters'] == {'status': 'closed', 'category': None} and rendered['reports'] == [closed]

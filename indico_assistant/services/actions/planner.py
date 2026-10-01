@@ -146,8 +146,9 @@ def _apply(draft, user, chat_session_id, open_plan, enabled, calls, settings, to
             return PlanTurn(outcome_message(ran), problem=None if ran.status == 'done' else 'cannot_do')
     elif draft.decision in ('unrelated', 'confirm', 'cancel'):
         return PlanTurn('', handled=False)
-    if not draft.steps:  # (a clarifying reply too: nothing was planned. Narrow to `not draft.reply` if noisy)
-        return PlanTurn(draft.reply or NOT_UNDERSTOOD, cannot_plan=True, problem='not_understood')
+    if not draft.steps:  # the model's own reply here is mostly a clarifying question: no problem (fresh review)
+        return PlanTurn(draft.reply or NOT_UNDERSTOOD, cannot_plan=True,
+                        problem=None if draft.reply else 'not_understood')
 
     try:
         resolved = resolve.draft_to_plan(draft, user, chat_session_id=chat_session_id, open_plan=open_plan,

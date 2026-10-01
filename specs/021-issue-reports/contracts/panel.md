@@ -46,8 +46,8 @@ the forms, offers and "Report sent" carry no thumbs (spec FR-007a).
 
 - **draft**: Send is disabled until a category is chosen and the text isn't blank;
 - **sending**: Send is disabled, so a second click does nothing (and R8 guards the server);
-- **sent**: "Report #12 sent. See your reports." The link is absolute to Indico, so `indico_panel.js` opens it
-  in the page;
+- **sent**: "Report #12 sent. Open it in your profile." The link, to that report's page, is absolute to Indico, so
+  `indico_panel.js` opens it in the page;
 - **error**: the message, with the text kept.
 
 The categories are toggle buttons (`aria-pressed`) in a labelled `role="group"`. The result line is

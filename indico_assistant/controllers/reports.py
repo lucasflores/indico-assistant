@@ -30,6 +30,12 @@ class RHReportsAPI(RHChatBase):
         if session.user is not None:  # the Indico cookie came with it (a token call carries none)
             super()._check_csrf()
 
+    def _refused(self, error):
+        """A ReportError as the API answers it (a 429 is raised, with its Retry-After)."""
+        if error.status == 429:
+            raise self._rate_limit_error(error.retry_after) from None
+        return self._error_response(error.code, error.message, error.details, status=error.status)
+
 
 class RHReportCreate(RHReportsAPI):
     """POST /reports: send a report (spec 021 US1). The limit counts only a report that is stored (R8)."""
@@ -38,9 +44,7 @@ class RHReportCreate(RHReportsAPI):
         try:
             report, created = reports.create_report(self.user, request.get_json(silent=True))
         except reports.ReportError as error:
-            if error.status == 429:
-                raise self._rate_limit_error(error.retry_after) from None
-            return self._error_response(error.code, error.message, error.details, status=error.status)
+            return self._refused(error)
         return jsonify({'report_id': report.id, 'url': reports.report_url(report.id)}), 201 if created else 200
 
 
@@ -81,9 +85,6 @@ class RHAdminReportsAPI(RHReportsAPI):
 
     ADMIN_ONLY = True
     RATE_LIMIT = "read"
-
-    def _refused(self, error):
-        return self._error_response(error.code, error.message, error.details, status=error.status)
 
 
 class RHAdminReportList(RHAdminReportsAPI):

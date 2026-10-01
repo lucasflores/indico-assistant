@@ -639,6 +639,7 @@ async def on_report_submit(action: cl.Action):
         return {"ok": False, "message": "The assistant service could not be reached, so please try again shortly."}
     if response.status_code in (200, 201):
         sent = response.json()
+        (cl.user_session.get("report_forms") or {}).pop(payload.get("form_key"), None)  # (no Cancel will come now)
         return {"ok": True, "report_id": sent["report_id"], "url": sent["url"]}
     return {"ok": False, "message": _report_refusal(response)}
 

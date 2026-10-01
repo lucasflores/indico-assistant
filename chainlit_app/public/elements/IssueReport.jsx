@@ -44,7 +44,7 @@ export default function IssueReport() {
   if (state === "sent") {
     return (
       <div data-issue="sent" role="status" aria-live="polite" className="p-3 border rounded-md text-sm">
-        Report #{result.report_id} sent. <a href={result.url} className="underline">See your reports</a>
+        Report #{result.report_id} sent. <a href={result.url} className="underline">Open it in your profile</a>
       </div>
     )
   }
