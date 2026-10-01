@@ -124,6 +124,9 @@
 | `search(kind, query)` | `/search/issues` with `is:pr` or `is:issue` + the query: one kind per call, as app tokens require |
 | `item(repo, number)` | `/repos/{repo}/issues/{n}`, plus its last 10 comments. For a pull request, also `/pulls/{n}` and `/pulls/{n}/reviews` |
 | `repo_activity(repo)` | `/repos/{repo}/events`, the last 30, summarised by type |
+
+A `repo` is `owner/name` or a bare name. A bare name is resolved among the repositories the app can see for this user
+(live run 1: "in ibis-routing"). Several matches, or none, come back as a GitHub error naming them.
 | `repositories()` | `/user/installations`, then `/user/installations/{id}/repositories` (capped at 100) |
 
 - **The result text:** each item is one line with its number, repository, title, state, age, review state and
@@ -144,9 +147,13 @@ llm_calls, urls)`.
 **Each step is one `llm.generate(prompt, Step, system_prompt=RULES, messages=history)`:**
 - The prompt holds the tools' descriptions, everything looked up so far, and the latest message.
 - Each result is wrapped in `<github_data>…</github_data>`, with any closing tag inside it escaped (FR-016).
-- `Step` is `call: <one tool's Args, discriminated on tool> | None` and `answer: str | None`. It is built once from
-  the tools, with `create_model`.
-- A step with neither field is an error, which instructor retries.
+- `Step` is `call: <one tool's Args> | None` and `answer: str | None`. It is built once from the tools, with
+  `create_model`.
+  - It is a plain union (`anyOf`). A discriminated one (`oneOf` + `discriminator`) breaks providers that accept only
+    part of JSON Schema. Each member's literal `tool` still picks it.
+  - A step with neither field is an error, which instructor retries.
+- **The first call is a `Lookup`:** a tool call, never an answer. The router sent the question to GitHub (live run 1:
+  a follow-up answered from memory and invented two reviewers).
 
 **Bounds** (FR-014), in the same order as ibis-routing's `ToolLoopGenerator`:
 - At most 3 tool steps. The 4th call is always `Final(reply)`, so the model must answer.
@@ -154,6 +161,9 @@ llm_calls, urls)`.
   isn't run again.
 - Each result is cut to 4,000 characters.
 - A `GitHubError` becomes the result text "GitHub error: …". The model then says so; it never invents a result.
+  Any other error in a tool fails that lookup ("The lookup failed."), not the answer.
+- A step that fails (its output never validated, or the call failed) goes straight to `Final`, answering from what
+  is there, and the cause is logged. The answer fails only when `Final` fails too (live run 1).
 
 **The rules text says:**
 - answer from the GitHub data;
