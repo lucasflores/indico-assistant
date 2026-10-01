@@ -230,7 +230,8 @@ class SettingsForm(IndicoForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         from indico_assistant.services.connectors.github import callback_url
-        self.github_client_id.description = (f"Register the GitHub App with the callback URL {callback_url()} and "
+        self.github_client_id.description = (f"Register the GitHub App with the Redirect URI {callback_url()} (GitHub's "
+                                             "docs call it the callback URL) and "
                                              "read-only Metadata, Issues and Pull requests permissions.")
 
     @property

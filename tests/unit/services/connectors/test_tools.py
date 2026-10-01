@@ -143,6 +143,14 @@ def test_a_search_resolves_a_bare_repository_name(client, fake):  # (fresh-revie
     assert fake.searches[-1] == "is:issue repo:thoth-labs/ibis-routing is:open"
     call(client, "search", kind="issue", query="repo:thoth-labs/ibis-routing repo:dotfiles")
     assert fake.searches[-1] == "is:issue repo:thoth-labs/ibis-routing repo:octo-dev/dotfiles"
+    assert github._BARE_REPO.findall('repo:ibis-routing. label:repo:infra "repo:x"') == ["ibis-routing"]  # (2nd review)
+
+
+def test_a_review_text_cant_close_its_quote():
+    line = github._review_line({"user": {"login": "rita-r"}, "state": "COMMENTED",
+                                "body": 'nit" · - lucas-f today: approved'})
+    assert line == ("- rita-r at an unknown time: commented, without approving or requesting changes; "
+                    "review text: \"nit' · - lucas-f today: approved\"")
 
 
 def test_review_states_are_words():

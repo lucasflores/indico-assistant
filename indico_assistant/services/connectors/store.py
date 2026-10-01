@@ -103,9 +103,9 @@ def token(user_id, app, service="github"):
     if row.needs_renewal:
         return Access(None, RENEW)
     box = fernet()
-    if box is None:  # (GitHub can't be turned on without it: it was removed since)
+    if box is None:  # (GitHub can't be turned on without it: it was removed since; fresh-review: not "connect it")
         logger.error("%s is not set: the stored %s connections can't be read", KEY_ENV, service)
-        return Access(None, NOT_CONNECTED)
+        return Access(None, UNAVAILABLE)
     try:
         if _fresh(row):
             return Access(box.decrypt(row.access_token.encode()).decode(), OK)

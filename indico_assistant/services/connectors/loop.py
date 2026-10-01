@@ -178,8 +178,9 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
     return result
 
 
-CONNECT_REPLY = ("I can read your GitHub (your pull requests, the reviews waiting for you, and your issues) once you "
-                 "connect it: [Connect GitHub]({url}) on the Connected accounts page of your profile.")
+CONNECT_REPLY = ("I can read your GitHub (your pull requests, the reviews waiting for you, your issues, searches, any "
+                 "issue or pull request in full, and a repository's activity) once you connect it: "
+                 "[Connect GitHub]({url}) on the Connected accounts page of your profile.")
 RENEW_REPLY = ("GitHub no longer accepts your connection, so I can't read it right now. [Connect it again]({url}) on "
                "the Connected accounts page of your profile.")
 UNAVAILABLE_REPLY = "GitHub couldn't be reached just now, so I can't read it. Please try again in a moment."

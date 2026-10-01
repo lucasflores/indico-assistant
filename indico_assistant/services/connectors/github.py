@@ -430,8 +430,8 @@ def _my_issues(client, args):
                    "issues assigned to the user", args.page)
 
 
-#: A ``repo:`` qualifier without an owner, which GitHub's search refuses
-_BARE_REPO = re.compile(r"\brepo:([\w.-]+)(?![\w./-])")
+#: A ``repo:`` qualifier without an owner, which GitHub's search refuses: a word of its own, without a trailing "."
+_BARE_REPO = re.compile(r"(?<!\S)repo:([\w.-]*[\w-])(?![\w/-])")
 
 
 def _search_tool(client, args):
@@ -439,6 +439,13 @@ def _search_tool(client, args):
     query = _BARE_REPO.sub(lambda m: "repo:" + _full(client, m.group(1)), args.query)  # (fresh-review: as my_issues)
     return _search(client, f"{kind} {query}", "pull requests" if args.kind == "pull_request" else "issues",
                    args.page)
+
+
+def _review_line(review):
+    """Who, when, the state in words, then the text in quotes that it can't close (fresh-review: a forged state)."""
+    body = _cut(review["body"], 300).replace('"', "'") if review.get("body") else ""
+    return (f"- {_login(review.get('user'))} {_ago(review.get('submitted_at'))}: {_review(review.get('state'))}"
+            + (f'; review text: "{body}"' if body else ""))
 
 
 def _item(client, args):
@@ -457,8 +464,7 @@ def _item(client, args):
         lines.append("Description: " + _cut(issue["body"], 300))
     if is_pull and (reviews := client.newest(f"{base}/pulls/{args.number}/reviews")):
         lines.append("Newest reviews:")
-        lines += [f"- {_login(r.get('user'))} {_ago(r.get('submitted_at'))}: {_review(r.get('state'))}"
-                  + (f'; review text: "{_cut(r["body"], 300)}"' if r.get("body") else "") for r in reviews]
+        lines += [_review_line(r) for r in reviews]
     if issue.get("comments"):
         comments = client.newest(f"{base}/issues/{args.number}/comments")
         lines += ["Newest comments:", *(f"- {_login(c.get('user'))} {_ago(c.get('created_at'))}: {_cut(c['body'], 300)}"
