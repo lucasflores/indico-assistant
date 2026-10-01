@@ -4,6 +4,9 @@
    connection and can remove it, but no repositories: the page never reads GitHub as another user. #}
 
 {% block user_content %}
+    <style>
+        .assistant-repos { list-style: disc; padding-left: 1.5em; margin: 0.4em 0 0.8em; }
+    </style>
     <div class="i-box">
         <div class="i-box-header">
             <div class="i-box-title">GitHub</div>
@@ -41,7 +44,7 @@
                 {% endif %}
                 {% if repos is not none %}
                     <h4>Repositories the assistant can see ({{ repo_count }})</h4>
-                    <ul>
+                    <ul class="assistant-repos">
                         {% for repo in repos %}
                             <li><a href="{{ repo.html_url }}" target="_blank" rel="noopener">{{ repo.full_name }}</a>{% if repo.private %} <span class="text-superfluous">private</span>{% endif %}</li>
                         {% else %}
