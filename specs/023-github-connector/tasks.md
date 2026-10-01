@@ -19,8 +19,10 @@ runs (T042, T043) happen only after Lucas says go.
 
 ## Phase 1: Setup
 
-- [ ] T001 The baseline on this branch at its rebase on `57b103b`: `pytest tests/unit tests/contract`, and all of
-  `pytest tests`. Record the counts here. Known failures on main: 7, all in `test_chat_citations.py`.
+- [x] T001 The baseline on this branch at its rebase on `57b103b` (2026-09-30):
+  - `pytest tests/unit tests/contract`: 1350 passed, 1 skipped;
+  - `pytest tests`: 2008 passed, 27 skipped, 7 failed. All 7 failures are in `test_chat_citations.py`, the known
+    baseline on main.
 - [ ] T002 [P] `pyproject.toml`: declare `cryptography` (the plugin imports it).
 - [ ] T003 [P] Settings (plan, Design 1).
   - `default_settings.py`: `github_enabled`, `github_client_id`, `github_client_secret`, `github_app_url`,
