@@ -140,11 +140,14 @@ def test_github_on_says_whether_this_user_is_connected(people, monkeypatch):
     text = _caps(people["manager"], settings=on).render()
     assert "It can read their GitHub" in text and "not connected it" in text and "Connected accounts" in text
     assert "no access to GitHub" not in text and "never changes anything on GitHub" in text
-    assert "searches of issues" in text and "recent activity" in text and "Add repositories or organisations" in text
+    assert "searches of issues" in text and "recent activity" in text and "where the app is installed" not in text
     monkeypatch.setenv(store.KEY_ENV, Fernet.generate_key().decode())
     store.save(people["manager"].id, "github", Account(1001, "octo-dev"), Tokens("ghu_x", None, None, None))
     db.session.flush()
-    assert "connected as @octo-dev" in _caps(people["manager"], settings=on).render()
+    text = _caps(people["manager"], settings=on).render()
+    assert "connected as @octo-dev" in text and "where the app is installed." in text and "Add repos" not in text
+    text = _caps(people["manager"], settings={**on, "github_app_url": "https://github.com/apps/x"}).render()
+    assert "“Add repositories or organisations” link" in text and "an organisation they own" in text
     store.renew(people["manager"].id)  # (fresh-review: not "not connected", but needing renewal)
     text = _caps(people["manager"], settings=on).render()
     assert "(@octo-dev) needs renewing" in text and "not connected" not in text

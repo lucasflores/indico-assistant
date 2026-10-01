@@ -33,6 +33,7 @@ class CapabilityList:
     changes_enabled: bool
     github: str | None = None  # spec 023: None while GitHub is off; else their login, or "" when not connected
     github_renew: bool = False  # their connection needs renewing (GitHub refused it)
+    github_add: bool = False  # the Connected accounts page shows the "Add repositories or organisations" link
 
     def render(self):
         lines = [f"You are talking to {self.user_name}{' (an Indico administrator)' if self.is_admin else ''}."]
@@ -66,13 +67,16 @@ class CapabilityList:
         else:
             lines.append("It can read their GitHub, read-only (their pull requests, the reviews waiting for them, "
                          "issues assigned to them, searches of issues and pull requests, one issue or pull request "
-                         "in full, a repository's recent activity, the repositories it can see). An organisation's "
-                         "repositories appear once they add the app to it, with the “Add repositories or "
-                         "organisations” link on the Connected accounts page. "
+                         "in full, a repository's recent activity, the repositories it can see). "
                          + (f"Their connection (@{self.github}) needs renewing, which they can do on the Connected "
                             "accounts page of their profile." if self.github and self.github_renew else
                             f"They are connected as @{self.github}." if self.github else "They have not connected it "
                             "yet, which they can do on the Connected accounts page of their profile."))
+            if self.github:  # (fresh-review: the link is on the page only once they are connected, and set up)
+                lines.append("It sees only the accounts and organisations where the app is installed"
+                             + (": they can add their own account, or an organisation they own, with the “Add "
+                                "repositories or organisations” link on the Connected accounts page; any other "
+                                "organisation's owners must approve it." if self.github_add else "."))
             lines.append("Never, for anyone: " + "; ".join(NEVER) + ". It never changes anything on GitHub, and has "
                          "no access to email inboxes or calendars outside Indico.")
         return "\n".join(lines)
@@ -132,7 +136,9 @@ def capability_list(user, event=None, settings=None):
         row = connection(user.id)
         github = row.account_login if row is not None else ""
         github_renew = bool(row is not None and row.needs_renewal)
+    github_add = bool(settings.get("github_app_url"))
     return CapabilityList(user_name=user.full_name, is_admin=bool(user.is_admin),
                           data_questions=bool(settings.get("nl2sql_enabled", True)), create_in=create_in,
                           propose_in=propose_in, can=can, cannot=cannot, event=event_info,
-                          changes_enabled=bool(enabled), github=github, github_renew=github_renew)
+                          changes_enabled=bool(enabled), github=github, github_renew=github_renew,
+                          github_add=github_add)
