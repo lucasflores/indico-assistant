@@ -45,13 +45,18 @@ def _key(path):
     return path.rstrip("/") or "/"
 
 
-def check(text, pages, guide_urls, base_url):
-    """``text`` with every link checked. ``pages``: paths the user can open; ``guide_urls``: the copy's pages."""
+def check(text, pages, guide_urls, base_url, urls=()):
+    """``text`` with every link checked. ``pages``: paths the user can open; ``guide_urls``: the copy's pages;
+    ``urls``: addresses kept exactly as they are, whatever their fragment (a connector answer's GitHub items, spec
+    023 FR-017: only what its tools returned, so a text read on GitHub can't plant a link)."""
     known = {_key(p): p for p in pages}
+    exact = {u.split("#")[0] for u in urls}
     base = base_url.rstrip("/")
     host, root = urlsplit(base).netloc, urlsplit(base).path
 
     def resolve(url):
+        if url.split("#")[0] in exact:
+            return url
         parts = urlsplit(url)
         anchor = f"#{parts.fragment}" if parts.fragment else ""
         if parts.netloc == GUIDE_HOST:
@@ -77,3 +82,12 @@ def check(text, pages, guide_urls, base_url):
         return f"{space}{new}{tail}" if (new := resolve(bare)) else tail
 
     return _LINK.sub(replace, text)
+
+
+_IMAGE = re.compile(r"!\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
+
+
+def strip_images(text):
+    """Every markdown image becomes its text: an image is fetched as soon as the answer is shown, so its address
+    could carry private text away (spec 023 FR-017)."""
+    return _IMAGE.sub(r"\1", text)

@@ -71,6 +71,17 @@ QUESTIONS = {
                                "question is it?"},
 }
 
+#: Spec 023: offered as a sixth route only while an admin has GitHub turned on (the questions are otherwise today's).
+CONNECTOR = ("A question about the user's own GitHub account: their pull requests, the reviews waiting for them, "
+             "issues assigned to them, their repositories, or recent activity on GitHub.")
+
+
+def questions(connector=False):
+    """What Jev is asked: ``QUESTIONS`` itself, or (GitHub on) a copy whose routes add ``connector``."""
+    if not connector:
+        return QUESTIONS
+    return {**QUESTIONS, "route": {**QUESTIONS["route"], "criteria": {**ROUTES, "connector": CONNECTOR}}}
+
 
 @dataclass
 class Decision:
@@ -136,8 +147,9 @@ def _dict(value):
     return value if isinstance(value, dict) else {}
 
 
-def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_http):
-    """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision."""
+def decide(messages, settings, *, plan_waiting=False, offer=None, connector=False, transport=_http):
+    """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision.
+    ``connector``: GitHub is on, so ``connector`` is one of the routes (spec 023)."""
     import httpx
 
     key = settings.get("jev_api_key")
@@ -145,7 +157,8 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_htt
         return _skipped("no key")
     timeout = float(settings.get("jev_timeout_seconds") or 1.5)
     try:
-        payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": QUESTIONS}
+        asked = questions(connector)
+        payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": asked}
     except ValueError:
         return _skipped("error")
     global _pool
@@ -166,8 +179,9 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, transport=_htt
     cost = _dict(_dict(body).get("usage")).get("cost")
     route, intent = _dict(answers.get("route")), _dict(answers.get("intent"))
     choice, probabilities = route.get("choice"), _dict(route.get("probabilities"))
-    if (not isinstance(choice, str) or choice not in ROUTES or not probabilities
-            or any(k not in ROUTES or _number(v) is None for k, v in probabilities.items())):
+    routes = asked["route"]["criteria"]
+    if (not isinstance(choice, str) or choice not in routes or not probabilities
+            or any(k not in routes or _number(v) is None for k, v in probabilities.items())):
         return _skipped("invalid", ms, cost)
     if ms > timeout * 1000:  # late: it does not decide
         return _skipped("timeout", ms, cost)

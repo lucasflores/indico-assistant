@@ -65,6 +65,10 @@ class PipelineResult(BaseModel):
         default=False,
         description="Spec 022: answerable from the conversation; the chat answer answers it",
     )
+    connector_request: bool = Field(
+        default=False,
+        description="Spec 023: about the user's own GitHub; the connector route answers it",
+    )
     answer: str | None = Field(
         default=None, description="Natural language answer to the question"
     )

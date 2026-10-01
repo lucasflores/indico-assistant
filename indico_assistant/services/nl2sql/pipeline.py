@@ -330,6 +330,7 @@ class NL2SQLPipeline:
         conversation_history: list[dict[str, str]] | None = None,
         intent: str | None = None,
         intent_confidence: float | None = None,
+        connector: bool = False,
         _trace: dict[str, Any] | None = None,
     ) -> PipelineResult:
         """
@@ -337,6 +338,8 @@ class NL2SQLPipeline:
 
         ``intent``: the kind of question when the router (Jev, spec 022) already decided it; the classifier is then
         not called, and the SQL generator reads dates and names from the question itself.
+
+        ``connector``: GitHub is on (spec 023), so the classifier may find a question about the user's GitHub.
 
         This is the main entry point for the NL2SQL pipeline. It:
         1. Creates audit log entry (T050)
@@ -403,7 +406,8 @@ class NL2SQLPipeline:
                 # Step 2: Classify the question (T025)
                 classify_start = time.time()
                 with self._span("query_classification") as classify_span:
-                    classification_response = self._classifier.classify(question)
+                    classification_response = self._classifier.classify(
+                        question, **({"connector": True} if connector else {}))
                     classification_time = int((time.time() - classify_start) * 1000)
                 
                     # Update span with result (T030)
@@ -460,6 +464,11 @@ class NL2SQLPipeline:
             # Answerable from the conversation: the chat answer (spec 022)
             if classification.intent == "chat":
                 return PipelineResult(success=True, chat_request=True,
+                                      total_time_ms=int((time.time() - start_time) * 1000),
+                                      classification_time_ms=classification_time)
+            # About the user's own GitHub: the connector route (spec 023), offered only while GitHub is on
+            if classification.intent == "connector" and connector:
+                return PipelineResult(success=True, connector_request=True,
                                       total_time_ms=int((time.time() - start_time) * 1000),
                                       classification_time_ms=classification_time)
 

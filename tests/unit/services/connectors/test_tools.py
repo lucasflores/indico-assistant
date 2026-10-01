@@ -1,0 +1,121 @@
+"""The seven read tools (spec 023 FR-015, T020), against the fake GitHub: what each asks, and what it returns."""
+
+import re
+
+import pytest
+from pydantic import ValidationError
+
+from indico_assistant.services.connectors import github
+from indico_assistant.services.connectors.fake_github import FakeGitHub
+from indico_assistant.services.connectors.github import TOOLS, GitHubClient, GitHubError, OAuthApp
+
+
+@pytest.fixture
+def fake(tmp_path):
+    return FakeGitHub(tmp_path / "fake.json")
+
+
+@pytest.fixture
+def client(fake):
+    tokens = OAuthApp("Iv1.fake", "fake-secret", transport=fake.transport()).exchange("fake-code", "v", "https://cb")
+    return GitHubClient(tokens.access, transport=fake.transport())
+
+
+def call(client, name, **arguments):
+    (tool,) = [t for t in TOOLS if t.name == name]
+    return tool.run(client, tool.args(tool=name, **arguments))
+
+
+def numbers(text):
+    return sorted(int(n) for n in re.findall(r"^#(\d+) ", text, re.M))
+
+
+def test_there_are_seven_tools_each_described_with_a_literal_name():
+    assert [t.name for t in TOOLS] == ["my_pull_requests", "review_requests", "my_issues", "search", "item",
+                                       "repo_activity", "repositories"]
+    for tool in TOOLS:
+        assert tool.description and tool.args.model_fields["tool"].annotation.__args__ == (tool.name,)
+
+
+def test_my_open_pull_requests(client, fake):
+    text = call(client, "my_pull_requests")
+    assert numbers(text) == [16, 17, 30] and fake.searches[-1] == "is:pr author:@me is:open"
+    assert "https://github.com/thoth-labs/indico-assistant/pull/16" in text and "(draft)" in text  # (#17)
+
+
+@pytest.mark.parametrize(("state", "expected", "query"), [
+    ("merged", [12], "is:pr author:@me is:merged"),
+    ("closed", [28], "is:pr author:@me is:closed is:unmerged"),
+    ("all", [12, 16, 17, 28, 30], "is:pr author:@me"),
+])
+def test_my_pull_requests_by_state(client, fake, state, expected, query):
+    assert numbers(call(client, "my_pull_requests", state=state)) == expected and fake.searches[-1] == query
+
+
+def test_one_repository_only(client, fake):
+    assert numbers(call(client, "my_pull_requests", repo="thoth-labs/ibis-routing")) == [30]
+    assert fake.searches[-1] == "is:pr author:@me is:open repo:thoth-labs/ibis-routing"
+
+
+def test_reviews_waiting_on_me(client, fake):
+    assert numbers(call(client, "review_requests")) == [15, 18, 31]
+    assert fake.searches[-1] == "is:pr is:open review-requested:@me"
+
+
+def test_my_issues(client, fake):
+    assert numbers(call(client, "my_issues")) == [8, 20, 40] and fake.searches[-1] == "is:issue assignee:@me is:open"
+    assert numbers(call(client, "my_issues", state="closed")) == [5]
+    assert numbers(call(client, "my_issues", repo="thoth-labs/ibis-routing")) == [40]
+
+
+def test_search_asks_for_one_kind(client, fake):
+    assert numbers(call(client, "search", kind="issue", query="today")) == [8]
+    assert fake.searches[-1] == "is:issue today"
+    assert numbers(call(client, "search", kind="pull_request", query="router")) == [15]
+    assert fake.searches[-1] == "is:pr router"
+
+
+def test_nothing_found_says_so(client):
+    assert "No " in call(client, "search", kind="issue", query="no-such-word")
+
+
+def test_a_pull_request_in_full(client):
+    text = call(client, "item", repo="thoth-labs/indico-assistant", number=16)
+    assert "Issue reports from the chat" in text and "open" in text
+    assert "makoto-k: CHANGES_REQUESTED" in text and "Please split the migration" in text  # (the reviews)
+    assert "The form looks good on desktop." in text  # (the comments)
+
+
+def test_an_issue_has_no_reviews(client, fake):
+    text = call(client, "item", repo="thoth-labs/indico-assistant", number=8)
+    assert "It uses UTC" in text and "Reviews" not in text
+    assert not any("/pulls/" in path for _, path in fake.calls)
+
+
+def test_a_repository_the_app_cant_see_raises(client):
+    with pytest.raises(GitHubError) as error:
+        call(client, "item", repo="thoth-labs/secret-infra", number=3)
+    assert error.value.status == 404
+
+
+def test_a_repositorys_recent_activity(client):
+    text = call(client, "repo_activity", repo="thoth-labs/indico-assistant")
+    assert "opened pull request #17" in text and "v0.9.0" in text and "pushed 4 commits" in text
+    assert "https://github.com/thoth-labs/indico-assistant/pull/17" in text
+
+
+def test_the_repositories_it_can_see(client):
+    text = call(client, "repositories")
+    assert "thoth-labs/indico-assistant" in text and "octo-dev/dotfiles" in text and "secret-infra" not in text
+
+
+@pytest.mark.parametrize("repo", ["../user", "thoth-labs/..", "a/b/c", "a b/c", "thoth-labs", "./x"])
+def test_a_repository_name_cant_reach_another_endpoint(repo):
+    with pytest.raises(ValidationError):
+        github.ActivityArgs(tool="repo_activity", repo=repo)
+
+
+def test_long_text_is_cut():
+    cut = github._cut("word " * 200, 300)
+    assert len(cut) <= 301 and cut.endswith("…")
+    assert github._cut("a\n\n  b", 300) == "a b"

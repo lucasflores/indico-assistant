@@ -133,3 +133,31 @@ def test_one_deadline_for_the_whole_call():
 
 def test_a_conversation_without_a_user_message_is_skipped():
     assert gate.decide([{"role": "assistant", "content": "Hello"}], SETTINGS, transport=_transport()).skipped
+
+
+# --- spec 023: the connector route, offered only while GitHub is on ----------------------------------------
+
+def test_connector_is_offered_only_when_asked_for():
+    import json
+
+    assert gate.questions() is gate.QUESTIONS and "connector" not in gate.QUESTIONS["route"]["criteria"]
+    offered = gate.questions(connector=True)
+    assert "GitHub" in offered["route"]["criteria"]["connector"]
+    assert {k: v for k, v in offered["route"]["criteria"].items() if k != "connector"} == gate.ROUTES
+    assert offered["intent"] == gate.QUESTIONS["intent"]
+    assert json.dumps(gate.QUESTIONS, sort_keys=True) == json.dumps(gate.questions(False), sort_keys=True)
+
+
+def test_without_github_jev_sends_todays_questions():
+    sent = []
+    gate.decide(TALK, SETTINGS, transport=_transport(record=sent))
+    assert sent[0][0]["questions"] is gate.QUESTIONS
+    gate.decide(TALK, SETTINGS, connector=True, transport=_transport(record=sent))
+    assert "connector" in sent[1][0]["questions"]["route"]["criteria"]
+
+
+def test_a_connector_answer_counts_only_when_it_was_offered():
+    body = _answer("connector", probabilities={"connector": 0.9, "data": 0.1})
+    assert gate.decide(TALK, SETTINGS, transport=_transport(body)).reason == "invalid"
+    decision = gate.decide(TALK, SETTINGS, connector=True, transport=_transport(body))
+    assert (decision.route, decision.skipped) == ("connector", False)

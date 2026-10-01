@@ -183,9 +183,11 @@ class ChatService:
         # straight to the planner (but a plain no to an offer turns down the offer, not the plan); otherwise one Jev
         # decision gives the route and a data question's kind; without Jev the classifier routes, with the planner
         # first after an offer. A change the planner cannot plan gets the knowledge answer.
+        # Spec 023: while GitHub is on, Jev (or the classifier) has a sixth route, connector.
         from indico_assistant.services.actions.planner import AFFIRMATIVE, NEGATIVE, exact_reply
         from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 
+        github_on = self._github_on()
         decision, fallback, planned, answer, open_for_change = None, None, None, None, waiting_plan
         request, tried = message, False  # what the knowledge answer is asked; whether the planner was already asked
         if offer and NEGATIVE.fullmatch(message):
@@ -196,7 +198,7 @@ class ChatService:
         elif exact_reply(waiting_plan, message):
             route = "change"
         else:
-            decision = self._decide(context, plan_waiting=waiting_plan is not None, offer=offer)
+            decision = self._decide(context, plan_waiting=waiting_plan is not None, offer=offer, connector=github_on)
             route = decision.route
             if decision.skipped:  # no key, slow, or an error: the classifier routes, as before the router
                 open_for_change = None  # (a change the classifier finds is a new request)
@@ -214,6 +216,7 @@ class ChatService:
                     message, context, event_id, user_id=viewer.id, auth_user=viewer,
                     intent=decision.intent if route == "data" else None,
                     intent_confidence=decision.intent_confidence if route == "data" else None,
+                    connector=github_on,
                 )
                 route = _route_of(metadata)
             elif route == "out_of_scope":  # (spec 021 R4: a refusal carries the report offer)
@@ -227,6 +230,8 @@ class ChatService:
             answer = self._knowledge(user, request, context, event_id)
         elif route == "chat":
             answer = self._chat(message, context)
+        elif route == "connector":
+            answer = self._connector(user, message, context)
         plan = None
         if answer is not None:  # (a knowledge or chat answer that failed carries the report offer, spec 021 R4)
             response_text, metadata = answer.text, {"problem": "failed"} if answer.failed else {}
@@ -292,7 +297,7 @@ class ChatService:
             metadata["problem"] = turn.problem  # the chat offers a report under it (spec 021 R4)
         return turn.reply, metadata, turn.plan
 
-    def _decide(self, context, plan_waiting=False, offer=None):
+    def _decide(self, context, plan_waiting=False, offer=None, connector=False):
         """Jev's route for the latest message; skipped (the classifier routes) without a key, slow, or on an error."""
         from indico_assistant.plugin import AssistantPlugin
         from indico_assistant.services.knowledge import gate
@@ -301,7 +306,7 @@ class ChatService:
             settings = AssistantPlugin.instance.settings.get_all()
         except RuntimeError:  # the plugin is not active (tests, scripts): no key, so the classifier routes
             settings = {}
-        return gate.decide(context, settings, plan_waiting=plan_waiting, offer=offer)
+        return gate.decide(context, settings, plan_waiting=plan_waiting, offer=offer, connector=connector)
 
     def _chat(self, message, context):
         """The chat answer (spec 022): from the conversation, informed by general knowledge."""
@@ -310,6 +315,28 @@ class ChatService:
 
         return chat_answer(message, _history(context), llm=AssistantPlugin.instance.llm_service,
                            base_url=self._get_base_url())
+
+    @staticmethod
+    def _github_on():
+        """Spec 023: whether the connector route is offered (an admin turned GitHub on)."""
+        from indico_assistant.plugin import AssistantPlugin
+
+        try:
+            return bool(AssistantPlugin.instance.settings.get("github_enabled"))
+        except RuntimeError:  # the plugin is not active (tests, scripts)
+            return False
+
+    def _connector(self, user, message, context):
+        """The connector answer (spec 023): the user's GitHub, read with their own token."""
+        from indico.core.plugins import url_for_plugin
+
+        from indico_assistant.plugin import AssistantPlugin
+        from indico_assistant.services.connectors.loop import answer
+
+        plugin = AssistantPlugin.instance
+        return answer(user.id, message, _history(context), llm=plugin.llm_service, settings=plugin.settings.get_all(),
+                      base_url=self._get_base_url(),
+                      profile_url=url_for_plugin("assistant.user_connections", _external=True))
 
     def _get_or_create_session(
         self,
@@ -516,6 +543,7 @@ class ChatService:
         auth_user: Any = None,
         intent: str | None = None,
         intent_confidence: float | None = None,
+        connector: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         """Process message through NL2SQL pipeline with RAG enhancement.
 
@@ -558,6 +586,7 @@ class ChatService:
                 event_ids=[event_id] if event_id else None,
                 conversation_history=context,  # Feature 012: T006
                 **({"intent": intent, "intent_confidence": intent_confidence} if intent else {}),  # (routed by Jev)
+                **({"connector": True} if connector else {}),  # (spec 023: GitHub is on)
             )
 
             response_text = result.answer or ""
@@ -608,6 +637,7 @@ class ChatService:
                 "write_request": getattr(result, 'write_request', False),
                 "knowledge_request": getattr(result, 'knowledge_request', False),
                 "chat_request": getattr(result, 'chat_request', False),
+                "connector_request": getattr(result, 'connector_request', False),
                 # how the answer was made, for the team's triage of a report (spec 021 R5): recorded now, since the
                 # query log has no link to answers. Never returned to the user (sessions API, job result)
                 "evidence": {
@@ -673,6 +703,8 @@ def _route_of(metadata):
         return "knowledge"
     if metadata.get("chat_request"):
         return "chat"
+    if metadata.get("connector_request"):
+        return "connector"
     if metadata.get("write_request"):
         return "change"
     error = metadata.get("pipeline_error") or {}
@@ -683,7 +715,7 @@ def _route_record(route, answer=None, *, decision=None, fallback=None):
     """How this answer was reached (spec 022, FR-020): kept in its metadata, so routing can be audited on real
     traffic. ``decision`` is Jev's (None for the shortcut, when neither Jev nor the classifier was asked)."""
     return {
-        "route": route,  # knowledge | chat | data | change | refusal
+        "route": route,  # knowledge | chat | data | change | connector | refusal
         "jev": None if decision is None else {
             "route": decision.route, "intent": decision.intent, "confidence": decision.confidence,
             "skipped": decision.skipped, "reason": decision.reason, "ms": decision.ms, "model": decision.name,
@@ -694,4 +726,5 @@ def _route_record(route, answer=None, *, decision=None, fallback=None):
         "offer": answer.offer if answer else None,
         "guide_commit": answer.guide_commit if answer else None,
         "failed": bool(answer.failed) if answer else False,
+        "tools": getattr(answer, "tools", None),  # the connector's calls: {name, ms, ok}, never what they read
     }
