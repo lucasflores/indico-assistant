@@ -85,6 +85,10 @@ ITEMS = [
            comments=[("rita-r", 1, INJECTED[8])]),
     _issue(IR, 40, "The cost snapshot goes stale", "lucas-f", 2, assignees=[USER], labels=["bug"]),
 ]
+#: every login and account in the seed (a search naming anyone else is refused, as GitHub refuses an unknown login)
+PEOPLE = {USER, *INSTALLATIONS.values(), *(i["author"] for i in ITEMS), *(a for i in ITEMS for a in i["assignees"]),
+          *(r for i in ITEMS for r in i["requested"]), *(c[0] for i in ITEMS for c in i["comments"]),
+          *(r[0] for i in ITEMS for r in i["reviews"])}
 #: repo -> [(type, actor, age in days, payload)]; the API's newest first
 EVENTS = {
     IA: [
@@ -262,11 +266,23 @@ class FakeGitHub:
         kind = next((w for w in words if w in ("is:pr", "is:pull-request", "type:pr", "is:issue", "type:issue")), None)
         if kind is None:  # (a GitHub App's user token can't search both at once)
             return self._error(422, "Query must include 'is:issue' or 'is:pull-request'")
+        if any(self._unsearchable(w) for w in words):  # (as GitHub: a repository or login the token can't see)
+            return self._error(422, "The listed users and repositories cannot be searched either because the "
+                                    "resources do not exist or you do not have permission to view them.")
         found = [i for i in ITEMS if _visible(i["repo"]) and i["pr"] == ("issue" not in kind)
                  and all(self._matches(i, w) for w in words if w != kind)]
         found.sort(key=lambda i: i["age"])
         return httpx.Response(200, json={"total_count": len(found), "incomplete_results": False,
                                          "items": [_issue_json(i) for i in found[:per_page]]})
+
+    @staticmethod
+    def _unsearchable(word):
+        key, _, value = word.partition(":")
+        if key == "repo":
+            return not _visible(value)
+        if key in ("author", "assignee", "review-requested", "involves", "user", "org"):
+            return value != "@me" and value not in PEOPLE
+        return False
 
     @staticmethod
     def _matches(item, word):

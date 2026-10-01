@@ -110,3 +110,13 @@ def test_revoking_the_grant_drops_the_tokens(fake):
     OAuthApp("Iv1.fake", "fake-secret", transport=fake.transport()).revoke(tokens.access)
     with pytest.raises(GitHubError):
         gh(fake, tokens.access).get("/user")
+
+
+
+def test_a_search_naming_what_the_token_cant_see_is_refused(fake):
+    """As GitHub's search does (422), so the model hears it can't see a repository rather than "none found"."""
+    for q in ("is:issue repo:thoth-labs/secret-infra", "is:pr author:rita", "is:pr review-requested:nobody"):
+        with pytest.raises(GitHubError) as error:
+            search(fake, q)
+        assert error.value.status == 422 and "cannot be searched" in error.value.message
+    assert search(fake, "is:pr author:rita-r") == [("thoth-labs/ibis-routing", 31)]

@@ -109,7 +109,7 @@ def test_the_repositories_it_can_see(client):
     assert "thoth-labs/indico-assistant" in text and "octo-dev/dotfiles" in text and "secret-infra" not in text
 
 
-@pytest.mark.parametrize("repo", ["../user", "thoth-labs/..", "a/b/c", "a b/c", "thoth-labs", "./x"])
+@pytest.mark.parametrize("repo", ["../user", "thoth-labs/..", "a/b/c", "a b/c", "..", ".", "./x", ""])
 def test_a_repository_name_cant_reach_another_endpoint(repo):
     with pytest.raises(ValidationError):
         github.ActivityArgs(tool="repo_activity", repo=repo)
@@ -119,3 +119,19 @@ def test_long_text_is_cut():
     cut = github._cut("word " * 200, 300)
     assert len(cut) <= 301 and cut.endswith("…")
     assert github._cut("a\n\n  b", 300) == "a b"
+
+
+
+# --- live run 1: a repository named without its owner ------------------------------------------------------
+
+def test_a_bare_repository_name_is_one_of_the_users_repositories(client, fake):
+    assert numbers(call(client, "my_issues", repo="ibis-routing")) == [40]
+    assert fake.searches[-1] == "is:issue assignee:@me is:open repo:thoth-labs/ibis-routing"
+    assert "Issue reports from the chat" in call(client, "item", repo="indico-assistant", number=16)
+    assert "Recent activity in thoth-labs/ibis-routing" in call(client, "repo_activity", repo="IBIS-routing")
+
+
+def test_a_bare_name_the_app_cant_see_says_which_it_can(client):
+    with pytest.raises(GitHubError) as error:
+        call(client, "item", repo="secret-infra", number=3)
+    assert error.value.status == 404 and "thoth-labs/indico-assistant" in error.value.message
