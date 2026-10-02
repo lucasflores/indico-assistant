@@ -452,3 +452,21 @@ def test_other_turns_keep_their_text(routed):
     s.decide.return_value = jev("knowledge")
     turn = _in_a_turn(run)
     assert turn.private is False and list(turn.texts) == [(1, "prompt")]
+
+
+def test_the_answer_is_linked_to_its_turn_before_the_answer_is_committed(routed):
+    """Review of #21 (FR-007): in the answer's own transaction, so a vote always finds its turn."""
+    run, s = routed
+    s.manager.holds_connector_answer.return_value = False
+    s.decide.return_value = jev("knowledge")
+    seen = {}
+    s.manager.commit.side_effect = lambda: seen.setdefault("at_commit", dict(turn.fields))
+    from indico_assistant.services.analytics import recorder
+
+    turn = recorder._Turn(1, text_on=True)
+    token = recorder._current.set(turn)
+    try:
+        run()
+    finally:
+        recorder._current.reset(token)
+    assert seen["at_commit"]["answer_id"] == s.manager.add_assistant_message.return_value.id
