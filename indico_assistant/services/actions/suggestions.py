@@ -64,10 +64,15 @@ def build_context(user, topic, chat_session_id=None, history=()):
         key = f'event:{event.id}'
         date = f'{event.start_dt:%d %b %Y}'
         context.sources[key] = {'type': 'event', 'label': f'“{event.title}”, {date}', 'event_id': event.id}
-        people = {link.full_name: link.email for link in event.person_links}
-        people |= {link.full_name: link.email for c in event.contributions if not c.is_deleted
-                   for link in c.person_links if link.is_speaker}
-        context.attendees[key] = people
+        links = [*event.person_links, *(link for c in event.contributions if not c.is_deleted
+                                        for link in c.person_links if link.is_speaker)]
+        people = dict.fromkeys(link.full_name for link in links)
+        # who may be offered as an invitee, with their email: Indico shows a guest's email (no Indico account) only
+        # to the event's managers (events/api.py); an Indico user's is what its user search shows anyone who may
+        # create events, and only they get a new meeting planned
+        manages = event.can_manage(user)
+        context.attendees[key] = {link.full_name: link.email for link in links
+                                  if link.person.user_id is not None or manages}
         minutes = int((event.end_dt - event.start_dt).total_seconds() // 60)
         context.sources[key]['minutes'] = minutes
         lines.append(f'[{key}] Meeting “{event.title}” on {date}, {minutes} minutes. '

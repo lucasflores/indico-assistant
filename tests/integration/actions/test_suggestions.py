@@ -197,3 +197,42 @@ def test_an_accepted_link_survives_a_revision():
         {'action': 'create_meeting', 'when': {}, 'links': ['https://indico.example/q3']}]})
     assert _only_what_the_user_asked_for(draft, ['make it an hour'], open_plan).steps[0].links == [
         'https://indico.example/q3']
+
+
+def test_a_guests_email_is_only_offered_to_the_events_managers(db, people, create_event, create_user):
+    """Indico shows a guest's email (no Indico account) only to the event's managers; an Indico user's email is
+    what its user search shows anyone who may create events."""
+    from indico.modules.events.models.persons import EventPerson, EventPersonLink
+    lucas = people['manager']
+    when = now_utc() - timedelta(days=20)
+    q2 = create_event(title='Q2 budget review', start_dt=when, end_dt=when + timedelta(minutes=30),
+                      creator=create_user(81))
+    q2.update_principal(lucas, permissions={'submit'})  # linked to him, not his to manage
+    q2.person_links.append(EventPersonLink(person=EventPerson.for_user(people['makoto'], q2)))
+    q2.person_links.append(EventPersonLink(person=EventPerson(event=q2, first_name='Gina', last_name='Guest',
+                                                              email='gina@guest.example')))
+    db.session.flush()
+    with acting_as(lucas):
+        context = suggestions.build_context(lucas, REQUEST)
+    assert context.attendees[f'event:{q2.id}'] == {'Makoto Tanaka': 'makoto@aithoth.com'}
+    assert 'Gina Guest' in context.text  # her name is on the event page; only her email is the managers'
+    assert suggestions.validate([SuggestionDraft(kind='person', content='Gina Guest', source_ref=f'event:{q2.id}')],
+                                context) == []
+
+    q2.update_principal(lucas, full_access=True)
+    with acting_as(lucas):
+        context = suggestions.build_context(lucas, REQUEST)
+    assert context.attendees[f'event:{q2.id}']['Gina Guest'] == 'gina@guest.example'
+
+
+def test_the_client_never_gets_a_suggested_persons_email():
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from indico_assistant.schemas.actions import PlanView
+    suggestion = {'id': 's1', 'kind': 'person', 'content': 'Makoto Tanaka', 'email': 'makoto@aithoth.com',
+                  'source': {'type': 'event', 'label': '“Q3 budget review”'}}
+    plan = SimpleNamespace(id=uuid4(), effective_status='shown', expires_at=now_utc(), summary='', can_confirm=True,
+                           error=None, steps=[], questions=[], suggestions=[suggestion])
+    assert PlanView.of(plan).suggestions == [{k: v for k, v in suggestion.items() if k != 'email'}]
+    assert plan.suggestions[0]['email'] == 'makoto@aithoth.com'  # the server's copy, which accepting reads

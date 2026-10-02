@@ -37,7 +37,9 @@ class PlanView(BaseModel):
                    summary=plan.summary, can_confirm=plan.can_confirm, error=plan.error,
                    steps=[PlanStepView(n=s['n'], description=s.get('description', s['action']),
                                        side_effects=s.get('side_effects', [])) for s in plan.steps],
-                   questions=plan.questions, suggestions=plan.suggestions)
+                   questions=plan.questions,
+                   # a suggested person's email stays on the server: accepting reads the plan's own copy
+                   suggestions=[{k: v for k, v in s.items() if k != 'email'} for s in plan.suggestions])
 
 
 class ConfirmRequest(BaseModel):
