@@ -1,0 +1,16 @@
+{% extends 'layout/admin_page.html' %}
+{# Spec 024: the assistant's analytics. The page draws only what its JSON API returns (FR-019): analytics.js reads
+   the range and filters from the URL's hash, fetches the stats and the turn list, and draws them with charts.js. #}
+
+{% block title %}Assistant analytics{% endblock %}
+
+{% block content %}
+    <link rel="stylesheet" href="{{ asset('analytics.css') }}">
+    <div id="assistant-analytics" class="assistant-analytics"
+         data-stats-url="{{ stats_url }}" data-turns-url="{{ turns_url }}" data-export-url="{{ export_url }}"
+         data-turn-page="{{ turn_page }}">
+        <noscript>This page needs JavaScript.</noscript>
+    </div>
+    <script src="{{ asset('charts.js') }}" defer></script>
+    <script src="{{ asset('analytics.js') }}" defer></script>
+{% endblock %}
