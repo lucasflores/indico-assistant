@@ -1,0 +1,15 @@
+{% extends 'layout/admin_page.html' %}
+{# Spec 024 US2: one answer's trace, drawn by analytics.js from GET /api/assistant/admin/turns/<id>. #}
+
+{% block title %}Assistant analytics: turn {{ turn_id }}{% endblock %}
+
+{% block content %}
+    <link rel="stylesheet" href="{{ asset('analytics.css') }}">
+    <p><a href="{{ back_url }}">&larr; Assistant analytics</a></p>
+    <div id="assistant-trace" class="assistant-analytics" data-trace-url="{{ trace_url }}"
+         data-turn-id="{{ turn_id }}">
+        <noscript>This page needs JavaScript.</noscript>
+    </div>
+    <script src="{{ asset('charts.js') }}" defer></script>
+    <script src="{{ asset('analytics.js') }}" defer></script>
+{% endblock %}

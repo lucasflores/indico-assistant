@@ -167,20 +167,20 @@
 
 ### Tests first
 
-- [ ] T022 [US1] `tests/integration/analytics/seed.py`: a fixed seed.
+- [x] T022 [US1] `tests/integration/analytics/seed.py`: a fixed seed.
   - Contents:
     - 60 days of turns across all routes, outcomes, users and admins, two events in two categories, two models;
     - steps with tokens and cost, some unpriced;
     - ratings, plans in every status, reports of every kind.
   - A function per query computes the expected value with plain SQL over the seed, written independently of
     `stats.py`.
-- [ ] T023 [US1] `tests/integration/analytics/test_stats_usage.py` (SC-007, FR-014):
+- [x] T023 [US1] `tests/integration/analytics/test_stats_usage.py` (SC-007, FR-014):
   - **Golden tests:** one for each query in Design 5's Tiles, Adoption, Cost and Speed rows.
   - **Ranges:** "7 days" covers exactly 7 days in the admin's timezone.
   - **Admins:** excluded by default, included with `admins=1`.
   - **Filters:** a route filter narrows every number.
   - **Unknown cost:** an unpriced call counts in `unpriced_share` and not in the spend.
-- [ ] T024 [US1] `tests/integration/analytics/test_api.py` (FR-019, FR-020, SC-008):
+- [x] T024 [US1] `tests/integration/analytics/test_api.py` (FR-019, FR-020, SC-008):
   - **Access:** a logged-in non-admin gets 403 on every new endpoint and page; an anonymous user gets the login
     response.
   - **Cache:** a second call within 45 s doesn't query, and a different filter does.
@@ -188,8 +188,8 @@
 
 ### Code
 
-- [ ] T025 [US1] `services/analytics/stats.py`: the US1 queries, `collect()` and the cache (Design 5).
-- [ ] T026 [US1] `controllers/analytics.py`, `blueprint.py` and `views.py`: `GET /api/assistant/admin/analytics`, the
+- [x] T025 [US1] `services/analytics/stats.py`: the US1 queries, `collect()` and the cache (Design 5).
+- [x] T026 [US1] `controllers/analytics.py`, `blueprint.py` and `views.py`: `GET /api/assistant/admin/analytics`, the
   page route `!/admin/assistant-analytics/`, and the menu item (`_admin_menu` yields both).
 - [ ] T027 [US1] `static/js/analytics/charts.js`, ported from ibis-chat's `public/charts.js`: keep `el`, `sv`,
   `tabs`, `tileInto`, `lineChart`, `niceTicks`, the tooltip and PNG/SVG download, and drop the rest.
@@ -203,7 +203,7 @@
 
 ### Tests first
 
-- [ ] T029 [US2] `tests/integration/analytics/test_trace.py`:
+- [x] T029 [US2] `tests/integration/analytics/test_trace.py`:
   - **The trace:** `GET /admin/turns/<id>` returns the turn, its ordered steps and its texts. For texts past their
     retention it returns `expired`.
   - **GitHub turns:** the trace returns no texts.
@@ -215,7 +215,7 @@
 
 ### Code
 
-- [ ] T030 [US2] `controllers/analytics.py`: the turn list and trace endpoints.
+- [x] T030 [US2] `controllers/analytics.py`: the turn list and trace endpoints.
 - [ ] T031 [US2] `templates/admin_turn.html` plus the trace view in `analytics.js`:
   - the header (question, answer, outcome, route decision);
   - the timeline of steps with their durations, with expandable texts;
@@ -225,7 +225,7 @@
 
 ## Phase 5: User Story 3 — how well it answers (P2)
 
-- [ ] T033 [US3] Tests first, in `test_stats_quality.py`:
+- [x] T033 [US3] Tests first, in `test_stats_quality.py`:
   - golden tests for the Quality row;
   - the 9-rating case shows "not enough ratings (9 of 10)";
   - the Wilson interval matches a hand-computed value.
@@ -233,12 +233,12 @@
 
 ## Phase 6: User Story 4 — routing and the agent's work (P2)
 
-- [ ] T035 [US4] Tests first, in `test_stats_routing.py`: golden tests for the Routing, Depth and Plans rows.
+- [x] T035 [US4] Tests first, in `test_stats_routing.py`: golden tests for the Routing, Depth and Plans rows.
 - [ ] T036 [US4] Code: the queries and the sections.
 
 ## Phase 7: User Story 5 — errors and export (P3)
 
-- [ ] T037 [US5] Tests first, in `test_export.py`:
+- [x] T037 [US5] Tests first, in `test_export.py`:
   - the CSV and JSON rows match the turn list for the same filters;
   - `text=1` adds the texts that are still kept. A private turn has neither texts nor its question and answer;
   - the export logs a line with the user, the filters and the text flag.

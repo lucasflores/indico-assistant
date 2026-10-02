@@ -272,8 +272,10 @@ def _profile_menu(sender, user, **kwargs):
 
 
 def _admin_menu(sender, **kwargs):
+    from indico_assistant.controllers.analytics import admin_menu_item as analytics_item
     from indico_assistant.controllers.report_pages import admin_menu_item
-    return admin_menu_item()
+    yield admin_menu_item()
+    yield analytics_item()  # spec 024
 
 
 def _merge_reports(target, source, **kwargs):

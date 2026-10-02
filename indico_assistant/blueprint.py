@@ -55,6 +55,28 @@ def widget_static_css(filename):
     return send_from_directory(_STATIC_CSS, filename, max_age=_ONE_YEAR)
 
 
+_STATIC_ANALYTICS = os.path.join(_STATIC_JS, "analytics")
+
+
+@functools.cache
+def _analytics_version():
+    digest = hashlib.sha256()
+    for name in sorted(os.listdir(_STATIC_ANALYTICS)):
+        with open(os.path.join(_STATIC_ANALYTICS, name), "rb") as f:
+            digest.update(f.read())
+    return digest.hexdigest()[:12]
+
+
+def analytics_asset_url(filename):
+    """The analytics pages' scripts and styles (spec 024), versioned like the widget's."""
+    return f"{blueprint.url_prefix}/admin/analytics/assets/{filename}?v={_analytics_version()}"
+
+
+@blueprint.route("/admin/analytics/assets/<path:filename>")
+def analytics_asset(filename):
+    return send_from_directory(_STATIC_ANALYTICS, filename, max_age=_ONE_YEAR)
+
+
 @blueprint.route("/widget/config")
 def widget_config():
     """Per-user widget config with a fresh Chainlit token; fetched only when the widget is opened."""
@@ -178,6 +200,27 @@ def _register_routes():
         blueprint.add_url_rule("/assistant-connections/github/disconnect", "github_disconnect", RHDisconnect,
                                methods=["POST"])
     blueprint.add_url_rule("!" + CALLBACK_PATH, "github_callback", RHGitHubCallback)
+
+    # Analytics (spec 024): the admin-only API, and the two admin pages
+    from indico_assistant.controllers.analytics import (
+        RHAnalyticsExport,
+        RHAnalyticsPage,
+        RHAnalyticsStats,
+        RHAnalyticsTurn,
+        RHAnalyticsTurnPage,
+        RHAnalyticsTurns,
+    )
+
+    blueprint.add_url_rule("/admin/analytics", "analytics_stats", RHAnalyticsStats, methods=["GET"])
+    blueprint.add_url_rule("/admin/turns", "analytics_turns", RHAnalyticsTurns, methods=["GET"])
+    blueprint.add_url_rule("/admin/turns/<int:turn_id>", "analytics_turn", RHAnalyticsTurn, methods=["GET"])
+    blueprint.add_url_rule("/admin/turns/by-answer/<uuid:answer_id>", "analytics_turn_by_answer", RHAnalyticsTurn,
+                           methods=["GET"])
+    blueprint.add_url_rule("/admin/turns/export.<any(csv,json):fmt>", "analytics_export", RHAnalyticsExport,
+                           methods=["GET"])
+    blueprint.add_url_rule("!/admin/assistant-analytics/", "admin_analytics", RHAnalyticsPage)
+    blueprint.add_url_rule("!/admin/assistant-analytics/turns/<int:turn_id>/", "admin_analytics_turn",
+                           RHAnalyticsTurnPage)
 
     # Vector Search API endpoints (Feature 006)
     from indico_assistant.controllers.search import (
