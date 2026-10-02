@@ -78,7 +78,7 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 
 ### Observability & Quality
 
-- **Langfuse Observability**: Integrated tracing and monitoring for all LLM interactions with privacy filters. See [Langfuse Setup](docs/LANGFUSE_SETUP.md)
+- **Analytics and traces**: every answer's route, steps, time, tokens and cost, on an admin page, with each answer's full trace. See [Analytics](#analytics)
 - **Test Coverage**: Comprehensive unit, integration, and contract tests (80%+ coverage on services)
 
 ## Chat actions
@@ -210,6 +210,30 @@ available: GitHub's API doesn't give them to an app.
 `docs/DEPLOYMENT.md`. Run `indico db --all-plugins upgrade` first: it adds `plugin_assistant.connections` (migration
 010). The design is in `specs/023-github-connector/` and `docs/design/routing.md`.
 
+## Analytics
+
+Admins find **Assistant analytics** in Indico's admin menu (spec 024). Every chat answer is recorded when it happens:
+- who asked, from which event page, and whether they are an admin;
+- the route and how it was decided (Jev, the classifier, a shortcut, the planner);
+- the outcome: answered, failed, timeout, access denied, refusal, couldn't plan;
+- each step: model calls, queries, Jev's call, GitHub lookups, with time, tokens, cost, attempts (the SDK's own
+  retries included) and errors.
+
+The page shows usage, cost and tokens, speed, quality (ratings with 95% intervals, the thumbs-down queue, data-answer
+health, issue reports), routing, the agent's work (calls per answer, corrections, tool calls, plans), and errors, for
+a range and filters kept in the URL. Each answer opens its **trace**: a timeline of its steps, with their prompts,
+responses, SQL and row previews.
+
+- **Cost** comes only from the provider's own bill (ibis's `cost_usd`, OpenRouter's `usage.cost`). A call without
+  one counts as unpriced, and the page shows that share. Nothing is estimated from a price table.
+- **Text** (prompts, answers, SQL, rows) is kept 30 days, for admins only. GitHub answers keep none, and neither do
+  later answers in the same chat, since the chat's history carries GitHub data into every prompt. Deleting a chat
+  deletes its answers' text; deleting or anonymising a user removes their user id and text from their answers.
+- **Records without text** are kept until an admin sets a limit, so trends outlive the chats.
+- **API:** `GET /api/assistant/admin/analytics`, `/admin/turns`, `/admin/turns/<id>`,
+  `/admin/turns/by-answer/<message id>` and `/admin/turns/export.csv|json` (`text=1` adds the kept text). All are
+  admin-only, and each export is logged.
+
 ## Requirements
 
 - **Indico 3.3+**
@@ -281,19 +305,13 @@ See [Deployment Guide](docs/DEPLOYMENT.md) for complete setup instructions.
 
 ![Indico Assistant Demo](docs/setup.png)
 
-### Observability Settings
-
-Configure Langfuse observability for tracing LLM interactions:
+### Analytics Settings
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Langfuse Enabled | Enable Langfuse tracing | False |
-| Langfuse Host | Langfuse API endpoint | https://cloud.langfuse.com |
-| Langfuse Public Key | Public API key | None |
-| Langfuse Secret Key | Secret API key | None |
-| Privacy Level | Data privacy level (metadata, masked, full) | metadata |
-
-See [Langfuse Setup](docs/LANGFUSE_SETUP.md) for detailed configuration instructions.
+| Keep trace text | Keep each answer's prompts, responses, SQL and row previews for admins | On |
+| Keep trace text (days) | Then the text goes; 0 keeps it forever | 30 |
+| Keep turn records (days) | Each answer's record and steps, without text; 0 keeps them forever | 0 |
 
 ### Vector Search Settings
 
@@ -387,8 +405,8 @@ attachment (cloned events) is copied instead of re-embedded. A nightly task remo
 attachments deleted while the plugin was off and closes sync runs whose worker died.
 
 **Retention**: a nightly task (03:11, queue `assistant_bulk`, needs Celery beat) deletes chat sessions
-idle 90 days (with their messages and feedback), audit-log rows after 90 days, error records after 30
-days and sync logs after 90 days. Each period is an admin setting (Admin → Plugins → Assistant);
+idle 90 days (with their messages and feedback), audit-log rows after 90 days, sync logs after 90 days,
+and the analytics' trace text after 30 days (their turn records stay, unless an admin sets a limit). Each period is an admin setting (Admin → Plugins → Assistant);
 0 keeps that data forever.
 
 ### Session Management
@@ -688,7 +706,7 @@ indico_assistant/
 │   ├── sessions.py         # Session management
 │   ├── feedback.py         # Feedback submission
 │   ├── search.py           # Vector search endpoints
-│   └── admin.py            # Admin statistics and monitoring
+│   └── analytics.py        # Admin analytics API and pages (spec 024)
 ├── services/                # Business logic layer
 │   ├── llm/                # LLM provider abstraction
 │   ├── nl2sql/             # Natural language to SQL pipeline
@@ -696,7 +714,7 @@ indico_assistant/
 │   ├── embedding/          # Document embedding service
 │   ├── vector_search/      # Semantic search with pgvector
 │   ├── feedback/           # Feedback collection service
-│   └── observability/      # Langfuse tracing integration
+│   └── analytics/          # Each answer's turn record and steps, and the analytics' stats
 ├── models/                  # SQLAlchemy database models
 │   ├── session.py          # Chat session model
 │   ├── message.py          # Message model
@@ -706,7 +724,7 @@ indico_assistant/
 ├── schemas/                 # Pydantic validation schemas
 └── tasks/                   # Background Celery tasks
     ├── indexing.py         # Document indexing worker
-    ├── sync.py             # Langfuse sync worker
+    ├── sync.py             # Document sync worker
     └── cleanup.py          # Session cleanup worker
 ```
 
@@ -753,7 +771,6 @@ Additional documentation for advanced topics:
 
 - **[Deployment Guide](docs/DEPLOYMENT.md)**: Chat widget deployment, bundle injection, JavaScript configuration, noscript fallbacks
 - **[Accessibility](docs/ACCESSIBILITY.md)**: Screen reader support, keyboard navigation, ARIA labels, WCAG 2.1 compliance
-- **[Langfuse Setup](docs/LANGFUSE_SETUP.md)**: Observability configuration, trace collection, privacy levels, dashboard setup
 - **[Vector Search Setup](docs/VECTOR_SEARCH_SETUP.md)**: PostgreSQL pgvector extension installation, embedding configuration, index optimization
 
 ## License

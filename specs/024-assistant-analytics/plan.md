@@ -9,7 +9,8 @@ ibis-chat's Router Analytics (`~/thoth/ibis-chat`: `ibis_chat/stats.py`, `public
 - **Recording:** a recorder lives in a context variable for the length of one `answer_chat` task.
   - It inserts the turn when the worker starts it, collects a step for each model call, query, Jev call and tool
     call, and writes everything when the task ends, whatever the outcome.
-  - It writes on its own database connection, so it never touches the answer's transaction.
+  - It writes in two short transactions of its own, at the task's clean points, so nothing of the answer's rides
+    along and a failed answer is still recorded.
 - **Storage:** three new tables. `turns` has one row per answer, `turn_steps` one row per step, and `turn_texts` the
   prompts, responses, SQL and row previews, kept 30 days. The same migration drops Langfuse's three tables.
 - **Reading:**
@@ -42,7 +43,7 @@ ibis-chat's Router Analytics (`~/thoth/ibis-chat`: `ibis_chat/stats.py`, `public
 | I. Indico plugin architecture | The tables live in `plugin_assistant`, created and dropped by an Alembic migration. The pages use `RHAdminBase`, `WPAdmin` and the `admin-sidemenu` signal. Settings go in `default_settings` and the settings form. The plugin keeps listening to Indico's user signals. |
 | II. API first | The pages only draw what the JSON endpoints return: stats, turns, trace and export. |
 | III. LLM abstraction | Unchanged. Recording sits inside `LLMService.generate()`, and the tracer hook goes. |
-| IV. Graceful degradation | A failure to record is logged and never changes the answer. There are no locks while the answer runs, and at most two short transactions per turn, on their own connection. |
+| IV. Graceful degradation | A failure to record is logged and never changes the answer. There are no locks while the answer runs, and at most two short transactions per turn, each in a savepoint at the task's clean points. |
 | V. Configuration | Three global settings. None per event. |
 | VI. Test-first | Every task lands with its tests first. |
 | Security | The pages and API are admin-only and rate-limited. GitHub turns store no text, which a leak test checks. Text is deleted with its chat or user. Queries use bound parameters. |
@@ -120,13 +121,14 @@ order. The downgrade recreates them from 003's body, and leaves `uuid-ossp` alon
 
 **The turn:**
 - `turn(job_id, user_id, session_id, message_id)` is a context manager around the whole body of `answer_chat`.
-  - **On entry**, it inserts the turn row in its own transaction, through `db.engine.begin()`, and sets the context
-    variable.
+  - **On entry**, it inserts the turn row in its own short transaction (a savepoint, then a commit), and sets the
+    context variable.
     - The row is one `INSERT … SELECT` that stamps who and where (FR-002) from the question's row and the user's
       row: `queued_at`, `event_id` and its `category_id`, and `is_admin`.
     - So a turn that fails before routing still has them, and the admin filter (`is_admin IS NOT TRUE`) never drops
       it.
-  - **On exit**, it always writes, in one more transaction on its own connection:
+  - **On exit**, it always writes, in one more short transaction: it rolls back first (the answer was committed or
+    rolled back already, so nothing of it rides along), then writes in a savepoint and commits:
     1. an UPDATE of the turn: outcome, the totals (summed over its steps), and fields. It also sets `rating` from
        `feedback_entries` for `answer_id`, so a vote cast before this write isn't lost (FR-007);
     2. the steps (executemany);
@@ -333,6 +335,6 @@ tests/integration/analytics/                # recorder, hooks per route, stats g
 
 | Departure | Why | The simpler option, and why not |
 |---|---|---|
-| Writes on their own connection, outside the ORM session | The answer's session is rolled back on failure, and the failed turn must still be recorded (FR-001, FR-006) | Writing through `db.session` after the task's rollback works only on the failure paths, and would mix the record's commit into the answer's on success |
+| Writes through `db.session` at the task's two clean points, each in a savepoint, the end one after a rollback (changed during the build, 2026-10-02) | The failed turn must still be recorded, and nothing of the answer may ride along (FR-001, FR-006). Indico's test fixture turns commit into flush and rollback into a no-op, so a separate connection would escape every test's rollback and couldn't see its rows | A separate connection (the first plan): untestable under Indico's fixture, and at those two points the session is clean anyway |
 | A turn row at the start as well as the end | A hard kill runs no code, so a start row is the only way to count lost turns (edge case), and it stamps who and where for turns that fail early | One write at the end loses exactly the failures we most want to see |
 | A chart script copied from another repo | FR-017 keeps the page to its own script, with no library to load or update, and Indico ships none | Writing charts from scratch repeats ibis-chat's 304 working lines; a shared package is premature for two users |

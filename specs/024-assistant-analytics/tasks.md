@@ -220,7 +220,7 @@
   - the header (question, answer, outcome, route decision);
   - the timeline of steps with their durations, with expandable texts;
   - the plan and the rating.
-- [ ] T032 [US2] Links: the turn list on the analytics page, and "open the trace" on the admin report page
+- [x] T032 [US2] Links: the turn list on the analytics page, and "open the trace" on the admin report page
   (`templates/admin_report.html`).
 
 ## Phase 5: User Story 3 — how well it answers (P2)
@@ -247,7 +247,7 @@
 
 ## Phase 8: Polish and checks
 
-- [ ] T039 Speed (SC-003): `tests/integration/analytics/test_speed.py` seeds 50,000 turns and 400,000 steps in bulk.
+- [x] T039 Speed (SC-003): `tests/integration/analytics/test_speed.py` seeds 50,000 turns and 400,000 steps in bulk.
   The stats endpoint must take under 2 s uncached and under 100 ms cached, and the trace under 300 ms. The test is
   marked `slow`, and fixes go in the indexes.
 - [ ] T040 The live window (instructions at the top):
@@ -262,7 +262,7 @@
      - SC-004: the recording's added time, and two transactions.
   6. Run the downgrade and the upgrade again.
   7. Restore the stack to main (skill, "Restore").
-- [ ] T041 [P] Docs:
+- [x] T041 [P] Docs:
   - `README.md`: the Analytics section, the settings and the retention line, plus the removals in Design 7.
   - `docs/VECTOR_SEARCH_SETUP.md`: `/search/status`.
   - `docs/DEPLOYMENT.md`: the drop in migration 011, and uninstalling `langfuse`.
