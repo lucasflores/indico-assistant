@@ -219,23 +219,20 @@ The response will include citations:
 ### Health Check
 
 ```bash
-curl "https://your-indico/api/assistant/admin/health" \
+curl "https://your-indico/api/assistant/search/status" \
   -H "Authorization: Bearer <admin-token>"
 ```
 
-Response includes vector search status:
+Response (admins only: it scans the chunk table):
 ```json
 {
-  "status": "healthy",
-  "vector_search": {
-    "enabled": true,
-    "available": true,
-    "pgvector_installed": true,
-    "embedding_model": "BAAI/bge-small-en-v1.5",
-    "stats": {
-      "total_documents": 150,
-      "total_events": 23
-    }
+  "available": true,
+  "pgvector_installed": true,
+  "enabled": true,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "stats": {
+    "total_documents": 150,
+    "total_events": 23
   }
 }
 ```

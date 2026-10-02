@@ -144,8 +144,11 @@ class RHAdminReport(RHAdminBase):
                 return redirect(url_for_plugin('assistant.admin_report', report_id=self.report.id))
         report = self.report
         people = reports.people([report])
+        from indico_assistant.controllers.analytics import answer_trace_url
         return WPReportsAdmin.render_template(
             'admin_report.html', MENU_ITEM, report=report, copy=report.copy, labels=LABELS, stale=stale,
+            # spec 024: the trace of the reported answer, when the analytics recorded it
+            trace_url=answer_trace_url((report.copy or {}).get('reported_answer_id')),
             reporter=people.get(report.user_id), updated_by=people.get(report.updated_by_id),
             seen=report.updated_at.isoformat() if report.updated_at else '', message_time=message_time,
             list_url=url_for_plugin('assistant.admin_reports'))

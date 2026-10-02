@@ -70,7 +70,8 @@
                         <strong>{{ 'User' if message.role == 'user' else 'Assistant' }}</strong>
                         · <span class="text-superfluous">{{ message_time(message.created_at) }}</span>
                         {% if message.event_id %}· <span class="text-superfluous">sent from event {{ message.event_id }}</span>{% endif %}
-                        {% if reported %}<span class="ui small label">Reported</span>{% endif %}
+                        {% if reported %}<span class="ui small label">Reported</span>
+                            {% if trace_url %}· <a href="{{ trace_url }}">Open its trace</a>{% endif %}{% endif %}
                         <div class="assistant-report-text">{{ message.content }}</div>
                         {% for upload in message.uploads or [] %}<div>📎 {{ upload.filename }}</div>{% endfor %}
                         {% if message.plan %}

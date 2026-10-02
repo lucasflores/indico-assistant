@@ -81,7 +81,16 @@ their pull requests, reviews, issues and repositories. It only reads.
 - **Dev mode:** `INDICO_ASSISTANT_FAKE_GITHUB=1` on both processes, with Indico's `DEBUG` on, swaps in a fake
   GitHub with fixed data (`services/connectors/fake_github.py`). Any client ID and secret will do.
 
-### 4. Content Security Policy
+### 4. Analytics (spec 024)
+- **Upgrading:** migration `011_analytics` creates `turns`, `turn_steps` and `turn_texts`, and **drops** the three
+  `observability_*` tables of the old Langfuse integration (never written: it was not wired). Take a `pg_dump`
+  first, as before any migration that drops tables. Then `pip uninstall langfuse` from the server's environment.
+- **Nothing else to configure:** the worker records every answer. The settings (Admin → Plugins → Assistant) keep
+  trace text 30 days and turn records forever by default.
+- **Who sees what:** only Indico admins see the page and the traces, and through them the text of users' questions
+  and answers for 30 days. GitHub answers, and later answers in the same chat, keep no text.
+
+### 5. Content Security Policy
 - Indico must allow the panel's frame: `frame-src 'self' https://assistant.example.org`.
 - With Indico's `CSP_ENABLED`, the panel's inline `<head>` snippet carries Indico's nonce. Nothing else is needed.
 - The page loads no script from Chainlit and makes no requests to it. Only the frame talks to Chainlit.
