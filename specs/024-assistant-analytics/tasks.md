@@ -25,7 +25,7 @@
 
 - [x] T001 The baseline on this branch, at `main` = `9d5e9f4` (2026-10-02). `pytest tests`: 2185 passed, 27 skipped,
   7 failed. All 7 failures are in `test_chat_citations.py`, the known baseline on main.
-- [ ] T002 [P] Settings (plan, Design 1).
+- [x] T002 [P] Settings (plan, Design 1).
   - `default_settings.py` and `forms.py`: add `analytics_trace_text`, `retention_trace_text_days` and
     `retention_turn_days`.
   - Remove the five `langfuse_*` settings and `retention_error_days`.
@@ -33,7 +33,7 @@
   Test first, in the settings form test that exists:
   - the defaults are True, 30 and 0;
   - a negative number of days is refused.
-- [ ] T003 `models/analytics.py` and `migrations/011_analytics.py` (down revision `010_create_connections`): the
+- [x] T003 `models/analytics.py` and `migrations/011_analytics.py` (down revision `010_create_connections`): the
   three tables of Design 2, with their indexes, and the drop of the three observability tables. The downgrade
   recreates them from 003's body. Export the models from `models/__init__.py`.
 
@@ -48,20 +48,20 @@
 
 ### Removing Langfuse (FR-022; plan, Design 7)
 
-- [ ] T004 Delete:
+- [x] T004 Delete:
   - `services/observability/` and `models/observability.py`;
   - `controllers/admin.py` and `schemas/admin.py`;
   - `migrations/versions/`;
   - `tests/unit/services/test_observability_tracing.py` and `tests/integration/admin/`;
   - `docs/LANGFUSE_SETUP.md`.
-- [ ] T005 Edit:
+- [x] T005 Edit:
   - `services/__init__.py`, `models/__init__.py` and `schemas/__init__.py`;
   - `blueprint.py`: the flush hook and the three admin routes;
   - `services/nl2sql/pipeline.py`: the `_span` blocks, dedented, with `set_tracer` gone;
   - `tasks/cleanup.py`: the two observability rows;
   - `tests/unit/tasks/test_retention.py:65`;
   - `pyproject.toml`: drop `langfuse`.
-- [ ] T006 `services/llm/service.py`: remove the tracer, `set_tracer` and the error-trace block.
+- [x] T006 `services/llm/service.py`: remove the tracer, `set_tracer` and the error-trace block.
 
   Test first: `pytest tests/unit tests/contract` passes with no import of `langfuse` or `observability` anywhere. A
   grep test in `tests/unit/test_no_langfuse.py` fails on any import of either name.

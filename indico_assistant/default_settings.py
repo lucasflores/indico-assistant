@@ -52,12 +52,6 @@ DEFAULT_SETTINGS = {
     "nl2sql_cache_ttl": 600,
     "nl2sql_allowed_tables": None,
     "max_retries": 2,
-    # Langfuse observability settings (Feature 005)
-    "langfuse_enabled": False,
-    "langfuse_host": "https://cloud.langfuse.com",
-    "langfuse_public_key": None,
-    "langfuse_secret_key": None,
-    "langfuse_privacy_level": "metadata",  # "metadata", "masked", or "full"
     # Vector search settings (Feature 006)
     "vector_search_enabled": True,
     "embedding_model": "BAAI/bge-small-en-v1.5",
@@ -75,10 +69,13 @@ DEFAULT_SETTINGS = {
     # Retention in days, applied nightly; 0 = keep forever
     "retention_chat_days": 90,  # chat sessions idle this long (their messages and feedback go with them)
     "retention_audit_days": 90,  # NL2SQL audit log: questions, emails, IP addresses
-    "retention_error_days": 30,
     "retention_sync_log_days": 90,
     "retention_plan_days": 90,  # chat action plans (their audit trail; undo only reaches back 24 h)
     "retention_report_days": 365,  # issue reports, counted from closing; open ones are never purged (spec 021)
+    # Analytics (spec 024): every answer's turn record and steps, and their text (prompts, answers, SQL), for admins
+    "analytics_trace_text": True,
+    "retention_trace_text_days": 30,
+    "retention_turn_days": 0,  # turn records and steps, without text: kept so trends outlive the chats
     # Chat actions (Feature 019): off until an admin enables them, since they write to shared data
     "actions_enabled": False,
     "actions_allowed": list(WRITE_ACTIONS),

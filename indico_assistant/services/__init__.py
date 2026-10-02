@@ -6,7 +6,6 @@ for the Indico Assistant plugin.
 Services:
     - LLMService: Low-level LLM interaction service (from 002-llm-service-layer)
     - NL2SQLPipeline: Natural language to SQL translation pipeline (from 003-nl2sql-pipeline)
-    - Observability: Langfuse tracing and metrics (from 005-langfuse-observability)
     - Vector Search: Document embedding, search, and RAG (from 006-vector-search-rag)
 """
 
@@ -19,11 +18,6 @@ from indico_assistant.services.nl2sql import (
     create_nl2sql_pipeline,
     create_nl2sql_pipeline_from_plugin,
 )
-from indico_assistant.services.observability import (
-    get_langfuse_client,
-    get_observability_logger,
-)
-from indico_assistant.services.observability.tracer import Tracer, create_tracer
 
 # Vector Search services (006-vector-search-rag)
 from indico_assistant.services.vector_search import (
@@ -51,11 +45,6 @@ __all__ = [
     "PipelineResult",
     "PipelineError",
     "PipelineErrorType",
-    # Observability (005)
-    "get_langfuse_client",
-    "get_observability_logger",
-    "Tracer",
-    "create_tracer",
     # Vector Search (006)
     "check_pgvector_available",
     "reset_pgvector_cache",

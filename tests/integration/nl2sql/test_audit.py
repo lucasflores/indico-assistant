@@ -269,7 +269,6 @@ class TestAuditLoggingMigration:
             "..",
             "indico_assistant",
             "migrations",
-            "versions",
             "001_create_query_audit_log.py",
         )
         migration_path = os.path.abspath(migration_path)

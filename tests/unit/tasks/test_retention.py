@@ -62,8 +62,8 @@ def test_zero_keeps_forever(db):
 def test_every_growing_table_has_a_retention_rule():
     tables = {table for table, _, _ in RETENTION}
     assert {'plugin_assistant.chat_sessions', 'plugin_assistant.query_audit_log',
-            'plugin_assistant.observability_error_records', 'plugin_assistant.action_plans',
-            'plugin_assistant.issue_reports'} <= tables
+            'plugin_assistant.action_plans', 'plugin_assistant.issue_reports',
+            'plugin_assistant.turns', 'plugin_assistant.turn_texts'} <= tables  # spec 024
     assert all(setting in DEFAULT_SETTINGS for _, _, setting in RETENTION)
 
 
