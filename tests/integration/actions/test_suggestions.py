@@ -219,6 +219,11 @@ def test_a_guests_email_is_only_offered_to_the_events_managers(db, people, creat
     assert suggestions.validate([SuggestionDraft(kind='person', content='Gina Guest', source_ref=f'event:{q2.id}')],
                                 context) == []
 
+    people['makoto'].is_blocked = True  # Indico keeps the link's user_id, but its user search no longer finds him
+    with acting_as(lucas):
+        context = suggestions.build_context(lucas, REQUEST)
+    assert context.attendees[f'event:{q2.id}'] == {}
+
     q2.update_principal(lucas, full_access=True)
     with acting_as(lucas):
         context = suggestions.build_context(lucas, REQUEST)
