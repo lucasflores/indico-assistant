@@ -29,6 +29,11 @@ def _plain(html):
     return re.sub(r'\s+', ' ', unescape(re.sub(r'<[^>]+>', ' ', html or ''))).strip()
 
 
+def _in_user_search(user):
+    """An account Indico's user search finds, and shows the email of (deleted and blocked ones it leaves out)."""
+    return user is not None and not user.is_deleted and not user.is_blocked
+
+
 def build_context(user, topic, chat_session_id=None, history=()):
     """The context block for a request about ``topic`` (empty when nothing relevant is found: no filler)."""
     from indico.modules.events.notes.models.notes import EventNote
@@ -67,12 +72,12 @@ def build_context(user, topic, chat_session_id=None, history=()):
         links = [*event.person_links, *(link for c in event.contributions if not c.is_deleted
                                         for link in c.person_links if link.is_speaker)]
         people = dict.fromkeys(link.full_name for link in links)
-        # who may be offered as an invitee, with their email: Indico shows a guest's email (no Indico account) only
-        # to the event's managers (events/api.py); an Indico user's is what its user search shows anyone who may
-        # create events, and only they get a new meeting planned
+        # who may be offered as an invitee, with their email: Indico shows a guest's email (no Indico account, or a
+        # deleted or blocked one) only to the event's managers (events/api.py); an Indico user's is what its user
+        # search shows anyone who may create events, and only they get a new meeting planned
         manages = event.can_manage(user)
         context.attendees[key] = {link.full_name: link.email for link in links
-                                  if link.person.user_id is not None or manages}
+                                  if manages or _in_user_search(link.person.user)}
         minutes = int((event.end_dt - event.start_dt).total_seconds() // 60)
         context.sources[key]['minutes'] = minutes
         lines.append(f'[{key}] Meeting “{event.title}” on {date}, {minutes} minutes. '
