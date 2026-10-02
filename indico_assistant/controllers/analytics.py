@@ -49,8 +49,12 @@ def params(args):
 
 
 def _instant(value):
+    """A date or time from the page, in the admin's own timezone unless it says otherwise."""
     moment = datetime.fromisoformat(value)
-    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+    if moment.tzinfo:
+        return moment
+    tz = session.tzinfo
+    return tz.localize(moment) if hasattr(tz, 'localize') else moment.replace(tzinfo=tz or UTC)
 
 
 class RHAnalyticsBase(RHChatBase):
@@ -84,6 +88,8 @@ class RHAnalyticsTurn(RHAnalyticsBase):
         found = turns.trace(turn_id) if turn_id else None
         if found is None:
             raise NotFound('No such turn')
+        for report in found['reports']:
+            report['url'] = url_for_plugin('assistant.admin_report', report_id=report['id'])
         return jsonify(stats._jsonable(found))
 
 

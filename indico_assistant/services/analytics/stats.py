@@ -289,7 +289,7 @@ def reports_by_kind(q):
 # --- routing and the agent's work (US4) ------------------------------------------------------------------------
 
 def jev_confidence(q):
-    return _rows(f'''SELECT width_bucket(t.jev_confidence, 0, 1, 10) AS bucket, count(*) AS turns
+    return _rows(f'''SELECT least(width_bucket(t.jev_confidence, 0, 1, 10), 10) AS bucket, count(*) AS turns
                      FROM {T} t WHERE {scope(q)} AND t.jev_confidence IS NOT NULL GROUP BY 1 ORDER BY 1''', q)
 
 
@@ -337,7 +337,7 @@ def plan_funnel(q):
                           count(*) FILTER (WHERE p.status = 'done') AS done,
                           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM plugin_assistant.action_plans u
                                                          WHERE u.undoes_id = p.id AND u.status = 'done')) AS undone,
-                          {_p('extract(epoch FROM p.confirmed_at - p.created_at)')}
+                          {_p('extract(epoch FROM p.confirmed_at - p.created_at) * 1000')}
                    FROM plugin_assistant.action_plans p
                    WHERE p.created_at >= :since AND p.created_at < :until
                          {"AND p.user_id = :user_id" if q.user_id is not None else ""}''', q)
@@ -375,6 +375,18 @@ def no_end_record(q):
                     AND t.started_at < now() - make_interval(secs => :after)''', q, after=NO_END_AFTER)['turns']
 
 
+def facets(q):
+    """The routes and models of the range, whatever the filters, for the page's selects."""
+    unfiltered = Params(since=q.since, until=q.until, tz=q.tz, admins=q.admins)
+    routes = _rows(f'''SELECT DISTINCT coalesce(t.route, 'none') AS route FROM {T} t
+                       WHERE {scope(unfiltered)} ORDER BY 1''', unfiltered)
+    models = _rows(f'''SELECT DISTINCT coalesce(s.served_model, s.requested_model) AS model
+                       FROM {T} t JOIN {S} s ON s.turn_id = t.id
+                       WHERE {scope(unfiltered)} AND s.kind = 'llm' AND coalesce(s.served_model, s.requested_model)
+                             IS NOT NULL ORDER BY 1''', unfiltered)
+    return {'routes': [r['route'] for r in routes], 'models': [m['model'] for m in models]}
+
+
 # --- the payload -----------------------------------------------------------------------------------------------
 
 def collect(q):
@@ -384,6 +396,7 @@ def collect(q):
         return cached
     payload = _jsonable({
         'params': asdict(q),
+        'facets': facets(q),
         'tiles': tiles(q),
         'adoption': {'turns': turns_per_day_by_route(q), 'users': active_users(q), 'chats': chats(q),
                      'returning': returning_users(q), 'events': top_events(q), 'categories': top_categories(q)},
