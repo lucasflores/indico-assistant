@@ -139,10 +139,6 @@ class SettingsForm(IndicoForm):
         validators=[InputRequired(), NumberRange(min=0)],
         description="The audit log holds users' questions, emails and IP addresses. 0 keeps it forever.",
     )
-    retention_error_days = IntegerField(
-        "Keep error records (days)", validators=[InputRequired(), NumberRange(min=0)],
-        description="0 keeps them forever.",
-    )
     retention_sync_log_days = IntegerField(
         "Keep document sync logs (days)", validators=[InputRequired(), NumberRange(min=0)],
         description="0 keeps them forever.",
@@ -156,6 +152,22 @@ class SettingsForm(IndicoForm):
         "Keep closed issue reports (days)", validators=[InputRequired(), NumberRange(min=0)],
         description="Counted from when a report was closed; open reports and reports under review are never "
                     "deleted. A report holds the conversation its user attached. 0 keeps them forever.",
+    )
+
+    # Analytics (spec 024): the admin "Assistant analytics" page and each answer's trace
+    analytics_trace_text = BooleanField(
+        "Keep trace text",
+        description="Keep the text of each answer's steps (prompts, answers, SQL and row previews) for admins. "
+                    "GitHub answers, and later answers in the same chat, never keep text.",
+    )
+    retention_trace_text_days = IntegerField(
+        "Keep trace text (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="The text goes earlier if its chat or its user is deleted. 0 keeps it forever.",
+    )
+    retention_turn_days = IntegerField(
+        "Keep turn records (days)", validators=[InputRequired(), NumberRange(min=0)],
+        description="Each answer's record and steps, without text: who asked, the route, time, tokens and cost. "
+                    "They outlive the chats so the analytics keep their history. 0 keeps them forever.",
     )
 
     # Chat actions (Feature 019)

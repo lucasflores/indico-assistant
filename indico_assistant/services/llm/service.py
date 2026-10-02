@@ -2,8 +2,6 @@
 
 This module provides the LLMService class which handles all LLM
 provider interactions using the Instructor library.
-
-Feature: 005-langfuse-observability (T019) - Added tracing instrumentation
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import TYPE_CHECKING, Any, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -53,7 +51,6 @@ def collect_calls():
 
 if TYPE_CHECKING:
     from indico_assistant.plugin import AssistantPlugin
-    from indico_assistant.services.observability.tracer import Tracer
 
 
 logger = logging.getLogger(__name__)
@@ -121,7 +118,6 @@ class LLMService:
         self._client_lock = threading.Lock()
         self._client_key: tuple | None = None
         self._logger = logger
-        self._tracer: Optional["Tracer"] = None
         # Recent completion_record()s across all calls in this process, for debugging. Bounded (the
         # service lives as long as the process) and mixed across threads: per-call records are on each
         # LLMResponse (.calls), per-request ones come from collect_calls() (e.g. PipelineResult.llm_calls).
@@ -154,14 +150,6 @@ class LLMService:
         for request in _request_calls.get():
             request.append(record)
 
-    def set_tracer(self, tracer: "Tracer") -> None:
-        """Set tracer for observability instrumentation (T019).
-        
-        Args:
-            tracer: Tracer instance for LLM call tracing
-        """
-        self._tracer = tracer
-    
     def _get_settings(self) -> dict[str, Any]:
         """Extract LLM configuration from plugin settings.
         
@@ -268,7 +256,6 @@ class LLMService:
             - Never raises exceptions to caller (all errors wrapped in LLMResponse)
             - Logs call metadata but NOT prompt/response content
             - Automatically retries on validation failures
-            - Traces LLM calls if tracer is configured (Feature 005)
         """
         start_time = time.time()
         retries = 0
@@ -293,51 +280,21 @@ class LLMService:
         messages.extend(history)
         messages.append({"role": "user", "content": prompt})
         
-        # Prepare tracing context (T019)
-        tracer = self._tracer
-        generation_name = f"llm-{response_model.__name__}"
-
         # Every raw completion is recorded, including instructor's validation retries and attempts that
         # end in failure (each one is billed), by the client's one hook (_record_completion) into this
         # call's own list.
         calls: list[dict[str, Any]] = []
         context_token = _current_calls.set((calls, response_model.__name__, settings["model"]))
         try:
-            # Make the LLM call with Instructor, optionally traced
-            if tracer is not None:
-                with tracer.generation(
-                    name=generation_name,
-                    model=settings["model"],
-                    prompt=prompt,
-                ) as gen:
-                    result = client.chat.completions.create(
-                        messages=messages,
-                        model=settings["model"],
-                        response_model=response_model,
-                        max_retries=effective_max_retries,
-                        timeout=effective_timeout,
-                        max_tokens=settings["max_tokens"],
-                    )
-                    
-                    latency_ms = int((time.time() - start_time) * 1000)
-                    
-                    # Complete the generation span with response details
-                    response_str = result.model_dump_json() if hasattr(result, 'model_dump_json') else str(result)
-                    gen.complete(
-                        response=response_str,
-                        latency_ms=latency_ms,
-                    )
-            else:
-                # No tracing - original behavior
-                result = client.chat.completions.create(
-                    messages=messages,
-                    model=settings["model"],
-                    response_model=response_model,
-                    max_retries=effective_max_retries,
-                    timeout=effective_timeout,
-                    max_tokens=settings["max_tokens"],
-                )
-                latency_ms = int((time.time() - start_time) * 1000)
+            result = client.chat.completions.create(
+                messages=messages,
+                model=settings["model"],
+                response_model=response_model,
+                max_retries=effective_max_retries,
+                timeout=effective_timeout,
+                max_tokens=settings["max_tokens"],
+            )
+            latency_ms = int((time.time() - start_time) * 1000)
             
             # Log metadata (not content)
             self._logger.info(
@@ -362,18 +319,6 @@ class LLMService:
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             error = _map_exception_to_error(e)
-            
-            # Record error in trace if available (T019)
-            if tracer is not None:
-                try:
-                    with tracer.generation(
-                        name=generation_name,
-                        model=settings["model"],
-                        prompt=prompt,
-                    ) as gen:
-                        gen.error(e, include_trace=True)
-                except Exception:
-                    pass  # Tracing errors must not affect main flow
             
             # Log error metadata with validation error details for FR-008
             log_extra = {

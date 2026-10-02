@@ -10,14 +10,11 @@ Main NL2SQL pipeline orchestrator.
 
 Coordinates the full natural language to SQL translation flow:
 classification → generation → validation → execution → error correction → formatting.
-
-Feature: 005-langfuse-observability (T024-T031)
 """
 
 import logging
 import time
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Callable, Generator, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from indico_assistant.services.llm import LLMService
 from indico_assistant.services.nl2sql.audit import (
@@ -48,7 +45,6 @@ from indico_assistant.services.nl2sql.schema import SchemaContext
 from indico_assistant.services.nl2sql.validator import SQLValidator
 
 if TYPE_CHECKING:
-    from indico_assistant.services.observability.tracer import Tracer
     from indico_assistant.services.embedding.service import EmbeddingService
 
 logger = logging.getLogger(__name__)
@@ -85,12 +81,6 @@ class NL2SQLPipeline:
     This class coordinates all components to convert a natural language
     question into a database query, execute it safely, and return
     formatted results.
-    
-    Feature 005 adds observability via Langfuse integration:
-    - Root trace for entire pipeline (T024)
-    - Nested spans for each stage (T025-T029)
-    - Parent-child span nesting (T030)
-    - Error status capture (T031)
     """
 
     def __init__(
@@ -129,7 +119,6 @@ class NL2SQLPipeline:
         self._max_validation_retries = max_validation_retries
         self._db_session_factory = db_session_factory
         self._audit_enabled = audit_enabled
-        self._tracer: Optional["Tracer"] = None  # Feature 005
 
         # Initialize components
         self._classifier = QueryClassifier(llm_service)
@@ -147,14 +136,6 @@ class NL2SQLPipeline:
             llm_service, schema_context, max_correction_attempts
         )
         self._formatter = ResultFormatter(llm_service)
-
-    def set_tracer(self, tracer: "Tracer") -> None:
-        """Set the tracer for observability (Feature 005).
-        
-        Args:
-            tracer: Tracer instance for span instrumentation
-        """
-        self._tracer = tracer
 
     def _fix_topic_search_sql(self, sql: str, classification: Any) -> str:
         """
@@ -283,26 +264,6 @@ class NL2SQLPipeline:
         
         return _local_days(sql)
 
-    @contextmanager
-    def _span(self, name: str, **kwargs: Any) -> Generator[Any, None, None]:
-        """Create an optional span if tracer is configured (T024).
-        
-        This helper ensures consistent span handling throughout the pipeline.
-        If no tracer is set, yields a no-op context.
-        
-        Args:
-            name: Span name (e.g., 'query_classification')
-            **kwargs: Additional span attributes
-            
-        Yields:
-            TracerSpan if tracer is set, otherwise None
-        """
-        if self._tracer is not None:
-            with self._tracer.span(name=name, **kwargs) as span:
-                yield span
-        else:
-            yield None
-
     def process(self, *args: Any, **kwargs: Any) -> PipelineResult:
         """Answer one question (arguments as in _process); the result lists every LLM call it made.
 
@@ -405,25 +366,9 @@ class NL2SQLPipeline:
             else:
                 # Step 2: Classify the question (T025)
                 classify_start = time.time()
-                with self._span("query_classification") as classify_span:
-                    classification_response = self._classifier.classify(
-                        question, **({"connector": True} if connector else {}))
-                    classification_time = int((time.time() - classify_start) * 1000)
-                
-                    # Update span with result (T030)
-                    if classify_span is not None:
-                        if classification_response.success and classification_response.data:
-                            classify_span.update(
-                                output=f"intent={classification_response.data.intent}, "
-                                       f"confidence={classification_response.data.confidence}",
-                                status="success",
-                                metadata={"latency_ms": classification_time}
-                            )
-                        else:
-                            classify_span.error(
-                                Exception(classification_response.error or "Classification failed"),
-                                include_trace=False
-                            )
+                classification_response = self._classifier.classify(
+                    question, **({"connector": True} if connector else {}))
+                classification_time = int((time.time() - classify_start) * 1000)
 
                 if not classification_response.success or not classification_response.data:
                     log_error(
@@ -485,37 +430,19 @@ class NL2SQLPipeline:
 
             # Step 3: Generate SQL (T026)
             gen_start = time.time()
-            with self._span("sql_generation") as gen_span:
-                event_id_param = None
-                if event_ids and len(event_ids) == 1:
-                    event_id_param = event_ids[0]
+            event_id_param = None
+            if event_ids and len(event_ids) == 1:
+                event_id_param = event_ids[0]
 
-                sql_response = self._generator.generate(
-                    question, 
-                    classification, 
-                    event_ids,
-                    conversation_history=conversation_history,  # Feature 012: T007
-                    user_id=user_id,
-                    event_id=event_id_param,
-                )
-                generation_time = int((time.time() - gen_start) * 1000)
-                
-                # Update span with result (T030)
-                if gen_span is not None:
-                    if sql_response.success and sql_response.data:
-                        gen_span.update(
-                            output=f"tables={sql_response.data.tables_used}",
-                            status="success",
-                            metadata={
-                                "latency_ms": generation_time,
-                                "tables_used": sql_response.data.tables_used,
-                            }
-                        )
-                    else:
-                        gen_span.error(
-                            Exception(sql_response.error or "SQL generation failed"),
-                            include_trace=False
-                        )
+            sql_response = self._generator.generate(
+                question, 
+                classification, 
+                event_ids,
+                conversation_history=conversation_history,  # Feature 012: T007
+                user_id=user_id,
+                event_id=event_id_param,
+            )
+            generation_time = int((time.time() - gen_start) * 1000)
 
             if not sql_response.success or not sql_response.data:
                 log_error(
@@ -558,37 +485,23 @@ class NL2SQLPipeline:
 
                 # Regenerate SQL with validation feedback
                 gen_start = time.time()
-                with self._span(f"sql_regeneration_{validation_attempts}") as regen_span:
-                    feedback = (
-                        f"The generated SQL has validation errors:\n"
-                        f"{chr(10).join('- ' + v for v in validation_result.violations)}\n\n"
-                        f"Please regenerate the SQL query addressing these issues. "
-                        f"Remember: Use JOINs instead of subqueries, no CTEs, no window functions."
-                    )
-                    
-                    sql_response = self._generator.generate(
-                        question,
-                        classification,
-                        event_ids,
-                        conversation_history=conversation_history,
-                        user_id=user_id,
-                        event_id=event_id_param,
-                        validation_feedback=feedback,
-                    )
-                    generation_time += int((time.time() - gen_start) * 1000)
-                    
-                    if regen_span is not None:
-                        if sql_response.success and sql_response.data:
-                            regen_span.update(
-                                output="regenerated",
-                                status="success",
-                                metadata={"attempt": validation_attempts}
-                            )
-                        else:
-                            regen_span.error(
-                                Exception(sql_response.error or "Regeneration failed"),
-                                include_trace=False
-                            )
+                feedback = (
+                    f"The generated SQL has validation errors:\n"
+                    f"{chr(10).join('- ' + v for v in validation_result.violations)}\n\n"
+                    f"Please regenerate the SQL query addressing these issues. "
+                    f"Remember: Use JOINs instead of subqueries, no CTEs, no window functions."
+                )
+
+                sql_response = self._generator.generate(
+                    question,
+                    classification,
+                    event_ids,
+                    conversation_history=conversation_history,
+                    user_id=user_id,
+                    event_id=event_id_param,
+                    validation_feedback=feedback,
+                )
+                generation_time += int((time.time() - gen_start) * 1000)
 
                 if not sql_response.success or not sql_response.data:
                     break  # Give up if regeneration fails
@@ -633,59 +546,41 @@ class NL2SQLPipeline:
 
             # Step 5: Execute query (T027)
             exec_start = time.time()
-            with self._span("sql_execution") as exec_span:
-                exec_params: dict[str, Any] | None = None
-                
-                # Inject :user_id parameter if referenced in SQL
-                if ":user_id" in generated_sql:
-                    exec_params = {"user_id": user_id}
-                
-                # Inject :event_id parameter if referenced in SQL
-                if ":event_id" in generated_sql:
-                    if exec_params is None:
-                        exec_params = {}
-                    if event_ids and len(event_ids) == 1:
-                        exec_params["event_id"] = event_ids[0]
-                    else:
-                        # SQL references :event_id but no event context available
-                        # Set to None to avoid SQL execution error
-                        exec_params["event_id"] = None
+            exec_params: dict[str, Any] | None = None
 
-                exec_result = self._executor.execute(
-                    generated_sql, params=exec_params, question=question, context=query_context
-                )
-                execution_time = int((time.time() - exec_start) * 1000)
-                
-                # DEBUG: Print execution results
-                row_count = len(exec_result.rows) if exec_result.rows else 0
-                logger.debug(f"[DEBUG SQL Execution] Success: {exec_result.success}, Rows returned: {row_count}")
-                if not exec_result.success:
-                    logger.debug(f"[DEBUG SQL Execution] ERROR: {exec_result.error_message}")
-                if exec_result.rows and row_count > 0:
-                    # Print first few event titles to see what matched
-                    for i, row in enumerate(exec_result.rows[:5]):
-                        event_title = row.get('event_title', row.get('title', 'N/A'))
-                        match_loc = row.get('match_location', 'N/A')
-                        logger.debug(f"[DEBUG]   Row {i+1}: '{event_title}' (matched in: {match_loc})")
-                    if row_count > 5:
-                        logger.debug(f"[DEBUG]   ... and {row_count - 5} more rows")
-                
-                # Update span with result (T030)
-                if exec_span is not None:
-                    if exec_result.success:
-                        exec_span.update(
-                            output=f"rows={len(exec_result.rows) if exec_result.rows else 0}",
-                            status="success",
-                            metadata={
-                                "latency_ms": execution_time,
-                                "row_count": len(exec_result.rows) if exec_result.rows else 0,
-                            }
-                        )
-                    else:
-                        exec_span.error(
-                            Exception(exec_result.error_message or "Execution failed"),
-                            include_trace=False
-                        )
+            # Inject :user_id parameter if referenced in SQL
+            if ":user_id" in generated_sql:
+                exec_params = {"user_id": user_id}
+
+            # Inject :event_id parameter if referenced in SQL
+            if ":event_id" in generated_sql:
+                if exec_params is None:
+                    exec_params = {}
+                if event_ids and len(event_ids) == 1:
+                    exec_params["event_id"] = event_ids[0]
+                else:
+                    # SQL references :event_id but no event context available
+                    # Set to None to avoid SQL execution error
+                    exec_params["event_id"] = None
+
+            exec_result = self._executor.execute(
+                generated_sql, params=exec_params, question=question, context=query_context
+            )
+            execution_time = int((time.time() - exec_start) * 1000)
+
+            # DEBUG: Print execution results
+            row_count = len(exec_result.rows) if exec_result.rows else 0
+            logger.debug(f"[DEBUG SQL Execution] Success: {exec_result.success}, Rows returned: {row_count}")
+            if not exec_result.success:
+                logger.debug(f"[DEBUG SQL Execution] ERROR: {exec_result.error_message}")
+            if exec_result.rows and row_count > 0:
+                # Print first few event titles to see what matched
+                for i, row in enumerate(exec_result.rows[:5]):
+                    event_title = row.get('event_title', row.get('title', 'N/A'))
+                    match_loc = row.get('match_location', 'N/A')
+                    logger.debug(f"[DEBUG]   Row {i+1}: '{event_title}' (matched in: {match_loc})")
+                if row_count > 5:
+                    logger.debug(f"[DEBUG]   ... and {row_count - 5} more rows")
 
             # Handle execution errors (with potential correction) (T028)
             correction_attempts = 0
@@ -699,24 +594,9 @@ class NL2SQLPipeline:
                 log_correction_attempt(audit_log)
 
                 # Attempt error correction (T028)
-                with self._span(f"sql_correction_{correction_attempts}") as corr_span:
-                    correction_response = self._corrector.correct(
-                        generated_sql, exec_result.error_message or "Unknown error", classification
-                    )
-                    
-                    # Update span with correction result (T030, T031)
-                    if corr_span is not None:
-                        if correction_response.success and correction_response.data:
-                            corr_span.update(
-                                output="correction_generated",
-                                status="success",
-                                metadata={"attempt": correction_attempts}
-                            )
-                        else:
-                            corr_span.error(
-                                Exception(correction_response.error or "Correction failed"),
-                                include_trace=False
-                            )
+                correction_response = self._corrector.correct(
+                    generated_sql, exec_result.error_message or "Unknown error", classification
+                )
 
                 if correction_response.success and correction_response.data:
                     # Re-validate corrected SQL
@@ -807,33 +687,24 @@ class NL2SQLPipeline:
                 builder = CitationBuilder(base_url=base_url)
                 citations = [builder.build_event_citation(eid) for eid in source_event_ids]
 
-            # Step 7: Format results (T029 - response_summarization span)
-            with self._span("response_summarization") as format_span:
-                if not filtered_results:
-                    summary = self._formatter.format_empty_response(question)
+            # Step 7: Format results (T029)
+            if not filtered_results:
+                summary = self._formatter.format_empty_response(question)
+            else:
+                format_response = self._formatter.format(
+                    question, 
+                    filtered_results, 
+                    tables_used, 
+                    citations=citations,  # Feature 015: T015
+                    user_id=user_id,
+                    event_id=event_ids[0] if event_ids and len(event_ids) == 1 else None,
+                    conversation_history=conversation_history,  # For contextual follow-ups
+                )
+                if format_response.success and format_response.data:
+                    summary = format_response.data
                 else:
-                    format_response = self._formatter.format(
-                        question, 
-                        filtered_results, 
-                        tables_used, 
-                        citations=citations,  # Feature 015: T015
-                        user_id=user_id,
-                        event_id=event_ids[0] if event_ids and len(event_ids) == 1 else None,
-                        conversation_history=conversation_history,  # For contextual follow-ups
-                    )
-                    if format_response.success and format_response.data:
-                        summary = format_response.data
-                    else:
-                        summary = self._formatter.format_error_response(
-                            question, format_response.error or "Formatting failed"
-                        )
-                
-                # Update span with formatting result (T030)
-                if format_span is not None:
-                    format_span.update(
-                        output=f"confidence={summary.confidence}",
-                        status="success",
-                        metadata={"row_count": len(filtered_results)}
+                    summary = self._formatter.format_error_response(
+                        question, format_response.error or "Formatting failed"
                     )
 
             total_time = int((time.time() - start_time) * 1000)

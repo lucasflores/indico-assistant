@@ -143,6 +143,26 @@ def test_chat_actions_are_off_until_an_admin_enables_them():
         assert hasattr(SettingsForm, name)
 
 
+def test_the_analytics_settings_keep_text_30_days_and_turns_forever():
+    """Spec 024: text for 30 days, turn records until an admin sets a limit; Langfuse's settings are gone."""
+    from wtforms.fields import BooleanField, IntegerField
+    from wtforms.validators import NumberRange
+
+    from indico_assistant.default_settings import DEFAULT_SETTINGS
+    from indico_assistant.forms import SettingsForm
+
+    assert DEFAULT_SETTINGS['analytics_trace_text'] is True
+    assert DEFAULT_SETTINGS['retention_trace_text_days'] == 30
+    assert DEFAULT_SETTINGS['retention_turn_days'] == 0
+    assert SettingsForm.analytics_trace_text.field_class is BooleanField
+    for name in ('retention_trace_text_days', 'retention_turn_days'):
+        field = getattr(SettingsForm, name)
+        assert field.field_class is IntegerField
+        assert any(isinstance(v, NumberRange) and v.min == 0 for v in field.kwargs['validators'])
+    gone = [k for k in DEFAULT_SETTINGS if k.startswith('langfuse_')] + ['retention_error_days']
+    assert not [k for k in gone if k in DEFAULT_SETTINGS or hasattr(SettingsForm, k)]
+
+
 def test_the_ibis_mode_field_offers_exactly_the_modes_the_client_knows():
     """One list of modes, the factory's: the form can neither offer one the client
     refuses nor miss one it takes."""

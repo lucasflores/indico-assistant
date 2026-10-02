@@ -30,7 +30,6 @@ dependencies = [
     "instructor>=1.15",  # hooks: completion:response and completion:error per attempt
     "openai>=1.0.0",
     "ollama>=0.3.0",
-    "langfuse>=2.0.0",
     # Vector search dependencies (Feature 006)
     "sentence-transformers>=2.2.0",
     "PyPDF2>=3.0.0",
