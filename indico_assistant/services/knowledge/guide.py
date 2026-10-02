@@ -80,9 +80,13 @@ class Guide:
         """The ``k`` pieces nearest to ``question``: [{url, title, text, score}], nearest first; [] if unavailable."""
         if not self.ok:
             return []
+        from celery.exceptions import SoftTimeLimitExceeded
+
         try:
             query = self._model.encode([question], normalize_embeddings=True)[0]
             scores = self._vectors @ query
+        except SoftTimeLimitExceeded:  # (the task reports the timeout, spec 024 FR-001)
+            raise
         except Exception as exc:  # inference failed (memory, say): this answer comes from the two lists alone
             logger.warning("guide search failed: %s", exc)  # (not self.problem: the next question may work)
             return []

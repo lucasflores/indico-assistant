@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 from uuid import UUID
 
+from celery.exceptions import SoftTimeLimitExceeded
 from indico.core.db import db
 
 from indico_assistant.models.session import ChatSession
@@ -163,6 +164,9 @@ class ChatService:
         user = self._load_user(user_id)
         if session is None or user is None:
             raise SessionNotFoundError(f"Session {session_id} not found")
+        from indico_assistant.services.analytics import recorder
+        if self._session_manager.holds_connector_answer(session.id):
+            recorder.private()  # an earlier GitHub answer is in every prompt of this chat (spec 024 FR-009)
         # the page this question was sent from; a question from before spec 020 has the session's event
         event_id = (self._session_manager.page_event_of(message_id, session.event_id) if message_id
                     else session.event_id)
@@ -234,6 +238,7 @@ class ChatService:
         elif route == "chat":
             answer = self._chat(message, context)
         elif route == "connector":  # (its own history: no Indico answers, no page note)
+            recorder.private()  # GitHub data: no text kept, and what Jev and the classifier left goes (spec 024)
             answer = self._connector(user, message, self._context_builder.connector_history(session.id, up_to=message_id),
                                      started)
         plan = None
@@ -248,6 +253,7 @@ class ChatService:
             message_id=self._session_manager.answer_id_of(message_id) if message_id else None,
         )
         self._session_manager.commit()
+        _record_turn(assistant_msg.id, route, decision, fallback, metadata, plan, answer)
         return ChatResult(
             response=response_text,
             session_id=session_id,
@@ -274,6 +280,8 @@ class ChatService:
         try:
             with acting_as(user):
                 caps, pages = capability_list(user, event, settings), page_list(user, event)
+        except SoftTimeLimitExceeded:  # (the task reports the timeout, spec 024 FR-001)
+            raise
         except Exception:  # (another plugin's menu, a query): a plain message, never no reply at all
             logger.exception("Could not build the knowledge answer's lists")
             db.session.rollback()
@@ -680,6 +688,8 @@ class ChatService:
             metadata["mock_response"] = True
             return response, metadata
             
+        except SoftTimeLimitExceeded:  # (the task reports the timeout, spec 024 FR-001)
+            raise
         except Exception as e:
             logger.exception("NL2SQL processing failed")
             raise QueryProcessingError(
@@ -708,6 +718,49 @@ def _history(context):
     """The conversation before the question: the context ends with the question (a page note goes before it). For
     an accepted offer the planner is asked the offer instead, and the bare "yes" must not stay in its history."""
     return context[:-1] if context and context[-1].get("role") == "user" else context
+
+
+def _record_turn(answer_id, route, decision, fallback, metadata, plan, answer):
+    """What the analytics keep of this answer (spec 024): stamped now, never recomputed. The outcome is set here for
+    the answers that aren't plain answers (the task's default is "answered")."""
+    try:
+        _describe_turn(answer_id, route, decision, fallback, metadata, plan, answer)
+    except Exception:  # (the analytics never fail an answer, FR-006)
+        logger.exception("Analytics: could not describe this turn")
+
+
+def _describe_turn(answer_id, route, decision, fallback, metadata, plan, answer):
+    from indico_assistant.services.analytics import recorder
+
+    evidence = metadata.get("evidence") or {}
+    extras = {"jev_probabilities": decision.probabilities} if decision is not None and decision.probabilities else {}
+    if getattr(answer, "guide_pages", None):
+        extras["guide_pages"] = answer.guide_pages
+    recorder.update(
+        answer_id=answer_id, route=route, fallback=fallback,
+        decided_by=("shortcut" if decision is None else "jev" if not decision.skipped
+                    else "planner" if fallback == "planner first" else "classifier"),
+        jev_confidence=decision.confidence if decision is not None and not decision.skipped else None,
+        intent=evidence.get("intent"), corrections=evidence.get("correction_attempts"),
+        row_count=evidence.get("row_count"), plan_id=_uuid(plan["id"]) if plan else None,
+        tool_calls=len(answer.tools) if getattr(answer, "tools", None) is not None else None,
+        record={"route": metadata["route"], **extras},
+    )
+    problem = metadata.get("problem")
+    if route == "refusal" or problem == "out_of_scope":
+        recorder.set_outcome("refusal")
+    elif metadata.get("cannot_plan") or problem in ("cannot_do", "not_understood"):
+        recorder.set_outcome("cannot_plan")
+    elif problem == "failed":  # an answer saved as a failure ("I couldn't…") is not answered
+        error = metadata.get("pipeline_error")
+        recorder.set_outcome("failed", (error.get("error_type") if isinstance(error, dict) else None) or "model_error")
+
+
+def _uuid(value):
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
 
 
 def _route_of(metadata):

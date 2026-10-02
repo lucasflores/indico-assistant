@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from indico.core.db import db
 from sqlalchemy import (BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, Numeric,
                         SmallInteger, String, Text, UniqueConstraint)
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 
 class Turn(db.Model):
@@ -100,6 +100,7 @@ class TurnStep(db.Model):
     completion_tokens = Column(Integer, nullable=True)
     cost_usd = Column(Numeric(12, 6), nullable=True)
     attempts = Column(SmallInteger, nullable=True)  # every HTTP request, SDK retries included
+    http_errors = Column(ARRAY(SmallInteger), nullable=True)  # the statuses of failed attempts (429, 503, ...)
     row_count = Column(Integer, nullable=True)
 
 

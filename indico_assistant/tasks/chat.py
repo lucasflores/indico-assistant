@@ -23,23 +23,32 @@ def answer_chat(job_id, user_id, session_id, message, message_id=None):
     from indico_assistant.services.chat import get_chat_service, jobs
     from indico_assistant.services.chat.service import ChatServiceError, EventAccessDeniedError
 
+    from indico_assistant.services.analytics import recorder
+
     jobs.start(job_id)
-    try:
-        result = get_chat_service().answer(user_id, session_id, message, message_id)
-    except SoftTimeLimitExceeded:
-        db.session.rollback()
-        jobs.finish(job_id, status='failed', error='TIMEOUT',
-                    message='That took too long to answer. Try a narrower question.')
-    except EventAccessDeniedError:
-        db.session.rollback()
-        jobs.finish(job_id, status='failed', error='ACCESS_DENIED', message='You no longer have access to this event')
-    except ChatServiceError as exc:
-        db.session.rollback()
-        jobs.finish(job_id, status='failed', error='QUERY_PROCESSING_ERROR', message=str(exc))
-    except Exception:
-        db.session.rollback()
-        logger.exception('Answering chat job %s failed', job_id)
-        jobs.finish(job_id, status='failed', error='INTERNAL_ERROR', message='An unexpected error occurred')
-    else:
-        jobs.finish(job_id, status='done', message_id=str(result.message_id), response=result.response,
-                    metadata=result.metadata, plan=result.plan)
+    # the turn's record (spec 024): a start row now, the outcome, steps and text when this ends, whatever happens
+    with recorder.turn(job_id, user_id, session_id, message_id, soft_limit=SOFT_TIME_LIMIT):
+        try:
+            result = get_chat_service().answer(user_id, session_id, message, message_id)
+        except SoftTimeLimitExceeded:
+            db.session.rollback()
+            recorder.set_outcome('timeout', 'TIMEOUT')
+            jobs.finish(job_id, status='failed', error='TIMEOUT',
+                        message='That took too long to answer. Try a narrower question.')
+        except EventAccessDeniedError:
+            db.session.rollback()
+            recorder.set_outcome('access_denied', 'ACCESS_DENIED')
+            jobs.finish(job_id, status='failed', error='ACCESS_DENIED',
+                        message='You no longer have access to this event')
+        except ChatServiceError as exc:
+            db.session.rollback()
+            recorder.set_outcome('failed', 'QUERY_PROCESSING_ERROR')
+            jobs.finish(job_id, status='failed', error='QUERY_PROCESSING_ERROR', message=str(exc))
+        except Exception:
+            db.session.rollback()
+            logger.exception('Answering chat job %s failed', job_id)
+            recorder.set_outcome('failed', 'INTERNAL_ERROR')
+            jobs.finish(job_id, status='failed', error='INTERNAL_ERROR', message='An unexpected error occurred')
+        else:  # (answered, unless the service set refusal, cannot_plan or failed)
+            jobs.finish(job_id, status='done', message_id=str(result.message_id), response=result.response,
+                        metadata=result.metadata, plan=result.plan)

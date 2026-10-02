@@ -33,7 +33,7 @@ TEXT_LIMIT = 100_000  # characters per text; longer ones are cut and marked (spe
 
 # what the services may set on a turn (the rest is the recorder's own)
 FIELDS = frozenset({'answer_id', 'route', 'decided_by', 'jev_confidence', 'fallback', 'intent', 'corrections',
-                    'row_count', 'truncated', 'sql_ms', 'plan_id', 'tool_calls', 'record'})
+                    'row_count', 'truncated', 'plan_id', 'tool_calls', 'record'})
 
 _current: contextvars.ContextVar[_Turn | None] = contextvars.ContextVar('assistant_analytics_turn', default=None)
 
@@ -72,17 +72,19 @@ class Step:
     completion_tokens: int | None = None
     cost_usd: Decimal | None = None
     attempts: int | None = None
+    http_errors: list[int] | None = None  # the status of each failed HTTP attempt (429, 503, ...), retried or not
     row_count: int | None = None
-    http: list[int] = field(default_factory=list)  # each HTTP attempt's status (factory.py's hook); not stored
+    http: list[int] = field(default_factory=list)  # every HTTP attempt's status (count_attempt); not stored
 
     def row(self, turn_id):
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name != 'http'} | {'turn_id': turn_id}
 
 
 class _Turn:
-    def __init__(self, turn_id, text_on):
+    def __init__(self, turn_id, text_on, soft_limit=None):
         self.id = turn_id
         self.t0 = time.monotonic()
+        self.deadline = self.t0 + soft_limit if soft_limit else None
         self.text_on = text_on
         self.private = False
         self.steps: list[Step] = []
@@ -97,16 +99,20 @@ class _Turn:
 
 
 @contextlib.contextmanager
-def turn(job_id, user_id, session_id, message_id):
-    """Around the whole of ``answer_chat``: the start row on entry, everything else on exit."""
+def turn(job_id, user_id, session_id, message_id, soft_limit=None):
+    """Around the whole of ``answer_chat``: the start row on entry, everything else on exit. ``soft_limit`` is the
+    task's, in seconds: see time_left()."""
     current = None
     try:
-        turn_id = db.session.execute(_START, {'job_id': job_id, 'user_id': user_id, 'session_id': str(session_id),
-                                              'message_id': str(message_id) if message_id else None}).scalar()
+        with db.session.begin_nested():  # (a failure takes back only this, never the caller's transaction)
+            turn_id = db.session.execute(_START, {'job_id': job_id, 'user_id': user_id,
+                                                  'session_id': str(session_id),
+                                                  'message_id': str(message_id) if message_id else None}).scalar()
         db.session.commit()
-        current = _Turn(turn_id, _text_on())
+        current = _Turn(turn_id, _text_on(), soft_limit)
     except Exception:
-        db.session.rollback()
+        with contextlib.suppress(Exception):
+            db.session.rollback()
         logger.exception('Analytics: could not record the start of chat job %s', job_id)
     token = _current.set(current)
     try:
@@ -121,7 +127,8 @@ def turn(job_id, user_id, session_id, message_id):
             try:
                 _write_end(current)
             except Exception:
-                db.session.rollback()
+                with contextlib.suppress(Exception):
+                    db.session.rollback()
                 logger.exception('Analytics: could not record the end of chat job %s', job_id)
 
 
@@ -142,6 +149,7 @@ def _write_end(current):
         'completion_tokens': _sum(s.completion_tokens for s in steps),
         'cost_usd': _sum(s.cost_usd for s in steps),
         'unpriced_calls': sum(1 for s in calls if s.cost_usd is None),
+        'sql_ms': _sum(s.duration_ms for s in steps if s.kind == 'sql'),  # every query, corrections included
     }
     if answer_id := values.get('answer_id'):  # a vote cast before this write (FR-007; the feedback hook missed it)
         values['rating'] = (select(db.case((FeedbackEntry.feedback_type == 'thumbs_up', 1), else_=-1))
@@ -149,13 +157,14 @@ def _write_end(current):
                                    FeedbackEntry.feedback_type.in_(('thumbs_up', 'thumbs_down')))
                             .order_by(FeedbackEntry.created_at.desc()).limit(1).scalar_subquery())
     turns = Turn.__table__
-    db.session.execute(turns.update().where(turns.c.id == current.id).values(**values))
-    if steps:
-        db.session.execute(TurnStep.__table__.insert(), [s.row(current.id) for s in steps])
-    if current.texts and not current.private:
-        db.session.execute(TurnText.__table__.insert(), [
-            {'turn_id': current.id, 'seq': seq, 'kind': kind, 'text': value, 'cut': cut}
-            for (seq, kind), (value, cut) in current.texts.items()])
+    with db.session.begin_nested():  # (a failure takes back only this, never the caller's transaction)
+        db.session.execute(turns.update().where(turns.c.id == current.id).values(**values))
+        if steps:
+            db.session.execute(TurnStep.__table__.insert(), [s.row(current.id) for s in steps])
+        if current.texts and not current.private:
+            db.session.execute(TurnText.__table__.insert(), [
+                {'turn_id': current.id, 'seq': seq, 'kind': kind, 'text': value, 'cut': cut}
+                for (seq, kind), (value, cut) in current.texts.items()])
     db.session.commit()
 
 
@@ -195,12 +204,29 @@ def step(kind, stage=None, name=None):
     finally:
         current.stack.pop()
         item.duration_ms = current.ms() - item.offset_ms
+        if item.http:  # (the SDK's own retries: they never reach instructor's hooks)
+            item.attempts = max(item.attempts or 0, len(item.http))
+            item.http_errors = [status for status in item.http if status >= 400] or None
 
 
 def current_step():
-    """The innermost open step of the current turn (for the HTTP hook), or None."""
+    """The innermost open step of the current turn, or None."""
     current = _current.get()
     return current.stack[-1] if current is not None and current.stack else None
+
+
+def time_left():
+    """Seconds left before the task's soft time limit, or None outside a turn. The SDK catches the worker's own
+    SoftTimeLimitExceeded inside an HTTP read (as a connection error, which it may retry), so model calls also check
+    this deadline themselves (spec 024 FR-001)."""
+    current = _current.get()
+    return current.deadline - time.monotonic() if current is not None and current.deadline else None
+
+
+def count_attempt(response):
+    """An ``httpx`` response hook: each HTTP attempt of the current step, retries included (FR-003)."""
+    if item := current_step():
+        item.http.append(response.status_code)
 
 
 def text(item, kind, value):

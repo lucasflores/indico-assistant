@@ -133,12 +133,23 @@ def _create_ollama_client(
     openai_client = OpenAI(
         base_url=effective_base_url,
         api_key="ollama",  # Ollama doesn't require auth but OpenAI client needs something
+        http_client=_http_client(),
     )
     
     return instructor.from_openai(
         openai_client,
         mode=instructor.Mode.JSON,  # Ollama works best with JSON mode
     )
+
+
+def _http_client():
+    """The SDK's own HTTP client, telling the analytics step about every attempt (spec 024 FR-003): the SDK retries
+    429s and 5xx on its own (every provider here but ibis keeps its default of 2), and instructor's hooks never see
+    those retries."""
+    from openai import DefaultHttpxClient
+
+    from indico_assistant.services.analytics.recorder import count_attempt
+    return DefaultHttpxClient(event_hooks={"response": [count_attempt]})
 
 
 def _create_huggingface_client(
@@ -171,6 +182,7 @@ def _create_huggingface_client(
     openai_client = OpenAI(
         base_url=effective_base_url,
         api_key=api_key,
+        http_client=_http_client(),
     )
     
     return instructor.from_openai(
@@ -209,7 +221,7 @@ def _create_openai_client(
         # For proxies that don't need auth
         client_kwargs["api_key"] = "not-needed"
     
-    openai_client = OpenAI(**client_kwargs)
+    openai_client = OpenAI(**client_kwargs, http_client=_http_client())
     
     # Use TOOLS mode for OpenAI as it supports function calling
     return instructor.from_openai(
@@ -252,5 +264,6 @@ def _create_ibis_client(
         base_url=_normalize_openai_base_url(base_url, "https://labs.aithoth.com/ibis-api"),
         api_key=api_key,
         max_retries=0,
+        http_client=_http_client(),
     )
     return instructor.from_openai(openai_client, mode=chosen)
