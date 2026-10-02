@@ -83,7 +83,7 @@
     committed nor lost.
   - **Failures:** a failing write (monkeypatched) is logged and doesn't raise.
   - **No turn:** outside a turn, every call is a no-op.
-- [ ] T008 [P] `tests/integration/analytics/test_outcomes.py` (SC-001):
+- [x] T008 [P] `tests/integration/analytics/test_outcomes.py` (SC-001):
   - Drive `answer_chat` with the model mocked to each outcome:
     - answered on each of the six routes;
     - failed (query processing);
@@ -100,7 +100,7 @@
   - A turn that fails before routing still has `is_admin` and `event_id`, and the default "users only" stats count
     it.
   - A turn left without an end past 160 s counts in `no_end_record`.
-- [ ] T009 [P] `tests/integration/analytics/test_steps.py` (SC-002, FR-004):
+- [x] T009 [P] `tests/integration/analytics/test_steps.py` (SC-002, FR-004):
   - **Every route:** for one answer per route, run through the real services with the model mocked:
     - the steps hold every call record of the turn, in order;
     - the turn's tokens and known cost equal the sum of its steps;
@@ -113,7 +113,7 @@
   - **SDK retries:** for an OpenAI-SDK provider other than ibis, an `httpx.MockTransport` answers 429 then 200. The
     step must show `attempts=2` and the 429.
   - **Cost:** OpenRouter's `usage.cost` is read when ibis's `cost_usd` is missing.
-- [ ] T010 [P] `tests/integration/analytics/test_privacy.py` (SC-005, FR-009, FR-011, FR-012):
+- [x] T010 [P] `tests/integration/analytics/test_privacy.py` (SC-005, FR-009, FR-011, FR-012):
   - **Leak test:** a GitHub answer over the fake GitHub, with a known marker string in an issue body and a known
     fake token, then a follow-up on another route in the same chat.
     - Neither the marker nor the token appears in any `turn_texts`, `turn_steps` or `turns.record` value, the trace
@@ -123,7 +123,7 @@
   - **Deleting a chat** deletes its texts and keeps its turns.
   - **Deleting a user** clears `user_id` and deletes the texts; anonymising them does the same.
   - **Merging users** moves the turns to the account that remains.
-- [ ] T011 [P] `tests/integration/analytics/test_rating.py` (FR-007):
+- [x] T011 [P] `tests/integration/analytics/test_rating.py` (FR-007):
   - a thumbs up sets `rating=1`; switching to down sets -1; withdrawing it sets NULL;
   - a comment alone doesn't change the rating;
   - a vote cast between the answer's commit and the recorder's end write is still on the turn after the end write.
@@ -143,20 +143,20 @@
 - [x] T016 [P] `services/nl2sql/executor.py`: the query step, with the timeout code and the preview, and
   `SoftTimeLimitExceeded` re-raised before the broad `except`.
   `services/nl2sql/models.py` and `pipeline.py`: `PipelineResult.truncated` and `sql_ms`.
-- [ ] T017 [P] `services/connectors/loop.py`: the tool steps and the stop reason.
-- [ ] T018 `services/chat/service.py` (Design 4):
+- [x] T017 [P] `services/connectors/loop.py`: the tool steps and the stop reason.
+- [x] T018 `services/chat/service.py` (Design 4):
   - `recorder.private()`, at the start for a chat holding a GitHub answer and on the `connector` route;
   - the `recorder.update(...)` call with every field;
   - the `failed` outcome for answers saved as failures.
 
   Makes T008 and T009 pass.
-- [ ] T019 [P] `services/feedback/service.py`: the rating. Makes T011 pass.
-- [ ] T020 Privacy hooks:
+- [x] T019 [P] `services/feedback/service.py`: the rating. Makes T011 pass.
+- [x] T020 Privacy hooks:
   - `services/chat/session_manager.delete_session`;
   - `plugin.py`: merged, db_deleted and anonymized.
 
   Makes T010 pass.
-- [ ] T021 `tasks/cleanup.py`: the two retention rows and the orphan-text statement (Design 8).
+- [x] T021 `tasks/cleanup.py`: the two retention rows and the orphan-text statement (Design 8).
 
   Test first, in `tests/unit/tasks/test_retention.py` and `tests/integration/analytics/test_retention.py` (SC-006):
   - texts older than the setting go, and turns stay;

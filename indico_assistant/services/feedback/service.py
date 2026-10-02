@@ -97,6 +97,9 @@ class FeedbackService:
             feedback_type=feedback_type,
             value=value if value is not None else '',
         )
+        if feedback_type in thumbs:  # the turn keeps the vote: satisfaction outlives the chat (spec 024 FR-007)
+            from indico_assistant.services.analytics import recorder
+            recorder.rate(message_id, 1 if feedback_type == 'thumbs_up' else -1)
         if feedback_type in thumbs and thumb_comment and thumb_comment.strip():
             # the vote's comment, in the same transaction: a failure keeps neither (review, PR #5)
             FeedbackEntry.create_or_update(message_id=message_id, user_id=user_id, feedback_type='comment',
@@ -114,6 +117,9 @@ class FeedbackService:
             FeedbackEntry.user_id == user_id,
             FeedbackEntry.feedback_type.in_(('thumbs_up', 'thumbs_down', 'comment')),
         ).delete(synchronize_session=False)
+        if entry.feedback_type in ('thumbs_up', 'thumbs_down'):
+            from indico_assistant.services.analytics import recorder
+            recorder.rate(entry.message_id, None)
         return True
 
     def _validate_message_access(

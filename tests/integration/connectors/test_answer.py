@@ -126,3 +126,20 @@ def test_an_earlier_connector_answers_github_links_stay_links(db, makoto, fake):
     result = loop.answer(makoto.id, "and issue 8?", history, llm=llm, settings=SETTINGS, base_url=BASE,
                          profile_url=PROFILE)
     assert f"[#16]({PR16})" in result.text
+
+
+def test_each_lookup_is_an_analytics_step_without_its_content(db, makoto, fake):
+    """Spec 024 (FR-009): the turn records each tool's name, time and outcome, and never what it read."""
+    from indico_assistant.services.analytics import recorder
+
+    connect(db, makoto)
+    turn = recorder._Turn(1, text_on=True)
+    token = recorder._current.set(turn)
+    try:
+        recorder.private()  # (the chat service marks a connector turn private before the loop runs)
+        result = ask(makoto, Script(use("my_pull_requests"), say(f"Open: [#16]({PR16}).")))
+    finally:
+        recorder._current.reset(token)
+    assert result.stop == "answered"
+    assert [(s.kind, s.stage, s.name, s.ok) for s in turn.steps] == [("tool", "github", "my_pull_requests", True)]
+    assert turn.steps[0].duration_ms is not None and turn.texts == {}

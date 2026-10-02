@@ -57,5 +57,9 @@ def apply_retention(settings=None):
     settings = settings or AssistantPlugin.settings
     result = {table: purge(table, column, days)
               for table, column, setting in RETENTION if (days := settings.get(setting))}
+    from indico_assistant.services.analytics import recorder
+    if count := recorder.forget_orphan_texts():  # (after the chats went: their turns' text goes too, FR-011)
+        result['turn_texts of deleted chats'] = count
+    db.session.commit()
     logger.info('Retention: %s', result)
     return result

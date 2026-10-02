@@ -264,6 +264,45 @@ def update(**values):
             current.fields[key] = value
 
 
+def rate(answer_id, rating):
+    """Copy a thumbs vote (1, -1, or None when taken back) onto the answer's turn, in the caller's transaction, so it
+    commits or fails with the vote itself (FR-007). (A vote cast before the turn's end write is read by that write.)"""
+    from indico_assistant.models import Turn
+    Turn.query.filter_by(answer_id=answer_id).update({Turn.rating: rating}, synchronize_session=False)
+
+
+def forget_chat(session_id):
+    """A deleted chat's turns keep their records and lose their text (FR-011), in the deleting transaction."""
+    from indico_assistant.models import Turn, TurnText
+    TurnText.query.filter(TurnText.turn_id.in_(db.session.query(Turn.id).filter(Turn.session_id == session_id))
+                          ).delete(synchronize_session=False)
+
+
+def forget_user(user_id):
+    """A deleted or anonymised user's turns lose their user and their text (FR-012)."""
+    from indico_assistant.models import Turn, TurnText
+    TurnText.query.filter(TurnText.turn_id.in_(db.session.query(Turn.id).filter(Turn.user_id == user_id))
+                          ).delete(synchronize_session=False)
+    Turn.query.filter_by(user_id=user_id).update({Turn.user_id: None}, synchronize_session=False)
+
+
+def merge_users(target_id, source_id):
+    """Merged accounts: the turns follow the account that remains (FR-012)."""
+    from indico_assistant.models import Turn
+    Turn.query.filter_by(user_id=source_id).update({Turn.user_id: target_id}, synchronize_session=False)
+
+
+_ORPHAN_TEXTS = sql('''
+    DELETE FROM plugin_assistant.turn_texts tt USING plugin_assistant.turns t
+    WHERE tt.turn_id = t.id AND NOT EXISTS (SELECT 1 FROM plugin_assistant.chat_sessions s WHERE s.id = t.session_id)
+''')
+
+
+def forget_orphan_texts():
+    """The text of turns whose chat is gone (the chat retention deleted it): text never outlives its chat."""
+    return db.session.execute(_ORPHAN_TEXTS).rowcount
+
+
 def set_outcome(outcome, error_code=None):
     if current := _current.get():
         current.outcome, current.error_code = outcome, error_code
