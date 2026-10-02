@@ -250,7 +250,13 @@
 - [x] T039 Speed (SC-003): `tests/integration/analytics/test_speed.py` seeds 50,000 turns and 400,000 steps in bulk.
   The stats endpoint must take under 2 s uncached and under 100 ms cached, and the trace under 300 ms. The test is
   marked `slow`, and fixes go in the indexes.
-- [ ] T040 The live window (instructions at the top):
+- [ ] T040 The live window (instructions at the top). **Unpaid half done 2026-10-02:** `pg_dump`
+  (`backups/indico_2026-10-02_before_024.dump`); the three observability tables held 0 rows; 011 up, down, up on the
+  dev database; the read-only NL2SQL role can't read `turns`, `turn_steps` or `turn_texts`; web and worker on the
+  worktree; the live page as an admin (menu entry, empty state, a missing trace's 404, no console or CSP errors);
+  401 for anonymous API calls; then 011 down again and the stack back on main (no `PYTHONPATH`, all four variables).
+  **Left:** the paid questions (step 4, with Lucas's go), their traces and numbers (step 5), and uninstalling
+  `langfuse` (step 2: after the merge, since main still names it).
   1. `pg_dump`, then `PYTHONPATH=… indico db --plugin assistant upgrade`. Check that the three observability tables
      are gone and the three new ones exist.
   2. `pip uninstall langfuse` from `instance/env`.
@@ -266,7 +272,7 @@
   - `README.md`: the Analytics section, the settings and the retention line, plus the removals in Design 7.
   - `docs/VECTOR_SEARCH_SETUP.md`: `/search/status`.
   - `docs/DEPLOYMENT.md`: the drop in migration 011, and uninstalling `langfuse`.
-- [ ] T042 All of `pytest tests` from the worktree passes, apart from the T001 baseline.
+- [x] T042 All of `pytest tests` from the worktree passes, apart from the T001 baseline.
 - [ ] T043 The ONE pull request, `024-assistant-analytics` → main. Its description covers the spec, the plan and the
   code. Copilot credits are out, so run `/fresh-review` and record its findings in the fix commit. Never merge.
 
