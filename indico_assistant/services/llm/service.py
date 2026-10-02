@@ -12,9 +12,13 @@ import logging
 import threading
 import time
 from collections import deque
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Type, TypeVar
 
+from celery.exceptions import SoftTimeLimitExceeded
 from pydantic import BaseModel
+
+from indico_assistant.services.analytics import recorder
 
 from indico_assistant.services.llm.errors import LLMError, ErrorType, _map_exception_to_error
 from indico_assistant.services.llm.models import LLMResponse, HealthStatus
@@ -58,13 +62,43 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def _fill_step(step: Any, calls: list[dict[str, Any]]) -> None:
+    """The analytics step of one generate() call, from its completion records (each attempt was billed)."""
+    step.prompt_tokens = _known_sum(c.get("prompt_tokens") for c in calls)
+    step.completion_tokens = _known_sum(c.get("completion_tokens") for c in calls)
+    costs = [Decimal(str(c["cost_usd"])) for c in calls if c.get("cost_usd") is not None]
+    step.cost_usd = sum(costs) if costs else None  # unknown, never estimated (spec 024 FR-005)
+    step.attempts = len(calls) or None
+    if calls:
+        last = calls[-1]
+        step.served_model, step.ibis_chosen, step.ibis_dial = (last.get("served_model"), last.get("ibis_chosen"),
+                                                               last.get("ibis_dial"))
+
+
+def _soft_limit_in(error: BaseException) -> SoftTimeLimitExceeded | None:
+    """The worker's SoftTimeLimitExceeded somewhere in an exception's causes, if any."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, SoftTimeLimitExceeded):
+            return error
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return None
+
+
+def _known_sum(values: Any) -> int | None:
+    known = [v for v in values if v is not None]
+    return sum(known) if known else None
+
+
 def completion_record(stage: str, requested_model: str | None, completion: Any) -> dict[str, Any]:
     """Summarise one raw chat completion (one HTTP call, including retries).
 
     ``served_model`` is the model that actually answered; for the ibis router
     ``requested_model`` is ``ibis/<dial>`` and the pick comes back in the
-    ``ibis`` extension. ``cost_usd`` is ibis's exact decimal string (the
-    provider's bill); other providers leave it None.
+    ``ibis`` extension. ``cost_usd`` is the provider's own bill: ibis's exact
+    decimal string, or OpenRouter's ``usage.cost``; other providers leave it None,
+    and nothing estimates it (spec 024 FR-005).
     """
     usage = getattr(completion, "usage", None)
     usage_extra = getattr(usage, "model_extra", None) or {}
@@ -75,7 +109,7 @@ def completion_record(stage: str, requested_model: str | None, completion: Any) 
         "served_model": getattr(completion, "model", None),
         "prompt_tokens": getattr(usage, "prompt_tokens", None),
         "completion_tokens": getattr(usage, "completion_tokens", None),
-        "cost_usd": usage_extra.get("cost_usd"),
+        "cost_usd": usage_extra.get("cost_usd") if usage_extra.get("cost_usd") is not None else usage_extra.get("cost"),
         "ibis_chosen": ibis.get("chosen"),
         "ibis_dial": ibis.get("dial"),
         "ibis_request_id": ibis.get("request_id"),
@@ -131,13 +165,13 @@ class LLMService:
         self._store(calls, completion_record(stage, model, completion))
 
     def _record_failed_attempt(self, error: Exception, **_: Any) -> None:
-        """An attempt that died in transport (timeout, dropped connection) leaves no completion, but the
-        router may still have run and billed it: record it with unknown cost. Validation failures are
-        already recorded through their completion."""
+        """An attempt that failed leaves no completion, but the router may still have run and billed it: record it
+        with unknown cost. That's a timeout or a dropped connection, or (spec 024) a rate limit or server error the
+        SDK gave up on. Validation failures are already recorded through their completion."""
         import openai
 
         current = _current_calls.get()
-        if current is None or not isinstance(error, openai.APIConnectionError):  # includes APITimeoutError
+        if current is None or not isinstance(error, openai.APIError):  # connection, timeout, status errors
             return
         calls, stage, model = current
         self._store(calls, {"stage": stage, "requested_model": model, "served_model": None,
@@ -265,6 +299,14 @@ class LLMService:
         effective_max_retries = max_retries if max_retries is not None else settings["max_retries"]
         effective_timeout = timeout if timeout is not None else settings["timeout_seconds"]
         
+        # The task's soft time limit (spec 024): the SDK may have swallowed the worker's own signal in a retry, so
+        # no call starts past it, and none may run beyond it.
+        left = recorder.time_left()
+        if left is not None:
+            if left <= 0:
+                raise SoftTimeLimitExceeded()
+            effective_timeout = min(effective_timeout, left)
+
         # Ensure client is ready
         client, error = self._ensure_client(settings)
         if error is not None:
@@ -285,67 +327,80 @@ class LLMService:
         # call's own list.
         calls: list[dict[str, Any]] = []
         context_token = _current_calls.set((calls, response_model.__name__, settings["model"]))
-        try:
-            result = client.chat.completions.create(
-                messages=messages,
-                model=settings["model"],
-                response_model=response_model,
-                max_retries=effective_max_retries,
-                timeout=effective_timeout,
-                max_tokens=settings["max_tokens"],
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
+        # one analytics step per call (spec 024), with its text: the whole conversation sent, and what came back
+        with recorder.step("llm", response_model.__name__) as step:
+            step.requested_model = settings["model"]
+            recorder.text(step, "prompt", messages)
+            try:
+                result = client.chat.completions.create(
+                    messages=messages,
+                    model=settings["model"],
+                    response_model=response_model,
+                    max_retries=effective_max_retries,
+                    timeout=effective_timeout,
+                    max_tokens=settings["max_tokens"],
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
             
-            # Log metadata (not content)
-            self._logger.info(
-                "LLM call succeeded",
-                extra={
+                # Log metadata (not content)
+                self._logger.info(
+                    "LLM call succeeded",
+                    extra={
+                        "provider": settings["provider"],
+                        "model": settings["model"],
+                        "latency_ms": latency_ms,
+                        "retries": max(len(calls) - 1, 0),
+                        "response_model": response_model.__name__,
+                        "served_model": calls[-1]["served_model"] if calls else None,
+                    }
+                )
+
+                recorder.text(step, "response", result.model_dump_json() if hasattr(result, "model_dump_json")
+                              else str(result))
+                return LLMResponse.success_response(
+                    result=result,
+                    latency_ms=latency_ms,
+                    retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
+                    calls=calls,
+                )
+
+            except SoftTimeLimitExceeded:  # the worker's time limit, not a model error: the task reports it (audit #1)
+                raise
+            except Exception as e:
+                if limit := _soft_limit_in(e):  # (the SDK wraps it as a connection error)
+                    raise limit from e
+                latency_ms = int((time.time() - start_time) * 1000)
+                error = _map_exception_to_error(e)
+            
+                # Log error metadata with validation error details for FR-008
+                log_extra = {
                     "provider": settings["provider"],
                     "model": settings["model"],
                     "latency_ms": latency_ms,
-                    "retries": max(len(calls) - 1, 0),
+                    "error_type": error.error_type.value,
                     "response_model": response_model.__name__,
-                    "served_model": calls[-1]["served_model"] if calls else None,
                 }
-            )
+            
+                # Include validation error details for retry logging (FR-008)
+                if error.error_type == ErrorType.VALIDATION_ERROR and error.details:
+                    log_extra["validation_errors"] = error.details.get("errors", "")
+            
+                self._logger.warning(
+                    "LLM call failed",
+                    extra=log_extra
+                )
+                step.ok, step.error_code = False, error.error_type.value  # returned, not raised (FR-003)
+                recorder.text(step, "response", error.message)
 
-            return LLMResponse.success_response(
-                result=result,
-                latency_ms=latency_ms,
-                retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
-                calls=calls,
-            )
-            
-        except Exception as e:
-            latency_ms = int((time.time() - start_time) * 1000)
-            error = _map_exception_to_error(e)
-            
-            # Log error metadata with validation error details for FR-008
-            log_extra = {
-                "provider": settings["provider"],
-                "model": settings["model"],
-                "latency_ms": latency_ms,
-                "error_type": error.error_type.value,
-                "response_model": response_model.__name__,
-            }
-            
-            # Include validation error details for retry logging (FR-008)
-            if error.error_type == ErrorType.VALIDATION_ERROR and error.details:
-                log_extra["validation_errors"] = error.details.get("errors", "")
-            
-            self._logger.warning(
-                "LLM call failed",
-                extra=log_extra
-            )
-            
-            return LLMResponse.error_response(
-                error=error,
-                latency_ms=latency_ms,
-                retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
-                calls=calls,
-            )
-        finally:
-            _current_calls.reset(context_token)
+                return LLMResponse.error_response(
+                    error=error,
+                    latency_ms=latency_ms,
+                    retries=max(len(calls) - 1, 0),  # every attempt after the first leaves a record
+                    calls=calls,
+                )
+            finally:
+                _fill_step(step, calls)
+                _current_calls.reset(context_token)
 
     def health_check(self) -> HealthStatus:
         """Test LLM provider connectivity.

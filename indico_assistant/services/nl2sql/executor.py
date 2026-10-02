@@ -16,9 +16,11 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, ProgrammingError, SQLAlchemyError
 
+from indico_assistant.services.analytics import recorder
 from indico_assistant.services.nl2sql import readonly_db
 from indico_assistant.services.nl2sql.models import ExecutionResult
 
@@ -52,6 +54,12 @@ def is_timeout_error(message: str | None) -> bool:
     """Statement timeouts must not be sent to the correction loop: the corrected query is just as heavy."""
     text_ = (message or "").lower()
     return "statement timeout" in text_ or text_.startswith(TIMEOUT_MESSAGE_PREFIX.lower())
+
+
+def _preview(value):
+    """A row value as the trace shows it: cut at 500 characters (spec 024 FR-008)."""
+    value = value if isinstance(value, (int, float, bool)) or value is None else str(value)
+    return value[:500] if isinstance(value, str) else value
 
 
 class QueryExecutor:
@@ -91,6 +99,21 @@ class QueryExecutor:
         context: "QueryContext | None" = None,
     ) -> ExecutionResult:
         """Execute a validated SQL query for the user and scope in `context`."""
+        with recorder.step("sql", "query") as step:  # spec 024: the query, its rows, and a preview of them
+            recorder.text(step, "sql", sql)
+            result = self._execute(sql, params, question, context)
+            step.row_count = result.row_count
+            if result.truncated:
+                recorder.update(truncated=True)
+            if not result.success:
+                step.ok = False
+                step.error_code = ("timeout" if (result.error_message or "").startswith(TIMEOUT_MESSAGE_PREFIX)
+                                   else "sql_error" if result.correctable else "failed")
+            else:
+                recorder.text(step, "rows", [{k: _preview(v) for k, v in row.items()} for row in result.rows[:20]])
+            return result
+
+    def _execute(self, sql, params, question, context) -> ExecutionResult:
         start_time = time.time()
         params = params or {}
 
@@ -115,6 +138,8 @@ class QueryExecutor:
                 truncated=truncated,
             )
 
+        except SoftTimeLimitExceeded:  # the worker's time limit: the task reports the timeout (spec 024 FR-001)
+            raise
         except Exception as e:
             error_msg = str(e)
             if isinstance(e, ExecutionError):

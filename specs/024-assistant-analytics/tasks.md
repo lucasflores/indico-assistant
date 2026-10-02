@@ -131,16 +131,16 @@
 #### Code
 
 - [x] T012 `services/analytics/recorder.py` (Design 3). Makes T007 pass.
-- [ ] T013 `tasks/chat.py`: the body runs inside `recorder.turn(...)`, and each branch calls `finish` (Design 4).
-- [ ] T014 `services/llm/service.py` and `factory.py`:
+- [x] T013 `tasks/chat.py`: the body runs inside `recorder.turn(...)`, and each branch calls `finish` (Design 4).
+- [x] T014 `services/llm/service.py` and `factory.py`:
   - each `generate()` is one step, with its texts, and `ok`/`error_code` from the response;
   - `SoftTimeLimitExceeded` is re-raised (audit finding #1);
   - `_record_failed_attempt` takes `openai.APIError`;
   - `completion_record` reads OpenRouter's `usage.cost`;
   - every OpenAI-SDK client gets the `httpx` response hook that counts attempts (plan, Design 3).
-- [ ] T015 [P] `services/knowledge/gate.py`: the Jev step, and `SoftTimeLimitExceeded` re-raised before the
+- [x] T015 [P] `services/knowledge/gate.py`: the Jev step, and `SoftTimeLimitExceeded` re-raised before the
   broad `except`.
-- [ ] T016 [P] `services/nl2sql/executor.py`: the query step, with the timeout code and the preview, and
+- [x] T016 [P] `services/nl2sql/executor.py`: the query step, with the timeout code and the preview, and
   `SoftTimeLimitExceeded` re-raised before the broad `except`.
   `services/nl2sql/models.py` and `pipeline.py`: `PipelineResult.truncated` and `sql_ms`.
 - [ ] T017 [P] `services/connectors/loop.py`: the tool steps and the stop reason.

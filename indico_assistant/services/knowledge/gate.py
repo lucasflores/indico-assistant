@@ -161,18 +161,38 @@ def _dict(value):
 
 def decide(messages, settings, *, plan_waiting=False, offer=None, connector=False, transport=_http):
     """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision.
-    ``connector``: GitHub is on, so ``connector`` is one of the routes (spec 023)."""
+    ``connector``: GitHub is on, so ``connector`` is one of the routes (spec 023). Each call is one analytics step
+    (spec 024), failed when the decision was skipped."""
+    from decimal import Decimal
+
+    from indico_assistant.services.analytics import recorder
+
+    if not settings.get("jev_api_key"):
+        return _skipped("no key")  # (no call)
+    with recorder.step("jev", "route", JEV_MODEL) as step:
+        decision = _decide(messages, settings, plan_waiting, offer, connector, transport, step)
+        step.requested_model = step.served_model = decision.name
+        if isinstance(decision.cost, (int, float)) and not isinstance(decision.cost, bool):
+            step.cost_usd = Decimal(str(decision.cost))
+        if decision.skipped:
+            step.ok, step.error_code = False, decision.reason
+    return decision
+
+
+def _decide(messages, settings, plan_waiting, offer, connector, transport, step):
     import httpx
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from indico_assistant.services.analytics import recorder
 
     key = settings.get("jev_api_key")
-    if not key:
-        return _skipped("no key")
     timeout = float(settings.get("jev_timeout_seconds") or 1.5)
     try:
         asked = questions(connector)
         payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": asked}
     except ValueError:
         return _skipped("error")
+    recorder.text(step, "prompt", payload)
     global _pool
     if _pool is None:  # (made on first use, after a fork, like the client)
         _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="jev")
@@ -183,9 +203,12 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, connector=Fals
         body = _pool.submit(transport, payload, key, timeout).result(timeout=timeout)
     except (httpx.TimeoutException, TooLate):
         return _skipped("timeout", int((time.monotonic() - started) * 1000))
+    except SoftTimeLimitExceeded:  # the worker's time limit: the task reports the timeout (spec 024 FR-001)
+        raise
     except Exception:  # noqa: BLE001 - the classifier routes instead
         return _skipped("error", int((time.monotonic() - started) * 1000))
     ms = int((time.monotonic() - started) * 1000)
+    recorder.text(step, "response", body)
     # any shape can come back from an alpha endpoint (a list, a bare string, a list as the choice): check each level
     answers = _dict(_dict(body).get("answers"))
     cost = _dict(_dict(body).get("usage")).get("cost")

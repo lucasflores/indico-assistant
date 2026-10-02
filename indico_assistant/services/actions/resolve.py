@@ -6,6 +6,7 @@ import difflib
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
+from celery.exceptions import SoftTimeLimitExceeded
 from dateutil import parser as date_parser
 from flask import g
 from sqlalchemy import or_
@@ -209,6 +210,8 @@ def _embed(texts):
             from indico_assistant.plugin import AssistantPlugin
             from indico_assistant.services.embedding import EmbeddingService
             cache.update(zip(missing, EmbeddingService(AssistantPlugin.instance).embed_batch(missing), strict=True))
+    except SoftTimeLimitExceeded:  # (the task reports the timeout, spec 024 FR-001)
+        raise
     except Exception:
         return None
     return [cache[t] for t in texts]

@@ -380,6 +380,12 @@ class SessionManager:
         
         return query.count()
 
+    def holds_connector_answer(self, session_id: UUID) -> bool:
+        """Whether a GitHub (connector) answer is in this chat: it's in every later prompt (spec 024 FR-009)."""
+        return db.session.query(ChatMessage.query.filter(
+            ChatMessage.session_id == session_id, ChatMessage.role == "assistant",
+            ChatMessage.metadata_json["route"]["route"].astext == "connector").exists()).scalar()
+
     def delete_session(self, session_id: UUID) -> bool:
         """Delete a session by ID.
         

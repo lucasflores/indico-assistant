@@ -11,7 +11,7 @@ import importlib
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 revision = '011_analytics'
 down_revision = '010_create_connections'
@@ -84,6 +84,7 @@ def upgrade():
         sa.Column('completion_tokens', sa.Integer(), nullable=True),
         sa.Column('cost_usd', sa.Numeric(12, 6), nullable=True),
         sa.Column('attempts', sa.SmallInteger(), nullable=True),
+        sa.Column('http_errors', ARRAY(sa.SmallInteger()), nullable=True),
         sa.Column('row_count', sa.Integer(), nullable=True),
         sa.UniqueConstraint('turn_id', 'seq'),
         schema=SCHEMA,

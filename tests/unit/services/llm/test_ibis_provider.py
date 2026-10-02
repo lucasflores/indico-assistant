@@ -86,7 +86,10 @@ def _fake_ibis(monkeypatch, handler):
     real_openai = openai.OpenAI
     monkeypatch.setattr(
         factory, "OpenAI",
-        lambda **kw: real_openai(http_client=httpx.Client(transport=httpx.MockTransport(handler)), **kw),
+        # (the factory's own client counts attempts for the analytics; the fake keeps its hooks)
+        lambda http_client=None, **kw: real_openai(http_client=httpx.Client(
+            transport=httpx.MockTransport(handler), event_hooks=http_client.event_hooks if http_client else None),
+            **kw),
     )
 
 
