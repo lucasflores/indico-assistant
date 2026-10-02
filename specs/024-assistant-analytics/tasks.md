@@ -70,7 +70,7 @@
 
 #### Tests first
 
-- [ ] T007 [P] `tests/integration/analytics/test_recorder.py`:
+- [x] T007 [P] `tests/integration/analytics/test_recorder.py`:
   - **Rows:** `turn()` inserts a running row at entry, and writes the outcome, steps and texts at exit.
   - **Nesting:** nested `step()` calls set `parent_seq`; an exception in a step sets `ok=False` and `error_code`,
     then re-raises.
@@ -130,7 +130,7 @@
 
 #### Code
 
-- [ ] T012 `services/analytics/recorder.py` (Design 3). Makes T007 pass.
+- [x] T012 `services/analytics/recorder.py` (Design 3). Makes T007 pass.
 - [ ] T013 `tasks/chat.py`: the body runs inside `recorder.turn(...)`, and each branch calls `finish` (Design 4).
 - [ ] T014 `services/llm/service.py` and `factory.py`:
   - each `generate()` is one step, with its texts, and `ok`/`error_code` from the response;

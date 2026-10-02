@@ -34,7 +34,7 @@ class Turn(db.Model):
     user_id = Column(Integer, nullable=True)  # NULL once the user is deleted or anonymised (FR-012)
     is_admin = Column(Boolean, nullable=True)
     session_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    message_id = Column(UUID(as_uuid=True), nullable=False)  # the question
+    message_id = Column(UUID(as_uuid=True), nullable=True)  # the question
     answer_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # the answer message, once saved
     event_id = Column(Integer, nullable=True)
     category_id = Column(Integer, nullable=True)
