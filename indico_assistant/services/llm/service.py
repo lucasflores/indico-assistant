@@ -12,7 +12,6 @@ import logging
 import threading
 import time
 from collections import deque
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Type, TypeVar
 
 from celery.exceptions import SoftTimeLimitExceeded
@@ -66,7 +65,7 @@ def _fill_step(step: Any, calls: list[dict[str, Any]]) -> None:
     """The analytics step of one generate() call, from its completion records (each attempt was billed)."""
     step.prompt_tokens = _known_sum(c.get("prompt_tokens") for c in calls)
     step.completion_tokens = _known_sum(c.get("completion_tokens") for c in calls)
-    costs = [Decimal(str(c["cost_usd"])) for c in calls if c.get("cost_usd") is not None]
+    costs = [amount for c in calls if (amount := recorder.cost(c.get("cost_usd"))) is not None]
     step.cost_usd = sum(costs) if costs else None  # unknown, never estimated (spec 024 FR-005)
     step.attempts = len(calls) or None
     if calls:

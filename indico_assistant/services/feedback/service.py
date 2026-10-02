@@ -117,9 +117,8 @@ class FeedbackService:
             FeedbackEntry.user_id == user_id,
             FeedbackEntry.feedback_type.in_(('thumbs_up', 'thumbs_down', 'comment')),
         ).delete(synchronize_session=False)
-        if entry.feedback_type in ('thumbs_up', 'thumbs_down'):
-            from indico_assistant.services.analytics import recorder
-            recorder.rate(entry.message_id, None)
+        from indico_assistant.services.analytics import recorder
+        recorder.rate(entry.message_id, None)  # (the thumbs went, whichever of the entries was named)
         return True
 
     def _validate_message_access(

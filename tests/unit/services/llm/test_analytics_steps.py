@@ -131,3 +131,26 @@ def test_outside_a_turn_nothing_is_recorded(monkeypatch):
     fake(monkeypatch, lambda request: httpx.Response(200, json=reply(LISBON)))
     assert LLMService(Plugin()).generate('Capital of Portugal?', Answer).success
     assert recorder.current_step() is None
+
+
+def test_no_sdk_retry_starts_past_the_deadline(monkeypatch, turn):
+    """Review of #21: the SDK swallows the worker's signal and retries; the request hook refuses each retry."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        turn.deadline = time.monotonic() - 1  # (the soft limit fires during this read)
+        raise SoftTimeLimitExceeded()
+
+    fake(monkeypatch, handler)
+    plugin = Plugin(llm_provider='openai', llm_model='openai/gpt-4o-mini', llm_base_url='https://openrouter.test/v1')
+    with pytest.raises(SoftTimeLimitExceeded):
+        LLMService(plugin).generate('Capital of Portugal?', Answer)
+    assert len(calls) == 1  # (the SDK's two retries never reached the network)
+
+
+def test_a_cost_that_is_not_an_amount_is_unknown_and_never_fails_the_answer(monkeypatch, turn):
+    fake(monkeypatch, lambda request: httpx.Response(200, json=tool_reply({'city': 'Lisbon'}, cost='n/a')))
+    plugin = Plugin(llm_provider='openai', llm_model='openai/gpt-4o-mini', llm_base_url='https://openrouter.test/v1')
+    assert LLMService(plugin).generate('Capital of Portugal?', Answer).success
+    assert turn.steps[0].cost_usd is None

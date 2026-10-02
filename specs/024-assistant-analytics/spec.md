@@ -256,8 +256,8 @@ written.
 - **FR-006**: The record MUST be written by the worker, outside the answer's own transaction. A failure to write it
   MUST NOT change the answer, and MUST be logged.
 - **FR-007**: The rating MUST be copied onto the turn record when the user rates the answer, and cleared when they
-  remove it, so satisfaction outlives the chat. It MUST also be read when the turn's end is written, so a vote cast
-  before that write isn't lost.
+  remove it, so satisfaction outlives the chat. The answer's id MUST go on the turn in the transaction that saves the
+  answer, so every vote, which can only come once the answer exists, finds its turn.
 
 **Text and privacy:**
 - **FR-008**: While the "keep trace text" setting is on (the default), each step MUST also keep its text:

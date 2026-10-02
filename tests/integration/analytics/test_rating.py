@@ -47,3 +47,13 @@ def test_a_comment_alone_changes_no_rating(answered):
     user, answer, turn = answered
     FeedbackService().submit_feedback(user.id, answer.id, 'comment', comment='nice')
     assert rating_of(turn) is None
+
+
+def test_withdrawing_by_the_comments_id_still_clears_the_rating(answered):
+    user, answer, turn = answered
+    service = FeedbackService()
+    service.submit_feedback(user.id, answer.id, 'thumbs_down', thumb_comment='wrong year')
+    from indico_assistant.models import FeedbackEntry
+    comment = FeedbackEntry.query.filter_by(message_id=answer.id, feedback_type='comment').one()
+    assert service.withdraw_feedback(user.id, comment.id) is True
+    assert rating_of(turn) is None

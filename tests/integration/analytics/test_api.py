@@ -177,3 +177,25 @@ def test_the_admin_menu_has_the_analytics(app, db, people):
         assert analytics.admin_menu_item().title == 'Assistant analytics'
         session.set_session_user(people['user'])
         assert analytics.admin_menu_item() is None
+
+
+def test_a_private_turns_comment_is_never_shown(app, db, people, turns):
+    got = body(run(app, analytics.RHAnalyticsTurn, people['admin'], turn_id=turns['private'].id))
+    assert got['comment'] is None
+    kept = body(run(app, analytics.RHAnalyticsTurn, people['admin'], turn_id=turns['kept'].id))
+    assert kept['comment'] == 'wrong'
+    queue = {row['id']: row for row in body(run(app, analytics.RHAnalyticsStats, people['admin'],
+                                                query={'range': '7d'}))['quality']['queue']}
+    assert queue[turns['private'].id]['comment'] is None and queue[turns['kept'].id]['comment'] == 'wrong'
+
+
+def test_requests_in_the_same_minute_share_the_cache(app, people):
+    with app.test_request_context(query_string={'range': '30d'}):
+        session.set_session_user(people['admin'])
+        first, second = analytics.params(request.args), analytics.params(request.args)
+    assert first == second and first.until.second == 0 and first.until.microsecond == 0
+
+
+def test_the_csv_never_carries_a_formula():
+    out = analytics.turns.as_csv([{'id': 1, 'question': '=HYPERLINK("http://evil")', 'answer': '+1', 'route': 'data'}])
+    assert '\'=HYPERLINK' in out and "'+1" in out and ',data' in out

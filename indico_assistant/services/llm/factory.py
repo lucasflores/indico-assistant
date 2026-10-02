@@ -145,11 +145,12 @@ def _create_ollama_client(
 def _http_client():
     """The SDK's own HTTP client, telling the analytics step about every attempt (spec 024 FR-003): the SDK retries
     429s and 5xx on its own (every provider here but ibis keeps its default of 2), and instructor's hooks never see
-    those retries."""
+    those retries. It also refuses any attempt past the turn's soft deadline (FR-001)."""
     from openai import DefaultHttpxClient
 
     from indico_assistant.services.analytics.recorder import count_attempt
-    return DefaultHttpxClient(event_hooks={"response": [count_attempt]})
+    from indico_assistant.services.analytics.recorder import check_deadline
+    return DefaultHttpxClient(event_hooks={"request": [check_deadline], "response": [count_attempt]})
 
 
 def _create_huggingface_client(

@@ -60,8 +60,9 @@ def trace(turn_id):
     if text_state == 'kept':  # the chat's own words, for the same days as the rest of the text (FR-010)
         question = db.session.get(ChatMessage, turn.message_id) if turn.message_id else None
         answer = db.session.get(ChatMessage, turn.answer_id) if turn.answer_id else None
+    # (a private turn's comment may quote the GitHub data it was about: FR-009)
     comment = (FeedbackEntry.query.filter_by(message_id=turn.answer_id, feedback_type='comment')
-               .order_by(FeedbackEntry.created_at.desc()).first()) if turn.answer_id else None
+               .order_by(FeedbackEntry.created_at.desc()).first()) if turn.answer_id and not turn.private else None
     plan = db.session.get(ActionPlan, turn.plan_id) if turn.plan_id else None
     reports = (IssueReport.query.filter(IssueReport.copy['reported_answer_id'].astext == str(turn.answer_id))
                .order_by(IssueReport.created_at).all()) if turn.answer_id else []
@@ -114,8 +115,13 @@ def as_csv(rows):
     fields = [k for k in (rows[0] if rows else {'id': None}) if k not in ('answer_id', 'session_id')]
     writer = csv.DictWriter(out, fieldnames=fields, extrasaction='ignore')
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({k: _cell(v) for k, v in row.items()} for row in rows)
     return out.getvalue()
+
+
+def _cell(value):
+    """A text a spreadsheet would run as a formula (a user's question can start with =), quoted so it stays text."""
+    return f"'{value}" if isinstance(value, str) and value[:1] in ('=', '+', '-', '@', '\t', '\r') else value
 
 
 def _columns(row):
