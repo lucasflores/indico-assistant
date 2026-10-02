@@ -71,6 +71,10 @@ class AssistantPlugin(IndicoPlugin):
         self.connect(signals.users.merged, _merge_connections)
         self.connect(signals.users.db_deleted, _forget_connections)
         self.connect(signals.users.anonymized, _forget_connections)
+        # spec 024: a user's turns follow a merge, and lose their user and text on deletion or anonymisation
+        self.connect(signals.users.merged, _merge_turns)
+        self.connect(signals.users.db_deleted, _forget_turns)
+        self.connect(signals.users.anonymized, _forget_turns)
         self.connect(signals.core.after_commit, _revoke_forgotten)
 
     # Reserves an open panel's width before the page paints (spec 020 FR-006a); the widget builds the panel
@@ -282,6 +286,17 @@ def _merge_reports(target, source, **kwargs):
 def _connections_menu(sender, user, **kwargs):
     from indico_assistant.controllers.connections import profile_menu_item
     return profile_menu_item(user)
+
+
+def _merge_turns(target, source, **kwargs):
+    from indico_assistant.services.analytics import recorder
+    recorder.merge_users(target.id, source.id)
+
+
+def _forget_turns(user, flushed=False, **kwargs):
+    if flushed:  # (only once the deletion or anonymisation is sure to happen, as _forget_connections)
+        from indico_assistant.services.analytics import recorder
+        recorder.forget_user(user.id)
 
 
 def _merge_connections(target, source, **kwargs):

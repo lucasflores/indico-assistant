@@ -736,6 +736,9 @@ def _describe_turn(answer_id, route, decision, fallback, metadata, plan, answer)
     extras = {"jev_probabilities": decision.probabilities} if decision is not None and decision.probabilities else {}
     if getattr(answer, "guide_pages", None):
         extras["guide_pages"] = answer.guide_pages
+    for key in ("stop", "access"):  # the connector loop's (spec 023)
+        if getattr(answer, key, None):
+            extras[f"connector_{key}"] = getattr(answer, key)
     recorder.update(
         answer_id=answer_id, route=route, fallback=fallback,
         decided_by=("shortcut" if decision is None else "jev" if not decision.skipped

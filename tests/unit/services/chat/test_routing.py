@@ -412,3 +412,43 @@ def test_an_unexpected_connector_failure_is_a_failed_answer_with_the_report_offe
         plugin.instance.settings.get_all.return_value = {}
         result = service._connector(MagicMock(id=6), "my PRs?", [])
     assert result.failed and result.tools == []
+
+
+# spec 024 (FR-009): a turn that may carry GitHub data keeps no text
+
+def _in_a_turn(run, **kwargs):
+    from indico_assistant.services.analytics import recorder
+
+    turn = recorder._Turn(1, text_on=True)
+    token = recorder._current.set(turn)
+    try:
+        with recorder.step("jev", "route") as step:  # (Jev's text, collected before the route is known)
+            recorder.text(step, "prompt", "which of my PRs are open?")
+        run(**kwargs)
+    finally:
+        recorder._current.reset(token)
+    return turn
+
+
+def test_a_github_answer_keeps_no_text_not_even_jevs(routed):
+    run, s = routed
+    s.manager.holds_connector_answer.return_value = False
+    s.github_on.return_value = True
+    s.decide.return_value = jev("connector")
+    turn = _in_a_turn(run, message="which of my PRs are open?")
+    assert turn.private is True and turn.texts == {}
+
+
+def test_a_chat_that_holds_a_github_answer_keeps_no_text_on_any_route(routed):
+    run, s = routed
+    s.manager.holds_connector_answer.return_value = True
+    s.decide.return_value = jev("knowledge")
+    assert _in_a_turn(run, message="and how do I lock an event?").private is True
+
+
+def test_other_turns_keep_their_text(routed):
+    run, s = routed
+    s.manager.holds_connector_answer.return_value = False
+    s.decide.return_value = jev("knowledge")
+    turn = _in_a_turn(run)
+    assert turn.private is False and list(turn.texts) == [(1, "prompt")]

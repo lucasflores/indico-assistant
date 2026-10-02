@@ -400,7 +400,9 @@ class SessionManager:
         session = self.get_session(session_id)
         if not session:
             return False
-        
+
+        from indico_assistant.services.analytics import recorder
+        recorder.forget_chat(session.id)  # its turns keep their numbers, not its text (spec 024 FR-011)
         db.session.delete(session)
         db.session.flush()
         return True

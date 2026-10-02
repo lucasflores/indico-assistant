@@ -19,6 +19,7 @@ from typing import Union
 from celery.exceptions import SoftTimeLimitExceeded
 from pydantic import BaseModel, Field, create_model, model_validator
 
+from indico_assistant.services.analytics import recorder
 from indico_assistant.services.connectors import Tool  # noqa: F401 - (the tools' shape, as loop.Tool)
 from indico_assistant.services.connectors.github import GitHubClient, GitHubError
 from indico_assistant.services.knowledge.answer import NOT_ANSWERED, KnowledgeResult
@@ -61,6 +62,9 @@ class ConnectorResult(KnowledgeResult):
     tools: list = field(default_factory=list)  # {name, ms, ok} per call: never its arguments or results (FR-019)
     urls: set = field(default_factory=set)  # the items' own addresses, from the API's fields: the links it may keep
     unauthorized: bool = False  # GitHub refused the token (401): the grant was revoked, so the connection must renew
+    # for the analytics (spec 024): why the loop stopped, and the connection's state when it never ran
+    stop: str | None = None  # answered | steps | budget | repeated | failed_step | unauthorized
+    access: str | None = None
 
 
 class _Step(BaseModel):
@@ -128,11 +132,12 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
     started, done, seen = (now() if started is None else started), [], set()
     if isinstance(client, GitHubClient):  # (every GitHub call inside the budget, however many one tool makes)
         client.deadline = time.monotonic() + BUDGET_SECONDS - (now() - started)
-    result, answered = ConnectorResult(NOT_ANSWERED), False
+    result, answered = ConnectorResult(NOT_ANSWERED, stop="steps"), False
     with collect_calls() as calls:
         for n in range(MAX_TOOL_STEPS):
             left = BUDGET_SECONDS - (now() - started)
             if left < MIN_STEP_SECONDS:
+                result.stop = "budget"
                 break
             response = llm.generate(_prompt(message, tools, done), step if n else first, system_prompt=RULES,
                                     messages=history, timeout=min(step_timeout, left))
@@ -140,29 +145,36 @@ def run(message, history, tools, *, client, llm, now=time.monotonic, step_timeou
                 error = response.error
                 logger.warning("A connector step failed (%s: %s)", getattr(error, "error_type", "?"),
                                str(getattr(error, "message", error))[:200])
+                result.stop = "failed_step"
                 break
             if response.result.call is None:  # (a Lookup always has one)
-                result.text, answered = response.result.answer, True
+                result.text, answered, result.stop = response.result.answer, True, "answered"
                 break
             call = response.result.call
             if (key := call.model_dump_json()) in seen:
+                result.stop = "repeated"
                 break  # (a repeated call: answer from what is there)
             seen.add(key)
             began, urls = now(), ()
-            try:
-                out = by_name[call.tool].run(client, call)
-                (text, urls), ok = (out if isinstance(out, tuple) else (out, ())), True
-            except GitHubError as error:
-                if error.status == 401:  # (a token GitHub no longer accepts: no answer can come of it)
-                    result.unauthorized = True
-                    result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": False})
-                    break
-                text, ok = f"GitHub error {error.status}: {error.message}", False
-            except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout; fresh-review)
-                raise
-            except Exception:  # noqa: BLE001 - (an answer GitHub shaped unexpectedly): this lookup fails, not the answer
-                logger.exception("The %s tool failed", call.tool)
-                text, ok = "The lookup failed.", False
+            # one analytics step per lookup: its name, time and outcome, never what it read (the turn is private)
+            with recorder.step("tool", "github", call.tool) as tool_step:
+                try:
+                    out = by_name[call.tool].run(client, call)
+                    (text, urls), ok = (out if isinstance(out, tuple) else (out, ())), True
+                except GitHubError as error:
+                    tool_step.error_code = str(error.status)
+                    if error.status == 401:  # (a token GitHub no longer accepts: no answer can come of it)
+                        result.unauthorized, result.stop, tool_step.ok = True, "unauthorized", False
+                        result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": False})
+                        break
+                    text, ok = f"GitHub error {error.status}: {error.message}", False
+                except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout; fresh-review)
+                    raise
+                except Exception:  # noqa: BLE001 - (an answer GitHub shaped unexpectedly): this lookup fails
+                    logger.exception("The %s tool failed", call.tool)
+                    text, ok = "The lookup failed.", False
+                    tool_step.error_code = "failed"
+                tool_step.ok = ok
             result.tools.append({"name": call.tool, "ms": int((now() - began) * 1000), "ok": ok})
             result.urls.update(urls)  # (never scraped from the text: a body or a comment can hold any address)
             done.append((call, text))
@@ -195,7 +207,7 @@ def answer(user_id, message, history, *, llm, settings, base_url, profile_url, s
     access = store.token(user_id, github.app_for(settings))
     if access.state != store.OK:
         reply = {store.RENEW: RENEW_REPLY, store.UNAVAILABLE: UNAVAILABLE_REPLY}.get(access.state, CONNECT_REPLY)
-        return ConnectorResult(reply.format(url=profile_url))
+        return ConnectorResult(reply.format(url=profile_url), access=access.state)
     store.used(user_id)  # (commits: no transaction stays open through the model calls)
     with github.client_for(access.token, settings) as client:
         result = run(message, history, github.TOOLS, client=client, llm=llm,
