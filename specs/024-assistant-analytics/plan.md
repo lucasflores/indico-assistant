@@ -70,11 +70,11 @@ There are no foreign keys to chats, messages, users or events (spec, "Outlives t
 | Group | Columns |
 |---|---|
 | Key | `id` BIGSERIAL; `job_id` VARCHAR(32) UNIQUE |
-| Who and where | `user_id` INT NULL; `is_admin` BOOL; `session_id` UUID; `message_id` UUID (the question); `answer_id` UUID NULL (the answer message); `event_id` INT NULL; `category_id` INT NULL |
-| When | `queued_at` (the question's `created_at`); `started_at`; `finished_at` NULL (NULL means running, or lost once past the hard limit) |
+| Who and where | `user_id` INT NULL; `is_admin` BOOL; `session_id` UUID; `message_id` UUID (the question); `answer_id` UUID NULL (the answer message); `event_id` INT NULL; `category_id` INT NULL; `private` BOOL (no text kept; FR-009). All but `answer_id` and `private` are stamped by the start row |
+| When | `queued_at` (the question's `created_at`); `started_at`; `finished_at` NULL (NULL means running, or "no end record" once past the hard limit: the worker died or the end write failed) |
 | Outcome | `outcome` VARCHAR(24) NULL: answered, failed, timeout, access_denied, refusal, cannot_plan. `error_code` VARCHAR(48) |
 | Routing | `route` VARCHAR(16); `decided_by` VARCHAR(16): jev, classifier, shortcut or planner; `jev_confidence` FLOAT; `fallback` VARCHAR(48) |
-| Totals | `llm_calls` SMALLINT; `prompt_tokens` INT; `completion_tokens` INT; `cost_usd` NUMERIC(12,6), the known sum; `unpriced_calls` SMALLINT |
+| Totals | sums over the turn's steps: `llm_calls` SMALLINT (steps of kind llm or jev); `prompt_tokens` INT; `completion_tokens` INT; `cost_usd` NUMERIC(12,6), the known sum; `unpriced_calls` SMALLINT (llm/jev steps without a cost report) |
 | Data route | `intent` VARCHAR(48); `corrections` SMALLINT; `row_count` INT; `truncated` BOOL; `sql_ms` INT |
 | Others | `plan_id` UUID; `tool_calls` SMALLINT; `rating` SMALLINT (1, -1 or NULL) |
 | The rest | `record` JSONB: the route record (`_route_record`), plus Jev's cost and probabilities, the knowledge pages, the tool-loop stop reason |
@@ -120,10 +120,17 @@ order. The downgrade recreates them from 003's body, and leaves `uuid-ossp` alon
 
 **The turn:**
 - `turn(job_id, user_id, session_id, message_id)` is a context manager around the whole body of `answer_chat`.
-  - **On entry**, it inserts the turn row (`started_at`, `queued_at` from the question's row) in its own
-    transaction, through `db.engine.begin()`. It also sets the context variable.
-  - **On exit**, it always writes, in one more transaction on its own connection: an UPDATE of the turn (outcome,
-    totals, fields), then the steps (executemany), then the texts.
+  - **On entry**, it inserts the turn row in its own transaction, through `db.engine.begin()`, and sets the context
+    variable.
+    - The row is one `INSERT … SELECT` that stamps who and where (FR-002) from the question's row and the user's
+      row: `queued_at`, `event_id` and its `category_id`, and `is_admin`.
+    - So a turn that fails before routing still has them, and the admin filter (`is_admin IS NOT TRUE`) never drops
+      it.
+  - **On exit**, it always writes, in one more transaction on its own connection:
+    1. an UPDATE of the turn: outcome, the totals (summed over its steps), and fields. It also sets `rating` from
+       `feedback_entries` for `answer_id`, so a vote cast before this write isn't lost (FR-007);
+    2. the steps (executemany);
+    3. the texts, unless the turn is private.
   - **Errors:** the recorder catches and logs its own errors. It never raises into the task.
 - `finish(outcome, error_code=None)` and `update(**fields)` are called by the task and the chat service.
 
@@ -132,16 +139,27 @@ order. The downgrade recreates them from 003's body, and leaves `uuid-ossp` alon
   - It gives the step the next `seq`, and its parent from a context-variable stack.
   - It times the step, and on an exception sets `ok=False` and `error_code` (the exception's class name), then
     re-raises.
-  - It yields a mutable `Step` that the caller fills in: models, tokens, cost, attempts, rows.
+  - It yields a mutable `Step` that the caller fills in: models, tokens, cost, attempts, rows, and `ok` and
+    `error_code` when the call fails without raising. `generate()` returns errors as `LLMResponse`, so it sets them
+    from `response.error`.
 - `text(step, kind, value)` adds a text, cut at 100,000 characters. It does nothing while text is off: setting off,
-  or inside `no_text()`.
-- `no_text()` is a context manager. The GitHub loop runs inside it (FR-009).
+  or the turn is private.
+- `private()` marks the turn private, drops the texts collected so far, and keeps any more (FR-009). The chat
+  service calls it in two cases:
+  - **at the start of `answer()`**, when an earlier answer in this chat has `route = 'connector'` (one EXISTS on
+    `chat_messages.metadata_json`);
+  - **as soon as the route is `connector`**, which drops Jev's and the classifier's texts.
+- **The attempt counter:** `factory.py` gives every OpenAI-SDK client an `httpx.Client` whose `response` event hook
+  adds each HTTP attempt and its status to the current step. So retries the SDK makes on its own count: the non-ibis
+  providers keep the SDK's default `max_retries=2` (`factory.py:133,171,212`), and the hooks of instructor never
+  see those retries.
 
 **Outside a turn** (tests, CLI, the admin health call, `execute_plan`), every call is a no-op. So
 `LLMService.generate()` works unchanged everywhere.
 
-**Lost turns** are computed by the queries: `finished_at IS NULL AND started_at < now() - interval '160 seconds'`,
-the hard limit plus 10 s. No sweep is needed.
+**Turns with no end record** are computed by the queries: `finished_at IS NULL AND started_at < now() - interval
+'160 seconds'`, the hard limit plus 10 s. They count lost answers and failed end writes together; the log tells
+them apart. No sweep is needed.
 
 ### 4. Hooks (each one small; the recorder carries the logic)
 
@@ -149,7 +167,8 @@ the hard limit plus 10 s. No sweep is needed.
   - The body runs inside `recorder.turn(...)`.
   - Each `except` branch calls `finish(...)` with its outcome: timeout, access_denied, failed (query processing),
     failed (internal).
-  - Success: `finish('answered')`, unless the service already set refusal or cannot_plan.
+  - Success: `finish('answered')`, unless the service already set an outcome: refusal, cannot_plan, or failed for an
+    answer saved as a failure (see `answer()` below).
 - **`services/llm/service.py`:**
   - **Steps:** `generate()` wraps `create()` in `recorder.step('llm', response_model.__name__)`. It fills the step
     from this call's own `calls`: tokens and cost summed over attempts (each was billed), `unpriced` if any attempt
@@ -157,9 +176,12 @@ the hard limit plus 10 s. No sweep is needed.
   - **Texts:** the prompt as the JSON of `messages` (system, history, prompt), and the response as
     `result.model_dump_json()` or the error.
   - **Timeout (audit finding #1):** `SoftTimeLimitExceeded` is re-raised before the broad `except`, so the task's
-    timeout branch runs. Without this, a timeout is never recorded as one.
+    timeout branch runs. The same `except SoftTimeLimitExceeded: raise` goes before the other broad handlers on the
+    answer's path: `executor.py:118` and `gate.py:186`. Without this, a timeout is never recorded as one.
   - **Failed attempts:** `_record_failed_attempt` widens from `APIConnectionError` to `openai.APIError`, so 429 and
-    5xx attempts are recorded, with the status code as `error`.
+    5xx attempts that reach instructor are recorded, with the status code as `error`. Attempts inside the SDK are
+    counted by the HTTP hook (Design 3).
+  - **Step outcome:** `ok` and `error_code` are set from the `LLMResponse` (FR-003).
   - **Cost:** `completion_record` also reads OpenRouter's `usage.cost` when ibis's `cost_usd` is missing (FR-005).
   - **Removed:** the tracer, `set_tracer` and the error-trace block (inventory 1).
 - **`services/knowledge/gate.py` `decide()`:** `recorder.step('jev', 'route')`, with Jev's model, cost
@@ -174,15 +196,20 @@ the hard limit plus 10 s. No sweep is needed.
   - `sql_ms` sums every execution, corrections included.
   - The tracer `_span` blocks go (inventory 1).
 - **`services/connectors/loop.py`:**
-  - The loop runs inside `recorder.no_text()`.
+  - The turn is already private by the time the loop runs (Design 3).
   - Each tool call is `recorder.step('tool', 'github', name)`.
   - The stop reason (answered, steps, budget, repeated, failed) and the access state go into `record`.
 - **`services/chat/service.py` `answer()`:**
-  - One `recorder.update(...)` near the end: `answer_id`, `is_admin`, `event_id` and its `category_id`, `route`,
-    `decided_by`, `jev_confidence`, `fallback`, and `record` (the route record plus extras).
+  - At the start, `recorder.private()` if the chat holds a GitHub answer. Again as soon as the route is
+    `connector`.
+  - One `recorder.update(...)` near the end: `answer_id`, `route`, `decided_by`, `jev_confidence`, `fallback`, and
+    `record` (the route record plus extras).
   - From `PipelineResult`: intent, corrections, rows and truncated.
   - Also `plan_id` and `tool_calls`.
-  - Refusal and cannot-plan set the outcome.
+  - **The outcome:**
+    - refusal and cannot-plan set it;
+    - so does an answer saved as a failure, as `failed`. That's metadata `problem == 'failed'`, or a knowledge or
+      chat answer with `failed=True`. Its `error_code` comes from `pipeline_error.error_type`, or is `model_error`.
 - **`services/feedback/service.py`:** `submit_feedback` and `withdraw_feedback` set or clear `turns.rating` by
   `answer_id`. Only thumbs count: thumbs up is 1, thumbs down is -1.
 - **Privacy (`plugin.py`, `services/chat/session_manager.py`, `tasks/cleanup.py`):**
@@ -211,7 +238,7 @@ the hard limit plus 10 s. No sweep is needed.
 | Routing (US4) | `route_mix`, `jev_confidence` (histogram), `jev_skips`, `fallbacks`, `negative_by_route` |
 | Depth (US4) | `calls_per_turn` (by route), `correction_loops`, `tool_calls` (per tool, with failure rate), `loop_steps` |
 | Plans (US4) | `plan_funnel` (shown, confirmed, carried out, undone), `plan_failures` (by action), `time_to_confirm`, read from `action_plans` |
-| Errors (US5) | `errors_by_type` (per day), `lost_turns` |
+| Errors (US5) | `errors_by_type` (per day), `no_end_record` |
 
 Percentiles use `percentile_cont`. Admin traffic is excluded unless the filter includes it.
 
@@ -223,6 +250,9 @@ Percentiles use `percentile_cont`. Admin traffic is excluded unless the filter i
 - `GET /api/assistant/admin/turns?…&before=<id>&limit=50` returns the keyset-paged list.
 - `GET /api/assistant/admin/turns/<id>` returns the turn, its steps in order, its texts (or `expired`), its rating
   and comment, its plan, and any reports that cite its answer.
+  - The question and the answer are read from the chat and included only while the turn still has texts and isn't
+    private (FR-010).
+  - The thumbs-down queue and the export follow the same rule.
 - `GET /api/assistant/admin/turns/export.csv|json?…&text=0|1` returns the export, and logs `assistant analytics
   export` with the user, the filters and the text flag (FR-021).
 
@@ -283,13 +313,13 @@ indico_assistant/
 ├── migrations/011_analytics.py             # new: 3 tables up, 3 Langfuse tables down
 ├── services/analytics/                     # new
 │   ├── __init__.py
-│   ├── recorder.py                         # context var, turn(), step(), text(), no_text()
+│   ├── recorder.py                         # context var, turn(), step(), text(), private()
 │   └── stats.py                            # one query per number, collect(), cache
 ├── controllers/analytics.py                # new: API + pages
 ├── templates/admin_analytics.html, admin_turn.html   # new
 ├── static/js/analytics/charts.js, analytics.js       # new (charts.js ported from ibis-chat)
 ├── tasks/chat.py, tasks/cleanup.py         # changed
-├── services/llm/service.py                 # changed: steps, timeout re-raise, failed attempts, OpenRouter cost, no tracer
+├── services/llm/{service,factory}.py       # changed: steps, timeout re-raise, failed attempts, HTTP attempt hook, OpenRouter cost, no tracer
 ├── services/knowledge/gate.py, services/nl2sql/{executor,pipeline,models}.py, services/connectors/loop.py
 ├── services/chat/{service,session_manager}.py, services/feedback/service.py
 ├── plugin.py, blueprint.py, views.py, default_settings.py, forms.py, models/__init__.py
@@ -304,5 +334,5 @@ tests/integration/analytics/                # recorder, hooks per route, stats g
 | Departure | Why | The simpler option, and why not |
 |---|---|---|
 | Writes on their own connection, outside the ORM session | The answer's session is rolled back on failure, and the failed turn must still be recorded (FR-001, FR-006) | Writing through `db.session` after the task's rollback works only on the failure paths, and would mix the record's commit into the answer's on success |
-| A turn row at the start as well as the end | A hard kill runs no code, so a start row is the only way to count lost turns (edge case) | One write at the end loses exactly the failures we most want to see |
+| A turn row at the start as well as the end | A hard kill runs no code, so a start row is the only way to count lost turns (edge case), and it stamps who and where for turns that fail early | One write at the end loses exactly the failures we most want to see |
 | A chart script copied from another repo | FR-017 keeps the page to its own script, with no library to load or update, and Indico ships none | Writing charts from scratch repeats ibis-chat's 304 working lines; a shared package is premature for two users |
