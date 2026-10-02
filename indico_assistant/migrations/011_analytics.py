@@ -29,7 +29,7 @@ def upgrade():
         sa.Column('user_id', sa.Integer(), nullable=True),
         sa.Column('is_admin', sa.Boolean(), nullable=True),
         sa.Column('session_id', UUID(as_uuid=True), nullable=False, index=True),
-        sa.Column('message_id', UUID(as_uuid=True), nullable=False),
+        sa.Column('message_id', UUID(as_uuid=True), nullable=True),
         sa.Column('answer_id', UUID(as_uuid=True), nullable=True, index=True),
         sa.Column('event_id', sa.Integer(), nullable=True),
         sa.Column('category_id', sa.Integer(), nullable=True),
