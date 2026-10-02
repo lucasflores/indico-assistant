@@ -130,6 +130,13 @@ def test_errors_and_no_end_record(seeded):
     assert stats.no_end_record(params()) == sum(1 for s in view if s.outcome is None)
 
 
+def test_the_selects_offer_every_route_and_model_of_the_range(seeded):
+    view = users_only(seeded[0])
+    facets = stats.facets(params(route='data'))  # (a filter narrows the numbers, not the choices)
+    assert facets['routes'] == sorted({s.route for s in view})
+    assert facets['models'] == sorted({st[2] for s in view for st in s.steps if st[0] == 'llm'})
+
+
 def test_the_payload_is_cached_45_seconds(seeded, monkeypatch):
     calls = []
     real = stats.tiles

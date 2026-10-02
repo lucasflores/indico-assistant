@@ -25,7 +25,8 @@ PATHS = {'assistant.analytics_stats': '/api/assistant/admin/analytics',
          'assistant.analytics_export': '/api/assistant/admin/turns/export.{fmt}',
          'assistant.analytics_turn': '/api/assistant/admin/turns/{turn_id}',
          'assistant.admin_analytics': '/admin/assistant-analytics/',
-         'assistant.admin_analytics_turn': '/admin/assistant-analytics/turns/{turn_id}/'}
+         'assistant.admin_analytics_turn': '/admin/assistant-analytics/turns/{turn_id}/',
+         'assistant.admin_report': '/admin/assistant-reports/{report_id}/'}
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +143,7 @@ def test_a_turn_is_found_from_its_answer_and_from_a_report(app, db, people, turn
     db.session.add(report)
     db.session.flush()
     got = body(run(app, analytics.RHAnalyticsTurn, people['admin'], turn_id=turns['kept'].id))
-    assert [r['id'] for r in got['reports']] == [report.id]
+    assert [(r['id'], r['url']) for r in got['reports']] == [(report.id, f'/admin/assistant-reports/{report.id}/')]
     with app.test_request_context():
         assert analytics.answer_trace_url(answer_id).endswith(f'/{turns["kept"].id}/')
 

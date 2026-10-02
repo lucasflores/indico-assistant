@@ -191,12 +191,12 @@
 - [x] T025 [US1] `services/analytics/stats.py`: the US1 queries, `collect()` and the cache (Design 5).
 - [x] T026 [US1] `controllers/analytics.py`, `blueprint.py` and `views.py`: `GET /api/assistant/admin/analytics`, the
   page route `!/admin/assistant-analytics/`, and the menu item (`_admin_menu` yields both).
-- [ ] T027 [US1] `static/js/analytics/charts.js`, ported from ibis-chat's `public/charts.js`: keep `el`, `sv`,
+- [x] T027 [US1] `static/js/analytics/charts.js`, ported from ibis-chat's `public/charts.js`: keep `el`, `sv`,
   `tabs`, `tileInto`, `lineChart`, `niceTicks`, the tooltip and PNG/SVG download, and drop the rest.
   - `analytics.js`: the range tabs, the filters, the URL-hash state, the tiles, and the adoption, cost and speed
     sections, each with an empty state.
   - `templates/admin_analytics.html`, extending `layout/admin_page.html`.
-- [ ] T028 [US1] Browser check, as `tests/browser/walk.mjs` does: the page renders with the seed, with no console
+- [x] T028 [US1] Browser check, as `tests/browser/walk.mjs` does: the page renders with the seed, with no console
   errors and with the CSP nonce, and a hash link restores the filters.
 
 ## Phase 4: User Story 2 — one answer's trace (P1; the MVP ends here)
@@ -216,7 +216,7 @@
 ### Code
 
 - [x] T030 [US2] `controllers/analytics.py`: the turn list and trace endpoints.
-- [ ] T031 [US2] `templates/admin_turn.html` plus the trace view in `analytics.js`:
+- [x] T031 [US2] `templates/admin_turn.html` plus the trace view in `analytics.js`:
   - the header (question, answer, outcome, route decision);
   - the timeline of steps with their durations, with expandable texts;
   - the plan and the rating.
@@ -229,12 +229,12 @@
   - golden tests for the Quality row;
   - the 9-rating case shows "not enough ratings (9 of 10)";
   - the Wilson interval matches a hand-computed value.
-- [ ] T034 [US3] Code: the queries, plus the quality section, including the thumbs-down queue with trace links.
+- [x] T034 [US3] Code: the queries, plus the quality section, including the thumbs-down queue with trace links.
 
 ## Phase 6: User Story 4 — routing and the agent's work (P2)
 
 - [x] T035 [US4] Tests first, in `test_stats_routing.py`: golden tests for the Routing, Depth and Plans rows.
-- [ ] T036 [US4] Code: the queries and the sections.
+- [x] T036 [US4] Code: the queries and the sections.
 
 ## Phase 7: User Story 5 — errors and export (P3)
 
@@ -243,7 +243,7 @@
   - `text=1` adds the texts that are still kept. A private turn has neither texts nor its question and answer;
   - the export logs a line with the user, the filters and the text flag.
   - Also golden tests for `errors_by_type` and `no_end_record`.
-- [ ] T038 [US5] Code: the export endpoint and the errors section.
+- [x] T038 [US5] Code: the export endpoint and the errors section.
 
 ## Phase 8: Polish and checks
 
