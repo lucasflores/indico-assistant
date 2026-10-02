@@ -129,8 +129,9 @@ order. The downgrade recreates them from 003's body, and leaves `uuid-ossp` alon
       it.
   - **On exit**, it always writes, in one more short transaction: it rolls back first (the answer was committed or
     rolled back already, so nothing of it rides along), then writes in a savepoint and commits:
-    1. an UPDATE of the turn: outcome, the totals (summed over its steps), and fields. It also sets `rating` from
-       `feedback_entries` for `answer_id`, so a vote cast before this write isn't lost (FR-007);
+    1. an UPDATE of the turn: outcome, the totals (summed over its steps), and fields. It never sets `rating`:
+       the answer's id was put on the turn in the transaction that saved the answer (`link_answer`), so every vote
+       sets it itself (FR-007);
     2. the steps (executemany);
     3. the texts, unless the turn is private.
   - **Errors:** the recorder catches and logs its own errors. It never raises into the task.

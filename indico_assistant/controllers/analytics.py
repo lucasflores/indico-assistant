@@ -31,7 +31,8 @@ EPOCH = datetime(2000, 1, 1, tzinfo=UTC)  # "all time"
 def params(args):
     """The range and filters of a request: ``range`` (24h, 7d, 30d, 90d, all) or ``since``/``until`` (ISO dates), and
     ``route``, ``model``, ``user``, ``event``, ``category``, ``admins=1``."""
-    now = datetime.now(UTC)
+    # to the minute: the cache key holds since/until, and requests in the same minute must share it (FR-020)
+    now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     try:
         if args.get('since'):
             since = _instant(args['since'])

@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, text as sql
+from sqlalchemy import text as sql
 
 from indico.core.db import db
 
@@ -133,7 +133,7 @@ def turn(job_id, user_id, session_id, message_id, soft_limit=None):
 
 
 def _write_end(current):
-    from indico_assistant.models import FeedbackEntry, Turn, TurnStep, TurnText
+    from indico_assistant.models import Turn, TurnStep, TurnText
 
     db.session.rollback()  # the answer committed, or was rolled back: nothing of it may ride along
     steps = current.steps
@@ -151,11 +151,8 @@ def _write_end(current):
         'unpriced_calls': sum(1 for s in calls if s.cost_usd is None),
         'sql_ms': _sum(s.duration_ms for s in steps if s.kind == 'sql'),  # every query, corrections included
     }
-    if answer_id := values.get('answer_id'):  # a vote cast before this write (FR-007; the feedback hook missed it)
-        values['rating'] = (select(db.case((FeedbackEntry.feedback_type == 'thumbs_up', 1), else_=-1))
-                            .where(FeedbackEntry.message_id == answer_id,
-                                   FeedbackEntry.feedback_type.in_(('thumbs_up', 'thumbs_down')))
-                            .order_by(FeedbackEntry.created_at.desc()).limit(1).scalar_subquery())
+    # (never the rating: votes set it themselves, and link_answer() made sure they find the turn; writing it here
+    # could overwrite a vote whose transaction this UPDATE waited for, under its older snapshot)
     turns = Turn.__table__
     with db.session.begin_nested():  # (a failure takes back only this, never the caller's transaction)
         db.session.execute(turns.update().where(turns.c.id == current.id).values(**values))
@@ -166,6 +163,21 @@ def _write_end(current):
                 {'turn_id': current.id, 'seq': seq, 'kind': kind, 'text': value, 'cut': cut}
                 for (seq, kind), (value, cut) in current.texts.items()])
     db.session.commit()
+
+
+MAX_COST = Decimal(10**6)  # (Numeric(12, 6): a cost at or past this is not a cost)
+
+
+def cost(value):
+    """A provider's reported cost as a Decimal, or None (unknown) when it is not a finite, sane amount: a cost the
+    recorder can't store must never fail an answer (FR-006)."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (ArithmeticError, ValueError):
+        return None
+    return amount if amount.is_finite() and 0 <= amount < MAX_COST else None
 
 
 def _sum(values):
@@ -223,6 +235,15 @@ def time_left():
     return current.deadline - time.monotonic() if current is not None and current.deadline else None
 
 
+def check_deadline(request):
+    """An ``httpx`` request hook: no HTTP attempt starts past the turn's soft deadline. The SDK may have swallowed
+    the worker's SoftTimeLimitExceeded and be retrying; this refuses its retries at once (FR-001)."""
+    left = time_left()
+    if left is not None and left <= 0:
+        from celery.exceptions import SoftTimeLimitExceeded
+        raise SoftTimeLimitExceeded()
+
+
 def count_attempt(response):
     """An ``httpx`` response hook: each HTTP attempt of the current step, retries included (FR-003)."""
     if item := current_step():
@@ -264,9 +285,21 @@ def update(**values):
             current.fields[key] = value
 
 
+def link_answer(answer_id):
+    """Put the answer's id on the turn in the transaction that saves the answer, so a vote, which can only come once
+    the answer exists, always finds its turn (FR-007; no race with the end write)."""
+    current = _current.get()
+    if current is None:
+        return
+    current.fields['answer_id'] = answer_id
+    from indico_assistant.models import Turn
+    with db.session.begin_nested():
+        Turn.query.filter_by(id=current.id).update({Turn.answer_id: answer_id}, synchronize_session=False)
+
+
 def rate(answer_id, rating):
     """Copy a thumbs vote (1, -1, or None when taken back) onto the answer's turn, in the caller's transaction, so it
-    commits or fails with the vote itself (FR-007). (A vote cast before the turn's end write is read by that write.)"""
+    commits or fails with the vote itself (FR-007). The turn has the answer's id by then: link_answer()."""
     from indico_assistant.models import Turn
     Turn.query.filter_by(answer_id=answer_id).update({Turn.rating: rating}, synchronize_session=False)
 

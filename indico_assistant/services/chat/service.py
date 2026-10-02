@@ -252,6 +252,7 @@ class ChatService:
             self._session_manager.get_session(session_id), response_text, metadata,
             message_id=self._session_manager.answer_id_of(message_id) if message_id else None,
         )
+        _link_answer(assistant_msg.id)  # (in the answer's own transaction: a vote always finds its turn)
         self._session_manager.commit()
         _record_turn(assistant_msg.id, route, decision, fallback, metadata, plan, answer)
         return ChatResult(
@@ -718,6 +719,14 @@ def _history(context):
     """The conversation before the question: the context ends with the question (a page note goes before it). For
     an accepted offer the planner is asked the offer instead, and the bare "yes" must not stay in its history."""
     return context[:-1] if context and context[-1].get("role") == "user" else context
+
+
+def _link_answer(answer_id):
+    try:
+        from indico_assistant.services.analytics import recorder
+        recorder.link_answer(answer_id)
+    except Exception:  # (the analytics never fail an answer, FR-006)
+        logger.exception("Analytics: could not link this answer to its turn")
 
 
 def _record_turn(answer_id, route, decision, fallback, metadata, plan, answer):

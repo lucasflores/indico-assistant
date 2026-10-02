@@ -8,7 +8,7 @@ import pytest
 
 from indico.core.db import db
 
-from indico_assistant.models import ChatMessage, ChatSession, FeedbackEntry, Turn, TurnStep, TurnText
+from indico_assistant.models import ChatMessage, ChatSession, Turn, TurnStep, TurnText
 from indico_assistant.services.analytics import recorder
 
 
@@ -108,7 +108,7 @@ def test_no_text_when_the_setting_is_off(question, monkeypatch):
     assert row.private is False and TurnText.query.filter_by(turn_id=row.id).count() == 0
 
 
-def test_outcome_fields_and_the_rating_read_at_the_end(question, db):
+def test_outcome_and_fields_at_the_end(question, db):
     answer = ChatMessage(session_id=question['session'].id, role='assistant', content='Nothing today.')
     db.session.add(answer)
     db.session.flush()
@@ -116,14 +116,10 @@ def test_outcome_fields_and_the_rating_read_at_the_end(question, db):
     def body(turn):
         recorder.update(answer_id=answer.id, route='data', intent='time_range', record={'a': 1})
         recorder.update(record={'b': 2}, not_a_column=1)  # an unknown field is ignored, never raised
-        # a vote that lands before the end write (FR-007)
-        db.session.add(FeedbackEntry(message_id=answer.id, user_id=question['user'].id, feedback_type='thumbs_down',
-                                     value='true'))
-        db.session.flush()
         recorder.set_outcome('refusal')
 
     row = run_turn(question, body)
-    assert (row.outcome, row.route, row.intent, row.rating) == ('refusal', 'data', 'time_range', -1)
+    assert (row.outcome, row.route, row.intent, row.rating) == ('refusal', 'data', 'time_range', None)
     assert row.record == {'a': 1, 'b': 2}
 
 
@@ -145,3 +141,26 @@ def test_outside_a_turn_everything_is_a_no_op():
     recorder.set_outcome('failed')
     recorder.private()
     assert recorder.current_step() is None
+
+
+@pytest.mark.parametrize(('value', 'want'), [
+    ('0.00020', Decimal('0.00020')), (0.0003, Decimal('0.0003')), (0, Decimal('0')), ('n/a', None), ('', None),
+    (float('nan'), None), (float('inf'), None), (-1, None), (10**6, None), (True, None), ({'usd': 1}, None),
+    (None, None)])
+def test_only_a_finite_sane_amount_is_a_cost(value, want):
+    assert recorder.cost(value) == want
+
+
+def test_the_answer_is_linked_in_its_own_transaction_so_a_vote_finds_its_turn(question, db):
+    answer = ChatMessage(session_id=question['session'].id, role='assistant', content='Nothing today.')
+    db.session.add(answer)
+    db.session.flush()
+
+    def body(turn):
+        recorder.link_answer(answer.id)
+        db.session.expire_all()
+        assert Turn.query.get(turn.id).answer_id == answer.id  # (before the end write)
+        recorder.rate(answer.id, 1)  # a vote between the answer and the end write
+
+    row = run_turn(question, body)
+    assert (row.answer_id, row.rating) == (answer.id, 1)

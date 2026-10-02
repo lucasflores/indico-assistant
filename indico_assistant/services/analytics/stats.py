@@ -64,7 +64,8 @@ def scope(q, t='t'):
         if value is not None:
             parts.append(f'{t}.{column} = :{column}')
     if q.model:
-        parts.append(f'EXISTS (SELECT 1 FROM {S} ms WHERE ms.turn_id = {t}.id AND ms.served_model = :model)')
+        parts.append(f'EXISTS (SELECT 1 FROM {S} ms WHERE ms.turn_id = {t}.id '
+                     f'AND coalesce(ms.served_model, ms.requested_model) = :model)')
     return ' AND '.join(parts)
 
 
@@ -254,9 +255,10 @@ def thumbs_down_queue(q, limit=50):
                             {WAIT_MS} AS wait_ms,
                             (SELECT coalesce(s.served_model, s.requested_model) FROM {S} s
                              WHERE s.turn_id = t.id AND s.kind = 'llm' ORDER BY s.seq DESC LIMIT 1) AS model,
-                            (SELECT f.value FROM plugin_assistant.feedback_entries f
-                             WHERE f.message_id = t.answer_id AND f.feedback_type = 'comment'
-                             ORDER BY f.created_at DESC LIMIT 1) AS comment
+                            CASE WHEN NOT t.private THEN
+                                (SELECT f.value FROM plugin_assistant.feedback_entries f
+                                 WHERE f.message_id = t.answer_id AND f.feedback_type = 'comment'
+                                 ORDER BY f.created_at DESC LIMIT 1) END AS comment
                      FROM {T} t WHERE {scope(q)} AND t.rating = -1
                      ORDER BY t.started_at DESC, t.id DESC LIMIT :limit''', q, limit=limit)
 
@@ -306,7 +308,8 @@ def decided_by(q):
 
 
 def negative_by_route(q):
-    return _rows(f'''SELECT coalesce(t.route, 'none') AS route, count(*) FILTER (WHERE t.rating = -1) AS thumbs_down,
+    return _rows(f'''SELECT coalesce(t.route, 'none') AS route,
+                            count(DISTINCT t.id) FILTER (WHERE t.rating = -1) AS thumbs_down,
                             count(r.id) AS reports
                      FROM {T} t LEFT JOIN plugin_assistant.issue_reports r
                           ON r.copy->>'reported_answer_id' = t.answer_id::text

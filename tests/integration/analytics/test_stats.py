@@ -147,3 +147,40 @@ def test_the_payload_is_cached_45_seconds(seeded, monkeypatch):
     assert len(calls) == 2
     assert isinstance(first['tiles']['spend'], float)  # (JSON-ready)
     assert Decimal(str(first['tiles']['spend'])) > 0
+
+
+def test_a_model_is_found_by_the_name_the_select_shows(create_user):
+    """Review of #21: a call with no served model (it failed, or the provider sent none) is filed under the model
+    asked for, in the select and in the filter alike."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from indico.core.db import db
+
+    from indico_assistant.models import Turn, TurnStep
+    row = Turn(job_id=uuid4().hex, session_id=uuid4(), message_id=uuid4(), user_id=create_user(63).id,
+               is_admin=False, started_at=BASE + timedelta(days=1), route='chat')
+    db.session.add(row)
+    db.session.flush()
+    db.session.add(TurnStep(turn_id=row.id, seq=1, kind='llm', requested_model='only/asked', ok=False))
+    db.session.flush()
+    assert 'only/asked' in stats.facets(params())['models']
+    assert stats.tiles(params(model='only/asked'))['turns'] == 1
+
+
+def test_a_thumbs_down_counts_once_however_many_reports_cite_it(create_user):
+    from uuid import uuid4
+
+    from indico.core.db import db
+
+    from indico_assistant.models import IssueReport, Turn
+    user = create_user(64)
+    row = Turn(job_id=uuid4().hex, session_id=uuid4(), message_id=uuid4(), answer_id=uuid4(), user_id=user.id,
+               is_admin=False, started_at=BASE + timedelta(days=1), route='data', rating=-1)
+    db.session.add(row)
+    db.session.flush()
+    db.session.add_all([IssueReport(user_id=user.id, form_key=uuid4(), category='wrong_answer', text='x',
+                                    copy={'reported_answer_id': str(row.answer_id)}) for _ in range(3)])
+    db.session.flush()
+    [data] = [r for r in stats.negative_by_route(params()) if r['route'] == 'data']
+    assert (data['thumbs_down'], data['reports']) == (1, 3)

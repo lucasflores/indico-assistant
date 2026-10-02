@@ -163,8 +163,6 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, connector=Fals
     """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision.
     ``connector``: GitHub is on, so ``connector`` is one of the routes (spec 023). Each call is one analytics step
     (spec 024), failed when the decision was skipped."""
-    from decimal import Decimal
-
     from indico_assistant.services.analytics import recorder
 
     if not settings.get("jev_api_key"):
@@ -172,8 +170,7 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, connector=Fals
     with recorder.step("jev", "route", JEV_MODEL) as step:
         decision = _decide(messages, settings, plan_waiting, offer, connector, transport, step)
         step.requested_model = step.served_model = decision.name
-        if isinstance(decision.cost, (int, float)) and not isinstance(decision.cost, bool):
-            step.cost_usd = Decimal(str(decision.cost))
+        step.cost_usd = recorder.cost(decision.cost)  # (any shape can come back from an alpha endpoint)
         if decision.skipped:
             step.ok, step.error_code = False, decision.reason
     return decision
