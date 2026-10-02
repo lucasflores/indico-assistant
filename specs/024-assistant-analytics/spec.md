@@ -46,9 +46,11 @@ and support that now."
 many.
 
 **Decided in this spec, for Lucas to confirm:**
-1. **GitHub answers store no text.** Their prompts carry the user's private GitHub data, which an Indico admin can't
-   otherwise see, and spec 023 records "never what they read". Their steps, timings, tokens and cost are still
-   recorded.
+1. **GitHub answers store no text, and neither do later answers in the same chat.** Their prompts carry the user's
+   private GitHub data, which an Indico admin can't otherwise see, and spec 023 records "never what they read". The
+   chat history then carries that answer into every later prompt in the chat. Such turns are marked private: their
+   steps, timings, tokens and cost are still recorded, but no text is kept, and the trace shows neither their
+   question nor their answer.
 2. **Turn records without text are kept until an admin sets a limit.** The default is 0, meaning forever, so trends
    outlive the chats' 90-day retention. Text follows its own 30-day setting.
 3. **Admin traffic:** turns by Indico admins are flagged when they happen. The page shows them separately from
@@ -120,10 +122,12 @@ list every model call the call records hold, in order, with matching tokens and 
 2. **Given** a turn older than the text retention, **When** its trace opens, **Then** every step is still there, and
    each text shows "text no longer kept".
 3. **Given** a GitHub answer, **When** its trace opens, **Then** the steps show tool names, times and outcomes, and
-   no prompt, response or tool text.
-4. **Given** a chat the user deleted, **When** its turns' traces open, **Then** the steps and numbers remain and the
+   no question, answer, prompt, response or tool text.
+4. **Given** a chat that holds a GitHub answer, **When** the user asks a follow-up on any route, **Then** that turn is
+   private too and keeps no text.
+5. **Given** a chat the user deleted, **When** its turns' traces open, **Then** the steps and numbers remain and the
    text is gone.
-5. **Given** the turn list, **When** an admin filters by route, outcome, user, event, model or date, **Then** the
+6. **Given** the turn list, **When** an admin filters by route, outcome, user, event, model or date, **Then** the
    list shows matching turns newest first, paged.
 
 ---
@@ -189,17 +193,22 @@ written.
 - **Failing before any route:** an answer that fails first (access denied, a lost session) still gets a turn
   record with its outcome, and no steps.
 - **The soft time limit:** the outcome is "timeout", and the steps finished before it are kept.
-- **A worker killed outright:** the hard limit or a crash means no code runs at the end. The turn is recorded as
-  "running" when the worker starts it, so one still "running" after the hard limit is counted as lost.
+- **A worker killed outright:** the hard limit or a crash means no code runs at the end. The turn is recorded when
+  the worker starts it, so one with no end record after the hard limit is counted as lost.
 - **Asking again:** each attempt is its own turn.
+- **A failure answered politely:** an answer saved as a failure ("I couldn't…", from a failed query or model call) is
+  recorded as failed, not answered.
 - **Carrying out a plan** runs in its own task and isn't a turn. Its progress already lives in the plans table,
   which the plan numbers read.
 - **Model retries:** a call that needed several attempts is one step, with its attempt count. An attempt that
   failed after the router may have billed it is recorded with unknown cost, as today.
 - **Missing token counts:** if the provider reports none, the field stays empty.
 - **Long text:** a text over 100,000 characters is stored cut off, with a mark saying so.
-- **Recording fails:** if writing the record fails (a database error), the answer is unaffected. The failure is
-  logged, and the turn is simply missing.
+- **Recording fails:** if writing the record fails (a database error), the answer is unaffected, and the failure is
+  logged.
+  - A failed start write means the turn is missing.
+  - A failed end write leaves a turn with no end record, counted with the lost ones. The page calls them "no end
+    record" (the worker died, or the final write failed), and the log tells the two apart.
 - **Deleted events and users:**
   - A deleted event keeps its id on old turns, and the page shows it as deleted.
   - A deleted or anonymised user's turns lose the user id and their text.
@@ -212,15 +221,19 @@ written.
 
 **Recording (stories 1, 2):**
 - **FR-001**: Every chat answer the worker starts MUST get exactly one turn record, whatever its outcome:
-  answered, failed, timeout, access denied, refusal or couldn't plan. A record still "running" past the hard time
-  limit counts as lost.
+  answered, failed, timeout, access denied, refusal or couldn't plan.
+  - An answer saved as a failure message counts as failed.
+  - A record with no end past the hard time limit counts as lost.
+  - A soft time limit MUST be recorded as a timeout wherever it fires: in a model call, a query or Jev's call.
 - **FR-002**: A turn record MUST hold, stamped when the turn happens:
   - **Who and where:** the user, whether they're an Indico admin, the chat, the user's message and the answer
-    message, and the event page and its category.
+    message, and the event page and its category. Who and where are stamped when the worker starts the turn, so
+    failed turns have them too.
   - **When:** queued, started and finished.
   - **What happened:** the route and how it was decided (Jev's route, confidence, time and skip reason, or the
     classifier; any fallback), the outcome and error code.
-  - **Totals:** model calls, tokens in and out, known cost, and the number of calls with unknown cost.
+  - **Totals:** model calls (every `generate()` call and Jev's call), tokens in and out, known cost, and the number
+    of calls with unknown cost. These are sums over the turn's steps.
   - **For data answers:** intent, corrections, rows, whether the result was cut off, query time.
   - **Other routes:** the plan id, and the number of GitHub tool calls.
 - **FR-003**: Each step inside a turn MUST be recorded in order, with:
@@ -229,10 +242,11 @@ written.
   - its stage (classifier, generator, correction, formatter, knowledge, chat, planner, tool loop, …);
   - its parent step, if any;
   - its start time within the turn and its duration;
-  - whether it succeeded, and its error code.
+  - whether it succeeded, and its error code. A model call that returns an error without raising counts as failed.
 
-  Model calls MUST add the model requested and served, the ibis pick, tokens, cost and attempts. Queries and
-  searches MUST add the rows returned.
+  Model calls MUST add the model requested and served, the ibis pick, tokens, cost and attempts. Attempts MUST count
+  every HTTP request, including retries the provider's SDK makes on its own. Queries and searches MUST add the rows
+  returned.
 - **FR-004**: Every model call MUST go through the step recording: every `LLMService.generate()` call in every
   route, and Jev's direct HTTP call. That includes a classifier call whose question then goes to another route, and
   an attempt that failed with a rate limit or server error. A test MUST fail if a model call made during a turn is
@@ -242,7 +256,8 @@ written.
 - **FR-006**: The record MUST be written by the worker, outside the answer's own transaction. A failure to write it
   MUST NOT change the answer, and MUST be logged.
 - **FR-007**: The rating MUST be copied onto the turn record when the user rates the answer, and cleared when they
-  remove it. That way satisfaction outlives the chat.
+  remove it, so satisfaction outlives the chat. It MUST also be read when the turn's end is written, so a vote cast
+  before that write isn't lost.
 
 **Text and privacy:**
 - **FR-008**: While the "keep trace text" setting is on (the default), each step MUST also keep its text:
@@ -250,9 +265,14 @@ written.
   - for queries, the SQL and a preview of up to 20 rows (for a document search, the matched passages).
 
   Each text is capped at 100,000 characters.
-- **FR-009**: GitHub (connector) turns MUST store no text, and neither may any step whose input or output holds
-  connector data. Tokens and secrets MUST never be stored anywhere in a trace.
-- **FR-010**: Only Indico admins MAY see traces, text, the page and the API.
+- **FR-009**: A turn MUST be private, keeping no text, if it's a GitHub (connector) turn or its chat already holds
+  a GitHub answer.
+  - Text collected before the route is known (Jev, the classifier) MUST be dropped too.
+  - The trace, the thumbs-down queue and the export MUST show a private turn's question and answer nowhere.
+  - Tokens and secrets MUST never be stored anywhere in a trace.
+- **FR-010**: Only Indico admins MAY see traces, text, the page and the API. The trace and the queue MUST show a
+  turn's question and answer, which they read from the chat, only while that turn's text is kept and it isn't
+  private. So admins read chat content for the same 30 days as the rest of the text.
 - **FR-011**: Deleting a chat MUST delete its turns' text and keep their records.
 - **FR-012**: Deleting or anonymising a user MUST clear their user id on turn records and delete their turns' text.
   Merging users MUST move the turns to the account that remains.
@@ -319,14 +339,15 @@ written.
 - **SC-001**: A test drives one answer to each outcome: answered on each route, failed, soft timeout, access
   denied, refusal and couldn't plan. Each leaves exactly one turn record, with the right outcome.
 - **SC-002**: For one answer per route, run with the model mocked:
-  - the trace lists every model call in the call records, in order;
+  - the trace lists every model call in the call records, and Jev's call, in order;
   - the turn's tokens and known cost equal the sum of its steps.
 - **SC-003**: With 50,000 seeded turns and 400,000 steps, the stats endpoint answers in under 2 s uncached and
   under 100 ms cached. The trace endpoint answers in under 300 ms.
 - **SC-004**: On the live stack, recording adds under 50 ms to an answer and two short database transactions.
   Measured in the live window.
-- **SC-005**: A leak test runs a GitHub answer with known fake data and a fake token. Neither appears in any stored
-  text, step or turn record.
+- **SC-005**: A leak test runs a GitHub answer with known fake data and a fake token, then a follow-up on another
+  route in the same chat. The data and the token appear in no stored text, step, turn record, trace response or
+  export.
 - **SC-006**: After the nightly retention, text older than its setting is gone and turn records remain. With turn
   retention set, old records and their steps are gone too.
 - **SC-007**: Every number on the page matches an independent SQL query on a fixed seed (one golden test per query).

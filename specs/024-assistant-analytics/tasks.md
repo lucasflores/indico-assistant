@@ -74,7 +74,11 @@
   - **Rows:** `turn()` inserts a running row at entry, and writes the outcome, steps and texts at exit.
   - **Nesting:** nested `step()` calls set `parent_seq`; an exception in a step sets `ok=False` and `error_code`,
     then re-raises.
-  - **Text:** `no_text()`, or the setting being off, stores no text. Text over 100,000 characters is cut and marked.
+  - **Text:** a private turn, or the setting being off, stores no text. `private()` also drops the texts already
+    collected. Text over 100,000 characters is cut and marked.
+  - **Failing without raising:** a step whose caller sets `ok=False` and an `error_code` is stored that way.
+  - **The start row:** it stamps `queued_at`, `is_admin`, `event_id` and `category_id` from the question and the
+    user.
   - **Own connection:** the writes don't change `db.session`'s state. A pending row on the session is neither
     committed nor lost.
   - **Failures:** a failing write (monkeypatched) is logged and doesn't raise.
@@ -88,43 +92,64 @@
     - access denied;
     - refusal;
     - couldn't plan.
+  - Also these cases:
+    - an answer saved as a failure (a failed query, or a model call that failed and was answered politely) →
+      `failed`;
+    - the soft limit fired inside a query (`executor.execute`) and inside Jev's call → `timeout`.
   - Each must leave exactly one turn with the right `outcome` and `error_code`.
-  - Also: a turn left running past 160 s counts as lost in `lost_turns`.
+  - A turn that fails before routing still has `is_admin` and `event_id`, and the default "users only" stats count
+    it.
+  - A turn left without an end past 160 s counts in `no_end_record`.
 - [ ] T009 [P] `tests/integration/analytics/test_steps.py` (SC-002, FR-004):
   - **Every route:** for one answer per route, run through the real services with the model mocked:
     - the steps hold every call record of the turn, in order;
     - the turn's tokens and known cost equal the sum of its steps;
-    - `llm_calls` equals the number of `generate()` calls.
+    - `llm_calls` equals the number of `generate()` calls plus Jev's call.
+  - **Failed calls:** a `generate()` that returns an error response is stored as `ok=False` with its error type.
   - **The data route** adds: classifier → generator → query (failing) → correction → query → formatter, with
     `parent_seq` and `corrections=1`.
   - **Jev:** with Jev on, its step comes first, with its cost.
-  - **Failed attempts:** a 429 attempt is recorded, with an unknown cost.
+  - **Failed attempts:** a 429 attempt that reaches instructor is recorded, with an unknown cost.
+  - **SDK retries:** for an OpenAI-SDK provider other than ibis, an `httpx.MockTransport` answers 429 then 200. The
+    step must show `attempts=2` and the 429.
   - **Cost:** OpenRouter's `usage.cost` is read when ibis's `cost_usd` is missing.
 - [ ] T010 [P] `tests/integration/analytics/test_privacy.py` (SC-005, FR-009, FR-011, FR-012):
   - **Leak test:** a GitHub answer over the fake GitHub, with a known marker string in an issue body and a known
-    fake token. Neither appears in any `turn_texts`, `turn_steps` or `turns.record` value. The tool steps exist with
-    names, times and outcomes.
+    fake token, then a follow-up on another route in the same chat.
+    - Neither the marker nor the token appears in any `turn_texts`, `turn_steps` or `turns.record` value, the trace
+      response, the thumbs-down queue or the export.
+    - Both turns are private, and the GitHub turn's Jev and classifier texts are gone too.
+    - The tool steps exist with names, times and outcomes.
   - **Deleting a chat** deletes its texts and keeps its turns.
   - **Deleting a user** clears `user_id` and deletes the texts; anonymising them does the same.
   - **Merging users** moves the turns to the account that remains.
-- [ ] T011 [P] `tests/integration/analytics/test_rating.py` (FR-007): a thumbs up sets `rating=1`; switching to down
-  sets -1; withdrawing it sets NULL. A comment alone doesn't change the rating.
+- [ ] T011 [P] `tests/integration/analytics/test_rating.py` (FR-007):
+  - a thumbs up sets `rating=1`; switching to down sets -1; withdrawing it sets NULL;
+  - a comment alone doesn't change the rating;
+  - a vote cast between the answer's commit and the recorder's end write is still on the turn after the end write.
 
 #### Code
 
 - [ ] T012 `services/analytics/recorder.py` (Design 3). Makes T007 pass.
 - [ ] T013 `tasks/chat.py`: the body runs inside `recorder.turn(...)`, and each branch calls `finish` (Design 4).
-- [ ] T014 `services/llm/service.py`:
-  - each `generate()` is one step, with its texts;
+- [ ] T014 `services/llm/service.py` and `factory.py`:
+  - each `generate()` is one step, with its texts, and `ok`/`error_code` from the response;
   - `SoftTimeLimitExceeded` is re-raised (audit finding #1);
   - `_record_failed_attempt` takes `openai.APIError`;
-  - `completion_record` reads OpenRouter's `usage.cost`.
-- [ ] T015 [P] `services/knowledge/gate.py`: the Jev step.
-- [ ] T016 [P] `services/nl2sql/executor.py`: the query step, with the timeout code and the preview.
+  - `completion_record` reads OpenRouter's `usage.cost`;
+  - every OpenAI-SDK client gets the `httpx` response hook that counts attempts (plan, Design 3).
+- [ ] T015 [P] `services/knowledge/gate.py`: the Jev step, and `SoftTimeLimitExceeded` re-raised before the
+  broad `except`.
+- [ ] T016 [P] `services/nl2sql/executor.py`: the query step, with the timeout code and the preview, and
+  `SoftTimeLimitExceeded` re-raised before the broad `except`.
   `services/nl2sql/models.py` and `pipeline.py`: `PipelineResult.truncated` and `sql_ms`.
-- [ ] T017 [P] `services/connectors/loop.py`: `no_text()`, the tool steps, and the stop reason.
-- [ ] T018 `services/chat/service.py`: the `recorder.update(...)` call with every field in Design 4. Makes T008 and
-  T009 pass.
+- [ ] T017 [P] `services/connectors/loop.py`: the tool steps and the stop reason.
+- [ ] T018 `services/chat/service.py` (Design 4):
+  - `recorder.private()`, at the start for a chat holding a GitHub answer and on the `connector` route;
+  - the `recorder.update(...)` call with every field;
+  - the `failed` outcome for answers saved as failures.
+
+  Makes T008 and T009 pass.
 - [ ] T019 [P] `services/feedback/service.py`: the rating. Makes T011 pass.
 - [ ] T020 Privacy hooks:
   - `services/chat/session_manager.delete_session`;
@@ -184,6 +209,8 @@
   - **GitHub turns:** the trace returns no texts.
   - **The list:** filters by route, outcome, user, event, model and date, newest first, with keyset paging.
   - **Lookups:** `?answer=<message id>` resolves the turn. A report's `copy.reported_answer_id` links to its turn.
+  - **What's shown:** the question and the answer are included only while the turn's texts are kept and it isn't
+    private. Past retention, or for a private turn, neither appears.
   - **Speed:** the trace answers in under 300 ms on the SC-003 seed.
 
 ### Code
@@ -213,9 +240,9 @@
 
 - [ ] T037 [US5] Tests first, in `test_export.py`:
   - the CSV and JSON rows match the turn list for the same filters;
-  - `text=1` adds the texts that are still kept, except for GitHub turns;
+  - `text=1` adds the texts that are still kept. A private turn has neither texts nor its question and answer;
   - the export logs a line with the user, the filters and the text flag.
-  - Also golden tests for `errors_by_type` and `lost_turns`.
+  - Also golden tests for `errors_by_type` and `no_end_record`.
 - [ ] T038 [US5] Code: the export endpoint and the errors section.
 
 ## Phase 8: Polish and checks
