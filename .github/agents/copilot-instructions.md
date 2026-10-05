@@ -38,6 +38,9 @@ Auto-generated from all feature plans. Last updated: 2026-01-14
 - PostgreSQL `plugin_assistant` (migration 008: chat_sessions.title); browser localStorage for the panel state (020-chat-persistence)
 - Python 3.12 (Indico and Chainlit venvs) + Chainlit 2.12.0 CustomElement/callAction, on_window_message, on_feedback; Indico WPUser/WPAdmin plugin pages with Jinja templates (021-issue-reports)
 - PostgreSQL `plugin_assistant` (migration 009: issue_reports); chat_messages.metadata_json gains problem + evidence (021-issue-reports)
+- Python 3.12.9 for both the Indico virtualenv and the eval repo (uv) (025-assistant-core)
+- pypdf 6.15 (replaces PyPDF2), python-docx, python-pptx 1.0.2; no agent framework: the turn loop runs on LLMService/instructor (025-assistant-core)
+- PostgreSQL 14 with pgvector, `plugin_assistant` schema (data-model.md) (025-assistant-core)
 
 - Python 3.11+ + Indico 3.3+, Flask (via Indico), WTForms (via Indico), SQLAlchemy (via Indico) (001-plugin-foundation)
 
@@ -57,9 +60,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 025-assistant-core: Added Python 3.12.9 for both the Indico virtualenv and the eval repo (uv)
 - 021-issue-reports: Added in-chat issue reports (Chainlit custom element), the plugin's first profile and admin pages
 - 020-chat-persistence: Added Chainlit 2.12.0 (full app in a panel, Indico-backed data layer), JavaScript panel script
-- 019-chat-actions: Added Python 3.12 (Indico venv; the constitution's minimum is 3.11)
 
 
 <!-- MANUAL ADDITIONS START -->
