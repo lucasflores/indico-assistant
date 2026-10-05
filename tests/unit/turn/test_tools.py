@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-
 from indico.modules.attachments.models.attachments import AttachmentFile
 
 from indico_assistant.services.connectors.loop import ConnectorResult
@@ -61,6 +60,7 @@ def test_list_documents_on_the_page_in_the_conversation_or_an_event(
     ctx = make_ctx(dummy_user, page_event_id=dummy_event.id)
     listed = run(by_name("list_documents"), ctx, scope="page")
     assert '"filename": "minutes.md"' in listed and "slides.txt" not in listed
+    assert f'"event": "{dummy_event.id}: {dummy_event.title}"' in listed
     assert ctx.memory.touched == [
         {"kind": "document", "ref": {"attachment_id": a.id}, "title": "minutes.md", "position": 1}
     ]
@@ -78,8 +78,9 @@ def test_list_documents_on_the_page_in_the_conversation_or_an_event(
 def test_read_document_remembers_what_it_read(db, dummy_user, dummy_event, document):
     a = document(dummy_event, "# Minutes\nApproved.", "minutes.md")
     ctx = make_ctx(dummy_user)
-    assert "[p.1]" in run(by_name("read_document"), ctx, document=a.id)
-    assert ctx.memory.documents() == [a.id]
+    text = run(by_name("read_document"), ctx, document=a.id)
+    assert "[p.1]" in text and text.startswith(f"(attached to event {dummy_event.id}: ")
+    assert ctx.memory.documents() == [a.id] and ctx.pages_seen == {a.id: {1}}
     assert run(by_name("read_document"), make_ctx(dummy_user), document=999999).startswith("No document")
 
 
@@ -87,7 +88,8 @@ def test_search_documents_labels_each_passage(db, dummy_user, dummy_event, docum
     a = document(dummy_event, "The look-up table is stored as ROOT histograms.", "talk.txt")
     ctx = make_ctx(dummy_user, embedder=fake_embedder)
     found = run(by_name("search_documents"), ctx, query="look-up table", document=a.id)
-    assert found.startswith(f"document {a.id} (talk.txt), [p.1]") and ctx.memory.documents() == [a.id]
+    assert found.startswith(f"document {a.id} (talk.txt, in event {dummy_event.id}: {dummy_event.title}), [p.1]")
+    assert ctx.memory.documents() == [a.id] and ctx.pages_seen == {a.id: {1}}
     assert run(by_name("search_documents"), ctx, query="nothing like it", document=999999) == "No passages found."
 
 

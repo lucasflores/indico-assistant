@@ -50,3 +50,21 @@ def test_only_quotes_on_their_page_are_kept_with_a_link(
     assert [(c["attachment_id"], c["filename"], c["page"]) for c in kept] == [(attachment.id, "thesis.md", 1)]
     assert kept[0]["url"].endswith("#page=1") and "/attachments/" in kept[0]["url"]
     assert "a sentence the model made up" in caplog.text
+
+
+def test_a_marker_cites_the_one_document_the_turn_saw_that_page_of(
+    db, dummy_user, dummy_event, create_attachment, fake_embedder
+):
+    from indico_assistant.services.turn.citations import from_markers
+
+    attachment = create_attachment(dummy_user, dummy_event, title="Notes")
+    attachment.file = AttachmentFile(user=dummy_user, filename="notes.md", content_type="text/plain")
+    attachment.file.save(b"# Notes\nThe budget was approved.")
+    db.session.flush()
+    with patch.object(indexing, "_vector_search_enabled", return_value=True):
+        indexing.index_attachment(attachment, embedder=fake_embedder)
+    text = "The budget was approved [p.1]; see also [p.4]."
+    added = from_markers(text, {attachment.id: {1}}, [])
+    assert [(c["attachment_id"], c["page"]) for c in added] == [(attachment.id, 1)]  # (p.4 was never seen)
+    assert from_markers(text, {attachment.id: {1}, 999: {1}}, []) == []  # (two documents have a p.1: no guess)
+    assert from_markers(text, {attachment.id: {1}}, [{"page": 1}]) == []  # (already cited)

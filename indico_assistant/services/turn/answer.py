@@ -33,12 +33,16 @@ class Outcome:
     offer: str | None = None
 
 
+#: The event settings with a global one of their own (the rest, allowed_tables and custom_system_prompt, have none)
+GLOBAL_OF = {"enabled": "enabled", "nl2sql_enabled": "nl2sql_enabled"}
+
+
 def event_setting(plugin: Any, event: Any, key: str) -> Any:
-    """An event's own setting, else the global one. The event form saves "" for "inherit" and "true"/"false" for
-    its switches (``plugin.get_effective_setting`` took "" for a value)."""
+    """An event's own setting, else the global one when there is one. The event form saves "" for "inherit" and
+    "true"/"false" for its switches (``plugin.get_effective_setting`` took "" for a value)."""
     value = plugin.event_settings.get(event, key) if event is not None else None
     if value is None or value == "":
-        return plugin.settings.get(key)
+        return plugin.settings.get(GLOBAL_OF[key]) if key in GLOBAL_OF else None
     if value in ("true", "false"):
         return value == "true"
     return value
@@ -132,7 +136,7 @@ def _agent(
     from indico_assistant.services.knowledge import links
     from indico_assistant.services.turn import loop, memory
     from indico_assistant.services.turn.abilities import registry
-    from indico_assistant.services.turn.citations import validate
+    from indico_assistant.services.turn.citations import from_markers, validate
     from indico_assistant.services.turn.rules import rules
     from indico_assistant.services.turn.tools import Ctx
 
@@ -186,8 +190,10 @@ def _agent(
             or loop.NOT_ANSWERED
         )
         metadata = {"problem": "failed"} if result.failed else {}
-    if result.citations:
-        metadata["citations"] = validate(user, result.citations)
+    cited = validate(user, result.citations) if result.citations else []
+    cited += from_markers(text, ctx.pages_seen, cited)
+    if cited:
+        metadata["citations"] = cited
     if ctx.data.get("event_ids"):
         metadata["data_sources"] = [
             {"type": "event", "event_id": i, "url": f"{base_url}/event/{i}/"} for i in ctx.data["event_ids"]

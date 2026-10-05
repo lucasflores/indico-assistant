@@ -56,7 +56,14 @@ def answered():
     )
     plugin = MagicMock()
     plugin.settings.get_all.side_effect = lambda: s.settings
-    plugin.settings.get.side_effect = lambda key, default=None: s.settings.get(key, default)
+    from indico_assistant.default_settings import DEFAULT_SETTINGS
+
+    def setting(key, default=None):  # (as Indico's settings proxy: an unknown name raises)
+        if key not in DEFAULT_SETTINGS:
+            raise ValueError(f"invalid setting: plugin_assistant.{key}")
+        return s.settings.get(key, default)
+
+    plugin.settings.get.side_effect = setting
     plugin.event_settings.get.side_effect = lambda event, key: s.event_settings.get(key)
 
     def run(message="hi", waiting_plan=None, offer=None, event_id=None):
@@ -266,3 +273,14 @@ def test_every_answer_goes_through_the_turn_unless_a_plan_shortcut_takes_it(answ
     turn.assert_called_once()
     for old in ("_process_with_nl2sql", "_knowledge", "_chat", "_connector", "_decide", "_plan"):
         assert not hasattr(ChatService, old)
+
+
+def test_an_event_page_without_its_own_settings_inherits_the_global_ones(answered):
+    """Seen live (quick run 1): allowed_tables and custom_system_prompt have no global setting to fall back to."""
+    run, s = answered
+    s.event, s.event_settings = MagicMock(id=5), {}
+    result, metadata = run("Which talks are on today?", event_id=5)
+    assert metadata["route"]["route"] == "agent"
+    ctx, _, tools = s.agent.call_args.args
+    assert ctx.allowed_tables is None and "query_data" in [t.name for t in tools]
+    assert s.agent.call_args.kwargs["system_prompt"].endswith("addresses the tools returned.")
