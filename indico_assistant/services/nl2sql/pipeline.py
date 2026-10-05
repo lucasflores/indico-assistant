@@ -44,9 +44,6 @@ from indico_assistant.services.nl2sql.readonly_db import QueryContext
 from indico_assistant.services.nl2sql.schema import SchemaContext
 from indico_assistant.services.nl2sql.validator import SQLValidator
 
-if TYPE_CHECKING:
-    from indico_assistant.services.embedding.service import EmbeddingService
-
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +92,6 @@ class NL2SQLPipeline:
         max_validation_retries: int = 2,
         allowed_tables: list[str] | None = None,
         audit_enabled: bool = True,
-        embedding_service: "EmbeddingService | None" = None,
         connection_factory: Callable[[], Any] | None = None,
     ) -> None:
         """
@@ -126,12 +122,7 @@ class NL2SQLPipeline:
         self._validator = SQLValidator(schema_context, allowed_tables)
         # SQL runs as the read-only NL2SQL role, never on db_session_factory (Indico's session, which is
         # only used for the audit log).
-        self._executor = QueryExecutor(
-            connection_factory,
-            max_rows,
-            timeout_seconds,
-            embedding_service=embedding_service,
-        )
+        self._executor = QueryExecutor(connection_factory, max_rows, timeout_seconds)
         self._corrector = ErrorCorrector(
             llm_service, schema_context, max_correction_attempts
         )

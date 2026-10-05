@@ -63,7 +63,7 @@ def test_the_intents_are_the_classifiers_data_intents():
     section = CLASSIFICATION_PROMPT.split("## INTENTS")[1].split("## CLASSIFICATION HINTS")[0]
     listed = re.findall(r"^- \*\*(\w+)\*\*:", section, re.M)
     routes = {"write_request", "knowledge", "chat", "out_of_scope"}
-    assert set(gate.INTENTS) == set(listed) - routes and len(gate.INTENTS) == 11
+    assert set(gate.INTENTS) == set(listed) - routes and len(gate.INTENTS) == 10  # (no document intent, spec 025)
 
 
 def test_a_concrete_can_you_is_a_change_as_the_classifier_has_it():

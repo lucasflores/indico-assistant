@@ -65,7 +65,6 @@ def test_rejected(validator, sql):
     "JOIN events.contribution_person_links cpl ON cpl.contribution_id = c.id "
     "JOIN events.persons p ON p.id = cpl.person_id WHERE c.event_id = :event_id LIMIT 50",
     "SELECT e.id FROM events.events e, events.contributions c WHERE c.event_id = e.id LIMIT 5",  # allowed comma join
-    "SELECT d.content FROM plugin_assistant.extracted_documents d ORDER BY d.embedding <=> :query_vector LIMIT 10",
     # not escape strings: a word ending in e before a quote, a CASE branch, a doubled quote, a cast
     "SELECT e.id FROM events.events e WHERE e.type = 'lecture' AND e.title <> 'the office'",
     "SELECT CASE WHEN e.id > 1 THEN 'a' ELSE'b' END FROM events.events e",
@@ -79,7 +78,7 @@ def test_allowed(validator, sql):
 def test_allowlist_has_no_personal_or_secret_columns():
     schema = yaml.safe_load(YAML.read_text())
     assert not {'users.users', 'events.registrations', 'events.registration_data'} & schema.keys()
-    assert not [t for t in schema if t.startswith('plugin_assistant.') and t != 'plugin_assistant.extracted_documents']
+    assert not [t for t in schema if t.startswith('plugin_assistant.')]  # (documents are read by tools, spec 025)
     for table, spec in schema.items():
         bad = {c for c in spec['columns'] if c in {'email', 'phone', 'access_key', 'user_email', 'ip_address'}
                or 'secret' in c or 'notification_emails' in c}

@@ -77,12 +77,21 @@ class RHHealth(RH):
         # Check if settings are valid
         settings_valid = self._validate_settings(plugin)
 
+        # Spec 025: documents per status (counts only: the endpoint is public), and whether search has vectors
+        from indico_assistant.services.document import store
+
+        try:
+            documents = {"statuses": store.status_counts(), "vector_search": store.check_pgvector_available()}
+        except Exception:
+            documents = {"error": "unavailable"}
+
         return {
             "status": status,
             "plugin_version": __version__,
             "indico_version": get_indico_version(),
             "llm": llm_info,  # Full LLM status with details
             "knowledge": knowledge,
+            "documents": documents,
             "settings_valid": settings_valid,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

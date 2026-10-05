@@ -33,7 +33,7 @@ Analyze the user's question and classify it into one of these intents:
 
 ## INTENTS
 
-- **topic_search**: BROAD search for a topic/keyword/project name across ALL content (events, notes, contributions, documents)
+- **topic_search**: BROAD search for a topic/keyword/project name across ALL content (events, notes, contributions)
 - **event_query**: Questions about events, conferences, meetings (count, list, search, basic info, meeting minutes, notes)
 - **registration_query**: Questions about event registrations, participants, check-ins
 - **contribution_query**: Questions about talks, presentations, contributions, papers
@@ -42,7 +42,6 @@ Analyze the user's question and classify it into one of these intents:
 - **attendee_query**: Questions about who attended events or registrations with personal details
 - **schedule_query**: Questions about event schedules, timetables, timing of contributions
 - **attachment_query**: Questions about file metadata (filenames, types, storage locations)
-- **document_content_query**: Questions about the CONTENT within files (what slides say, paper contents)
 - **general_info**: General questions about the system or unclear queries
 - **write_request**: An instruction to CREATE, CHANGE, MOVE, ADD, ATTACH, CANCEL or UNDO something in Indico
   (a meeting, its talks or speakers, a reminder, a Teams meeting, material): "Create a meeting tomorrow at
@@ -87,34 +86,10 @@ what exists ("which meetings are tomorrow?", "who is speaking?") is never a writ
 5. **schedule_query**: WHEN things happen, timetables, timing
 6. **contribution_query**: Questions about talk titles/abstracts without speaker focus
 
-### CRITICAL: document_content_query Priority
+### attachment_query
 
-**Use document_content_query** when the question asks about CONTENT within documents (slides, papers, presentations).
-
-**Key indicators for document_content_query**:
-- **Presentation content**: "what did [person] present/discuss/say", "summarize presentation", "what was presented"
-- **Topics/discussions**: "what topics were covered", "what was discussed"
-- **Analysis**: "main points", "key findings", "conclusions"
-- **Content keywords**: "says", "mentions", "according to", "talks about", "discusses"
-
-**Do NOT use document_content_query for**:
-- Basic event info: "what event is this?", "event details" → **event_query**
-- Speaker names: "who presented?" → **speaker_query**
-- Talk titles: "what talks are there?" → **contribution_query**
-
-### attachment_query vs document_content_query
-
-- Use **attachment_query** for FILE METADATA only:
-    - "What files are attached?"
-    - "List the PDFs"
-
-- Use **document_content_query** for CONTENT ACCESS:
-    - "What does the presentation say?"
-    - "Topics in slides?"
-
-### Hybrid Queries (metadata + content)
-
-- If the question requests BOTH file metadata and content, classify as **document_content_query** and include file metadata entities when possible.
+- Use **attachment_query** for FILE METADATA only: "What files are attached?", "List the PDFs". What a file says
+  is read by the assistant's document tools, never by SQL (spec 025).
 
 ## TIME REFERENCE DEFAULTS
 
@@ -152,13 +127,6 @@ When the user says:
 - "Event details"
 - "What's the event title?"
 
-**document_content_query** (search document content):
-- "Can you summarize what Lucas presented on?"
-- "What did the speaker discuss?"
-- "What topics were covered in the talks?"
-- "What does the paper say about X?"
-- "Main conclusions from presentations?"
-
 **speaker_query** (names/titles only):
 - "Who presented at this event?"
 - "List all speakers"
@@ -167,8 +135,6 @@ When the user says:
 **contribution_query** (talk titles/abstracts):
 - "What talks are at this event?"
 - "List all contributions"
-
-**CRITICAL**: "What did X present?" = **document_content_query** (content), NOT speaker_query (metadata)
 
 ## EXTRACTION RULES
 

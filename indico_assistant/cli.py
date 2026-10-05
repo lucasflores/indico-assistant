@@ -150,6 +150,21 @@ def guide_build_command(commit):
                f"{manifest['model']} ({manifest['dims']}-d) -> {guide_build.OUT_DIR}")
 
 
+@cli.command("sync-documents")
+@click.option("--event", "event_id", type=int, help="Read this event's attachments now, here (default: queue all).")
+@click.option("--force", is_flag=True, help="Read again even the files that were already read.")
+@with_appcontext
+def sync_documents_command(event_id, force):
+    """Bring the documents in line with the attachments (spec 025): new and changed files are read again.
+
+    Without --event, a reading task is queued on the assistant_bulk queue for each attachment that needs one.
+    """
+    from indico_assistant.tasks.sync import sync_all_documents, sync_event_documents
+
+    result = sync_event_documents.run(event_id, force=force) if event_id else sync_all_documents.run(force=force)
+    click.echo(result)
+
+
 @cli.command("nl2sql-db-sql")
 @click.option("--password", help="Password for the read-only role (omit where local trust/peer auth is used).")
 @click.option("--teardown", is_flag=True, help="Print the SQL that removes the role, policies and functions.")

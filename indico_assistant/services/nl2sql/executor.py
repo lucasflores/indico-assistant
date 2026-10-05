@@ -25,7 +25,6 @@ from indico_assistant.services.nl2sql import readonly_db
 from indico_assistant.services.nl2sql.models import ExecutionResult
 
 if TYPE_CHECKING:
-    from indico_assistant.services.embedding.service import EmbeddingService
     from indico_assistant.services.nl2sql.readonly_db import QueryContext
 
 
@@ -75,7 +74,6 @@ class QueryExecutor:
         connection_factory: Callable[[], Any] | None = None,
         max_rows: int = 1000,
         timeout_seconds: int = 10,
-        embedding_service: "EmbeddingService | None" = None,
         signer: Callable[["QueryContext"], str] | None = None,
     ) -> None:
         """
@@ -89,7 +87,6 @@ class QueryExecutor:
         self._signer = signer
         self._max_rows = max_rows
         self._timeout_seconds = timeout_seconds
-        self._embedding_service = embedding_service
 
     def execute(
         self,
@@ -120,7 +117,6 @@ class QueryExecutor:
         try:
             if context is None:
                 raise ExecutionError("A user context is required to query event data")
-            params = self._prepare_vector_params(sql, question, params)
             with readonly_db.scoped_connection(context, self._connection_factory, self._signer) as conn:
                 conn.execute(text(f"SET LOCAL statement_timeout = {int(self._timeout_seconds * 1000)}"))
                 result = conn.execute(text(_escape_colons(self._wrap_limit(sql), params)), params)
@@ -158,37 +154,6 @@ class QueryExecutor:
                 # Only errors in the SQL itself; a timeout (OperationalError) or setup failure would recur.
                 correctable=isinstance(e, (ProgrammingError, DataError)),
             )
-
-    def _contains_vector_placeholder(self, sql: str) -> bool:
-        """Check if SQL contains :query_vector parameter placeholder."""
-        return ":query_vector" in sql
-
-    def _prepare_vector_params(
-        self,
-        sql: str,
-        question: str | None,
-        params: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Prepare parameters with query vector if needed."""
-        if not self._contains_vector_placeholder(sql):
-            return params
-
-        if self._embedding_service is None:
-            raise ExecutionError(
-                "Vector search requested but embedding service not available"
-            )
-
-        if not question:
-            raise ExecutionError(
-                "Vector search requested but no question provided for embedding"
-            )
-
-        embedding = self._embedding_service.embed_text(question)
-        vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
-
-        updated_params = dict(params) if params else {}
-        updated_params["query_vector"] = vector_str
-        return updated_params
 
     def _wrap_limit(self, sql: str) -> str:
         """Cap the rows in SQL whatever the query says (a LIMIT inside it may be missing or huge)."""

@@ -112,19 +112,6 @@ def test_params_are_passed_through():
     assert conn.statements[-1][1] == {'event_id': 3}
 
 
-def test_vector_placeholder_needs_an_embedding_service():
-    result = make(FakeConnection()).execute('SELECT 1 ORDER BY x <=> :query_vector', question='q', context=CTX)
-    assert not result.success and 'embedding service' in result.error_message
-
-
-def test_vector_placeholder_is_filled_from_the_question():
-    conn = FakeConnection()
-    embedder = MagicMock(embed_text=MagicMock(return_value=[0.5, 0.25]))
-    make(conn, embedding_service=embedder).execute('SELECT 1 ORDER BY x <=> :query_vector', question='q',
-                                                   context=CTX)
-    assert conn.statements[-1][1] == {'query_vector': '[0.5,0.25]'}
-
-
 def test_colons_in_generated_sql_are_not_taken_for_parameters():
     """text() read ':TBD' inside a literal as a missing parameter; only our own placeholders bind now."""
     from sqlalchemy import text

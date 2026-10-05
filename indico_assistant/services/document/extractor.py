@@ -1,346 +1,175 @@
-"""Document text extraction for various file formats.
+"""Reading a document's pages and the headings the file itself declares (spec 025, FR-010, research R3).
 
-Feature: 006-vector-search-rag
-Tasks: T016, T017, T018, T019
+- **PDF:** pypdf, one text per page, NFKC-normalised (it restores the fi/ff ligatures), and the PDF outline.
+- **Word:** python-docx; heading styles are headings, and Word's saved page breaks split the pages.
+- **PowerPoint:** python-pptx, one page per slide; slide titles are headings.
+- **Text and Markdown:** one page; Markdown's ``#`` lines are headings.
 
-Provides text extraction from PDF, DOCX, TXT, and MD files.
+Documents without declared headings get numbered ones found in their text (``structure.py``).
 """
 
 from __future__ import annotations
 
 import logging
-import os
+import re
+import unicodedata
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import BinaryIO, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
-def _sanitize_text(text: str) -> str:
-    """Remove NULL bytes and non-printable characters from text.
-    
-    PostgreSQL cannot store NULL bytes (0x00) in text fields.
-    This function removes them along with other non-printable characters.
-    
-    Args:
-        text: Raw extracted text.
-        
-    Returns:
-        Sanitized text safe for database storage.
-    """
-    # Keep line breaks and tabs: isprintable() drops them, and the chunker splits on them
-    return ''.join(char for char in text if char.isprintable() or char in '\n\t')
-
-
-MAX_PDF_PAGES = 1000
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md"}  # no .doc: python-docx can't read it
+MAX_PAGES = 1000  # ponytail: bounds pathological files; the task's time limit bounds the rest
 
 
 class ExtractionError(Exception):
-    """Raised when document extraction fails."""
-    pass
+    """The file could not be read."""
 
 
 class UnsupportedFileTypeError(ExtractionError):
-    """Raised when file type is not supported."""
-    pass
+    """A type the plugin does not read."""
 
 
-class DocumentExtractor:
-    """Extracts text from various document formats.
-    
-    Supported formats:
-    - PDF: Uses PyPDF2 for text extraction
-    - DOCX/DOC: Uses python-docx for text extraction
-    - TXT/MD: Plain text reading
-    
-    Example:
-        >>> extractor = DocumentExtractor()
-        >>> text = extractor.extract("/path/to/document.pdf")
-        >>> text, metadata = extractor.extract_with_metadata("/path/to/doc.docx")
-    """
-    
-    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md'}  # no .doc: python-docx cannot read it
-    
-    def __init__(self, supported_extensions: Optional[list[str]] = None) -> None:
-        """Initialize the document extractor.
-        
-        Args:
-            supported_extensions: Optional list of supported extensions.
-                Defaults to SUPPORTED_EXTENSIONS class attribute.
-        """
-        if supported_extensions:
-            self._extensions = {ext.lower() for ext in supported_extensions}
-        else:
-            self._extensions = self.SUPPORTED_EXTENSIONS
-    
-    def is_supported(self, file_path: Union[str, Path]) -> bool:
-        """Check if file type is supported.
-        
-        Args:
-            file_path: Path to the file.
-            
-        Returns:
-            True if file type is supported for extraction.
-        """
-        ext = Path(file_path).suffix.lower()
-        return ext in self._extensions
-    
-    def extract(self, file_path: Union[str, Path]) -> str:
-        """Extract text from a document file.
-        
-        Args:
-            file_path: Path to the document file.
-            
-        Returns:
-            Extracted text content.
-            
-        Raises:
-            UnsupportedFileTypeError: If file type is not supported.
-            ExtractionError: If extraction fails.
-            FileNotFoundError: If file does not exist.
-        """
-        path = Path(file_path)
-        
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-        
-        ext = path.suffix.lower()
-        
-        if ext not in self._extensions:
-            raise UnsupportedFileTypeError(
-                f"Unsupported file type: {ext}. "
-                f"Supported: {', '.join(sorted(self._extensions))}"
-            )
-        
-        try:
-            if ext == '.pdf':
-                text = self._extract_pdf(path)
-            elif ext == '.docx':
-                text = self._extract_docx(path)
-            elif ext in {'.txt', '.md'}:
-                text = self._extract_text(path)
-            else:
-                raise UnsupportedFileTypeError(f"No extractor for: {ext}")
-            
-            # Sanitize text to remove NULL bytes and problematic characters
-            return _sanitize_text(text)
-        except (UnsupportedFileTypeError, FileNotFoundError):
-            raise
-        except Exception as e:
-            raise ExtractionError(f"Failed to extract text from {file_path}: {e}")
-    
-    def extract_with_metadata(
-        self, 
-        file_path: Union[str, Path]
-    ) -> tuple[str, dict]:
-        """Extract text and metadata from a document file.
-        
-        Args:
-            file_path: Path to the document file.
-            
-        Returns:
-            Tuple of (extracted_text, metadata_dict).
-            
-        Raises:
-            UnsupportedFileTypeError: If file type is not supported.
-            ExtractionError: If extraction fails.
-        """
-        path = Path(file_path)
-        ext = path.suffix.lower()
-        
-        text = self.extract(path)
-        
-        metadata = {
-            "filename": path.name,
-            "file_type": ext.lstrip('.'),
-            "file_size": path.stat().st_size,
-            "extraction_method": self._get_extraction_method(ext),
-        }
-        
-        # Add format-specific metadata
-        if ext == '.pdf':
-            try:
-                pdf_meta = self._get_pdf_metadata(path)
-                metadata.update(pdf_meta)
-            except Exception as e:
-                logger.warning(f"Could not extract PDF metadata: {e}")
-        
-        return text, metadata
-    
-    def _extract_pdf(self, file_path: Path) -> str:
-        """Extract text from PDF file using PyPDF2.
-        
-        Args:
-            file_path: Path to PDF file.
-            
-        Returns:
-            Extracted text content.
-        """
-        try:
-            from PyPDF2 import PdfReader
-        except ImportError:
-            raise ExtractionError(
-                "PyPDF2 not installed. Install with: pip install PyPDF2"
-            )
-        
-        try:
-            reader = PdfReader(str(file_path))
-            self._pdf_page_count = len(reader.pages)  # reused by _get_pdf_metadata (no second parse)
-            text_parts = []
-            
-            # ponytail: page cap bounds pathological PDFs; the task's soft time limit bounds the rest
-            for page in reader.pages[:MAX_PDF_PAGES]:
-                page_text = page.extract_text()
-                if page_text:
-                    text_parts.append(page_text)
-            
-            return "\n\n".join(text_parts)
-            
-        except Exception as e:
-            logger.error(f"PDF extraction failed for {file_path}: {e}")
-            raise ExtractionError(f"PDF extraction failed: {e}")
-    
-    def _extract_docx(self, file_path: Path) -> str:
-        """Extract text from DOCX file using python-docx.
-        
-        Args:
-            file_path: Path to DOCX file.
-            
-        Returns:
-            Extracted text content.
-        """
-        try:
-            from docx import Document
-        except ImportError:
-            raise ExtractionError(
-                "python-docx not installed. Install with: pip install python-docx"
-            )
-        
-        try:
-            doc = Document(str(file_path))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n\n".join(paragraphs)
-            
-        except Exception as e:
-            logger.error(f"DOCX extraction failed for {file_path}: {e}")
-            raise ExtractionError(f"DOCX extraction failed: {e}")
-    
-    def _extract_text(self, file_path: Path) -> str:
-        """Extract text from plain text file.
-        
-        Args:
-            file_path: Path to text file.
-            
-        Returns:
-            File content as text.
-        """
-        # Try different encodings
-        encodings = ['utf-8', 'latin-1', 'cp1252']
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                continue
-        
-        raise ExtractionError(
-            f"Could not decode text file with encodings: {encodings}"
-        )
-    
-    def _get_extraction_method(self, ext: str) -> str:
-        """Get the extraction method name for a file type.
-        
-        Args:
-            ext: File extension (with or without dot).
-            
-        Returns:
-            Extraction method name.
-        """
-        ext = ext.lstrip('.')
-        methods = {
-            'pdf': 'pypdf2',
-            'docx': 'python-docx',
-            'doc': 'python-docx',
-            'txt': 'builtin',
-            'md': 'builtin',
-        }
-        return methods.get(ext, 'unknown')
-    
-    def _get_pdf_metadata(self, file_path: Path) -> dict:
-        """Get PDF-specific metadata.
-        
-        Args:
-            file_path: Path to PDF file.
-            
-        Returns:
-            Dictionary with PDF metadata.
-        """
-        pages = getattr(self, "_pdf_page_count", None)
-        if pages is None:
-            from PyPDF2 import PdfReader
-            pages = len(PdfReader(str(file_path)).pages)
-        return {"total_pages": pages}
+@dataclass
+class Heading:
+    """A heading the file declares (or that was found in its text)."""
+
+    title: str
+    level: int  # 1 = top
+    page: int  # 1-based
+    number: str | None = None  # "4.4.1"
+    offset: int = 0  # where on the page it starts
 
 
-def extract_text(
-    file_path: Union[str, Path],
-    supported_extensions: Optional[list[str]] = None
-) -> str:
-    """Extract text from a document file.
-    
-    Convenience function that creates a DocumentExtractor and extracts text.
-    
-    Args:
-        file_path: Path to the document file.
-        supported_extensions: Optional list of supported extensions.
-        
-    Returns:
-        Extracted text content.
-        
-    Raises:
-        UnsupportedFileTypeError: If file type is not supported.
-        ExtractionError: If extraction fails.
-    """
-    extractor = DocumentExtractor(supported_extensions)
-    return extractor.extract(file_path)
+@dataclass
+class Extracted:
+    pages: list[str]
+    headings: list[Heading] = field(default_factory=list)
 
 
-def extract_from_bytes(
-    content: bytes,
-    filename: str,
-    supported_extensions: Optional[list[str]] = None
-) -> str:
-    """Extract text from file content in memory.
-    
-    Args:
-        content: File content as bytes.
-        filename: Original filename (used to determine type).
-        supported_extensions: Optional list of supported extensions.
-        
-    Returns:
-        Extracted text content.
-        
-    Raises:
-        UnsupportedFileTypeError: If file type is not supported.
-        ExtractionError: If extraction fails.
-    """
-    import tempfile
-    
-    ext = Path(filename).suffix.lower()
-    extractor = DocumentExtractor(supported_extensions)
-    
-    if ext not in extractor._extensions:
-        raise UnsupportedFileTypeError(
-            f"Unsupported file type: {ext}"
-        )
-    
-    # Write to temp file and extract
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    
+def clean(text: str) -> str:
+    """NFKC (ligatures, full-width forms), without NULs and other control characters PostgreSQL or the chunker
+    can't take. Line breaks and tabs stay: the heading finder reads lines."""
+    text = unicodedata.normalize("NFKC", text)
+    return "".join(c for c in text if c.isprintable() or c in "\n\t")
+
+
+def extract(path: str | Path, filename: str | None = None) -> Extracted:
+    """The pages and declared headings of ``path``; its type comes from ``filename`` (or the path)."""
+    ext = Path(filename or str(path)).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise UnsupportedFileTypeError(f"Unsupported file type: {ext or 'none'}")
+    reader = {".pdf": _pdf, ".docx": _docx, ".pptx": _pptx, ".txt": _text, ".md": _markdown}[ext]
     try:
-        return extractor.extract(tmp_path)
-    finally:
-        os.unlink(tmp_path)
+        result = reader(Path(path))
+    except ExtractionError:
+        raise
+    except Exception as exc:
+        raise ExtractionError(f"Could not read {Path(filename or str(path)).name}: {exc}") from exc
+    result.pages = [clean(p) for p in result.pages[:MAX_PAGES]]
+    for h in result.headings:
+        h.title = clean(h.title).strip()
+    result.headings = [h for h in result.headings if h.title and h.page <= len(result.pages)]
+    return result
+
+
+def _pdf(path: Path) -> Extracted:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    pages = [page.extract_text() or "" for page in reader.pages[:MAX_PAGES]]
+    headings: list[Heading] = []
+
+    def walk(items: list[Any], level: int) -> None:
+        for item in items:
+            if isinstance(item, list):
+                walk(item, level + 1)
+                continue
+            try:
+                index = reader.get_destination_page_number(item)
+            except Exception:
+                continue
+            if index is not None and index >= 0:
+                headings.append(Heading(title=str(item.title), level=level, page=index + 1))
+
+    try:
+        walk(reader.outline, 1)
+    except Exception:
+        logger.info("Unreadable outline in %s", path.name)
+    for h in headings:
+        number, title = _split_number(h.title)
+        h.number, h.title = number, title
+    return Extracted(pages, sorted(headings, key=lambda h: h.page))
+
+
+def _split_number(title: str) -> tuple[str | None, str]:
+    match = re.match(r"^\s*(\d+(?:\.\d+)*)\.?\s+(.+)$", title)
+    return (match.group(1), match.group(2)) if match else (None, title)
+
+
+def _docx(path: Path) -> Extracted:
+    from docx import Document
+
+    pages: list[list[str]] = [[]]
+    headings: list[Heading] = []
+    for paragraph in Document(str(path)).paragraphs:
+        if paragraph.contains_page_break and pages[-1]:  # Word saved where its pages broke: before this one
+            pages.append([])
+        text = paragraph.text.strip()
+        if text:
+            style = paragraph.style.name if paragraph.style is not None else ""
+            level = re.match(r"Heading (\d)", style or "")
+            if level or style == "Title":
+                number, title = _split_number(text)
+                offset = sum(len(t) + 2 for t in pages[-1])
+                headings.append(Heading(title, int(level.group(1)) if level else 1, len(pages), number, offset))
+            pages[-1].append(text)
+        if paragraph._p.xpath('.//w:br[@w:type="page"]') and pages[-1]:  # a typed page break: after this one
+            pages.append([])
+    if len(pages) > 1 and not pages[-1]:
+        pages.pop()
+    return Extracted(["\n\n".join(p) for p in pages], headings)
+
+
+def _pptx(path: Path) -> Extracted:
+    from pptx import Presentation
+
+    pages, headings = [], []
+    for number, slide in enumerate(Presentation(str(path)).slides, 1):
+        texts = []
+        title = slide.shapes.title.text_frame.text.strip() if slide.shapes.title is not None else ""
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape.text_frame.text.strip():
+                texts.append(shape.text_frame.text.strip())
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                texts.append(f"Notes: {notes}")
+        pages.append("\n\n".join(texts))
+        if title:
+            headings.append(Heading(title=title, level=1, page=number))
+    return Extracted(pages, headings)
+
+
+def _read_text(path: Path) -> str:
+    data = path.read_bytes()
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1")  # never fails
+
+
+def _text(path: Path) -> Extracted:
+    return Extracted([_read_text(path)])
+
+
+def _markdown(path: Path) -> Extracted:
+    text = _read_text(path)
+    headings = []
+    for match in re.finditer(r"^(#{1,6})\s+(.+?)\s*#*\s*$", text, re.MULTILINE):
+        number, title = _split_number(match.group(2))
+        headings.append(Heading(title, len(match.group(1)), 1, number, match.start()))
+    return Extracted([text], headings)

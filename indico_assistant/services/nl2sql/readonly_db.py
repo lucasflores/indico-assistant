@@ -158,8 +158,6 @@ POLICIES = {
         OR id IN (SELECT plugin_assistant.nl2sql_public_category_ids())
         OR id IN (SELECT plugin_assistant.nl2sql_read_category_ids())
         OR id IN (SELECT plugin_assistant.nl2sql_managed_category_ids()))''',
-    'plugin_assistant.extracted_documents': f'''{_EVENT_VISIBLE.format('event_id')}
-        AND EXISTS (SELECT 1 FROM attachments.attachments a WHERE a.id = attachment_id)''',
 }
 
 _FUNCTIONS = f'''

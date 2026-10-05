@@ -17,10 +17,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable
 
 from indico_assistant.services.llm import LLMService
-from indico_assistant.services.embedding.service import (
-    EmbeddingService,
-    create_embedding_service,
-)
 from indico_assistant.services.nl2sql.cache import QueryCache
 from indico_assistant.services.nl2sql.pipeline import NL2SQLPipeline
 from indico_assistant.services.nl2sql.schema import SchemaContext
@@ -41,7 +37,6 @@ def create_nl2sql_pipeline(
     timeout_seconds: int = 10,
     max_correction_attempts: int = 3,
     allowed_tables: list[str] | None = None,
-    embedding_service: EmbeddingService | None = None,
     connection_factory: Callable[[], Any] | None = None,
     audit_enabled: bool = True,
 ) -> NL2SQLPipeline:
@@ -68,7 +63,6 @@ def create_nl2sql_pipeline(
         timeout_seconds: Query timeout (default: 10).
         max_correction_attempts: Max error corrections (default: 3).
         allowed_tables: Optional explicit table allowlist.
-        embedding_service: Optional embedding service for vector search.
         connection_factory: Connections for generated SQL (default: the read-only NL2SQL role).
         audit_enabled: Whether to write the query audit log (default: True).
 
@@ -105,7 +99,6 @@ def create_nl2sql_pipeline(
         timeout_seconds=timeout_seconds,
         max_correction_attempts=max_correction_attempts,
         allowed_tables=allowed_tables,
-        embedding_service=embedding_service,
         audit_enabled=audit_enabled,
     )
 
@@ -137,8 +130,6 @@ def create_nl2sql_pipeline_from_plugin(
     max_corrections = settings.get("nl2sql_max_corrections", 3)
     allowed_tables = settings.get("nl2sql_allowed_tables")
 
-    embedding_service = create_embedding_service(plugin)
-
     return create_nl2sql_pipeline(
         llm_service=llm_service,
         # ponytail: no result cache (see enable_cache); a shared one would need the full QueryContext in the key
@@ -147,5 +138,4 @@ def create_nl2sql_pipeline_from_plugin(
         timeout_seconds=timeout,
         max_correction_attempts=max_corrections,
         allowed_tables=allowed_tables,
-        embedding_service=embedding_service,
     )

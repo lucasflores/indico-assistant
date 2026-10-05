@@ -8,18 +8,14 @@ Feature: 019-chat-actions
 Feature: 021-issue-reports
 Feature: 023-github-connector
 Feature: 024-assistant-analytics
+Feature: 025-assistant-core
 """
 
 from indico_assistant.models.action_plan import ActionPlan
 from indico_assistant.models.analytics import Turn, TurnStep, TurnText
 from indico_assistant.models.audit import QueryAuditLog
 from indico_assistant.models.connection import Connection
-from indico_assistant.models.document import (
-    DocumentSyncLog,
-    ExtractedDocument,
-    ExtractionStatus,
-    SyncStatus as DocumentSyncStatus,
-)
+from indico_assistant.models.document import Document, DocumentChunk, DocumentStatus
 from indico_assistant.models.feedback import FeedbackEntry
 from indico_assistant.models.message import ChatMessage
 from indico_assistant.models.report import IssueReport
@@ -37,9 +33,8 @@ __all__ = [
     "Turn",
     "TurnStep",
     "TurnText",
-    # Document models (Feature 006)
-    "ExtractedDocument",
-    "DocumentSyncLog",
-    "ExtractionStatus",
-    "DocumentSyncStatus",
+    # Documents (spec 025)
+    "Document",
+    "DocumentChunk",
+    "DocumentStatus",
 ]

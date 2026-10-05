@@ -1,29 +1,9 @@
-"""Document service package for text extraction and processing.
+"""Documents (spec 025, story 2): reading attachments with their structure, storing, searching and reading them.
 
-Feature: 006-vector-search-rag
-Task: T013
-
-Provides document text extraction, chunking, and processing.
+- ``extractor``: pages and declared headings (PDF, Word, PowerPoint, text, Markdown).
+- ``structure``: sections, and numbered headings found in the text.
+- ``chunker``: page-bound chunks with their section.
+- ``store``: the status rows and chunks.
+- ``search``: hybrid keyword and meaning search, filtered by access.
+- ``reader``: lists, starts, pages and sections for the agent.
 """
-
-import logging
-
-logger = logging.getLogger(__name__)
-
-from indico_assistant.services.document.extractor import (
-    DocumentExtractor,
-    extract_text,
-)
-from indico_assistant.services.document.chunker import (
-    DocumentChunker,
-    chunk_text,
-)
-from indico_assistant.services.document.processor import DocumentProcessor
-
-__all__ = [
-    "DocumentExtractor",
-    "extract_text",
-    "DocumentChunker",
-    "chunk_text",
-    "DocumentProcessor",
-]

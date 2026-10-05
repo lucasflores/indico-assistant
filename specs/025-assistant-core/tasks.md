@@ -297,23 +297,23 @@ baseline (SC-004). Fast-path messages cost no more (SC-005).
 
 ### Tests first
 
-- [ ] T028 [P] [US2] `tests/unit/document/test_extractor.py`.
+- [x] T028 [P] [US2] `tests/unit/document/test_extractor.py`.
   - **PDF:** pypdf gives one text per page, NFKC-normalised. A fixture with fi/ff ligatures reads "different".
   - **Word:** heading styles come out as headings.
   - **PowerPoint:** one page per slide, from a small generated .pptx.
   - **Text and Markdown:** one page.
-- [ ] T029 [P] [US2] `tests/unit/document/test_structure.py`.
+- [x] T029 [P] [US2] `tests/unit/document/test_structure.py`.
   - The outline becomes sections with page ranges.
   - Numbered headings are detected, and the increasing-order filter drops contents-page lines and list items. Use a
     text fixture modelled on the thesis, where "4.4.1 Fit Quality Measure" must land on its page.
   - Word heading levels become sections.
-- [ ] T030 [P] [US2] `tests/unit/document/test_chunker.py`. Chunks never cross a page and carry their section path.
+- [x] T030 [P] [US2] `tests/unit/document/test_chunker.py`. Chunks never cross a page and carry their section path.
   The text to embed and index is prefixed with the title and section.
-- [ ] T031 [P] [US2] `tests/integration/document/test_store.py`.
+- [x] T031 [P] [US2] `tests/integration/document/test_store.py`.
   - Status goes `queued → reading → ready`, `no_text`, `failed` or `unsupported`.
   - A new `file_id` resets the row to `queued`.
   - Deleting the attachment deletes the document and its chunks.
-- [ ] T032 [P] [US2] `tests/integration/document/test_search.py`.
+- [x] T032 [P] [US2] `tests/integration/document/test_search.py`.
   - An exact term found only by the keyword channel ranks in the top 3.
   - Scope by document and by event works.
   - An attachment the user can't open is never returned. Its event is protected, and the test runs inside
@@ -364,24 +364,40 @@ baseline (SC-004). Fast-path messages cost no more (SC-005).
 
 ### Code
 
-- [ ] T040 [US2] `indico_assistant/models/document.py` and `indico_assistant/migrations/012_documents.py` (down
+- [x] T040 [US2] `indico_assistant/models/document.py` and `indico_assistant/migrations/012_documents.py` (down
   revision `011_analytics`).
   - `Document` and `DocumentChunk` (data-model), with `search` as a generated `tsvector` and a GIN index.
   - `extracted_documents` and its sync-log rows are dropped.
   - The downgrade recreates an empty `extracted_documents` (constitution I).
   - Export from `models/__init__.py`.
   - Update the RLS script (`services/nl2sql/readonly_db.py`) to drop `extracted_documents`.
-- [ ] T041 [US2] `indico_assistant/services/document/extractor.py`.
+- [x] T041 [US2] `indico_assistant/services/document/extractor.py`.
   - pypdf pages with NFKC; python-docx headings; python-pptx slides; txt and md.
   - Add `python-pptx==1.0.2` and remove `PyPDF2` in `pyproject.toml`.
   - `services/document/validation.py` accepts `.pptx`.
-- [ ] T042 [US2] `indico_assistant/services/document/structure.py`, `chunker.py` (research R3, data-model).
-- [ ] T043 [US2] `indico_assistant/services/document/store.py` and `indico_assistant/tasks/indexing.py`.
+- [x] T042 [US2] `indico_assistant/services/document/structure.py`, `chunker.py` (research R3, data-model).
+- [x] T043 [US2] `indico_assistant/services/document/store.py` and `indico_assistant/tasks/indexing.py`.
   - Status rows: `queued` when the signal is collected (`plugin.py:212-236`), then reading and done in the task.
   - Writes outline and chunks.
   - `tasks/sync.py` works from `documents.file_id`.
-- [ ] T044 [US2] `indico_assistant/services/document/search.py` (research R4: one SQL statement, RRF k=60, scope,
+- [x] T044 [US2] `indico_assistant/services/document/search.py` (research R4: one SQL statement, RRF k=60, scope,
   access filter as the acting user) and `reader.py` (start, pages, section, with `[p.N]` labels).
+  - **Done 2026-10-05 (document pipeline, T028–T032 and T040–T044):**
+    - Tests: `tests/unit/document/` (extractor, structure, chunker) and `tests/integration/documents/` (store,
+      search). The integration folder is `documents`, not `document`: two test packages named `document` collide.
+    - Chunks also store their `offset` on the page, so `read_document` rebuilds whole pages from them. `search` is
+      a plain `tsvector` column written with each chunk, not a generated one: the title it indexes lives in
+      `documents`.
+    - Numbered headings: the longest chain in which each number follows the last (by at most 2), after dropping
+      contents lines and pages; "Chapter N" takes the next line as its title; a chain under 3 is no outline. On the
+      thesis: 66 sections, 4.4.1 on p.48, all 7 chapters. The IDA talk (slides) gets none.
+    - Part of T053 went in now, since nothing worked without the old table: `services/vector_search/`,
+      `controllers/search.py` (+ routes, schemas), the old processor and hasher, NL2SQL's document template, intent
+      and `:query_vector` hook, the YAML table and its row policy, PyPDF2 and the Python `pgvector` package (raw SQL
+      only), the sync log and its retention setting. A new `indico assistant sync-documents [--event N] [--force]`
+      replaces the removed sync endpoints. The health check reports document status counts.
+    - `pytest tests`: 2067 passed, 7 failed (T001's known `test_chat_citations.py`). New code: ruff and black
+      clean, `mypy --strict` clean, coverage 92–99% on `services/document/`.
 - [ ] T045 [US2] `indico_assistant/services/turn/tools.py`. It holds:
   - the `Tool` registry and `ctx` (user, session, page event, memory, limits);
   - result truncation and untrusted marking, importing `_mark` from `connectors/loop.py` until US3 moves it here;

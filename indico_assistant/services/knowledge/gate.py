@@ -5,7 +5,7 @@ called here, outside the Instructor abstraction (constitution 1.1.0, Principle I
 its answers are validated, the classifier routes instead whenever it is skipped, and ``transport`` is injectable.
 
 One call carries two ``choice`` questions: ``route`` (knowledge, change, data, chat, out_of_scope) and ``intent`` (the
-classifier's 11 data intents, used only for data). The state is the format ibis's web gate measured
+classifier's 10 data intents, used only for data). The state is the format ibis's web gate measured
 (ibis_routing.webgate.gate_input): the last two exchanges, each earlier reply cut to 400 characters, then the latest
 message. The criteria are the ones the router probe measured (thread E study, jev_router_probe.py), with two changes
 Lucas made on 2026-09-30: a "can you ...?" naming a concrete change is a change (the plan card is the offer, as the
@@ -49,7 +49,7 @@ ROUTES = {
 #: The classifier's data intents, in its own words (services/nl2sql/classifier.py; a test keeps them equal).
 INTENTS = {
     "topic_search": "A broad search for a topic, keyword or project name across all content (events, notes, "
-                    "contributions, documents).",
+                    "contributions).",
     "event_query": "Events, conferences, meetings: count, list, search, basic info, meeting minutes, notes.",
     "registration_query": "Event registrations, participants, check-ins.",
     "contribution_query": "Talks, presentations, contributions, papers.",
@@ -58,7 +58,6 @@ INTENTS = {
     "attendee_query": "Who attended events, or registrations with personal details.",
     "schedule_query": "Event schedules, timetables, the timing of contributions.",
     "attachment_query": "File metadata: filenames, types, storage locations.",
-    "document_content_query": "The content within files: what slides say, paper contents.",
     "general_info": "General questions about the system, or unclear queries.",
 }
 QUESTIONS = {

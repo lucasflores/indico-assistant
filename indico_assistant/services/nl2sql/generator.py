@@ -113,7 +113,6 @@ Include extra columns beyond the minimum that may add context (description, venu
 | speaker_query | Template 2 (contributor/speaker queries) |
 | contribution_query | Template 2 (contributor queries) |
 | attachment_query | Template 3 (file metadata) |
-| document_content_query | Template 4 (vector search) |
 
 ### Template 1: Event Queries
 
@@ -189,29 +188,6 @@ JOIN attachments.files f ON a.file_id = f.id
 JOIN events.events e ON fo.event_id = e.id
 WHERE fo.event_id = :event_id
 ```
-
-### Template 4: Document Content Vector Search
-
-Use this pattern for questions about content WITHIN files (uses pgvector similarity):
-
-```sql
-SELECT 
-    ed.content_text AS extracted_content,
-    ed.metadata_json->>'filename' AS filename,
-    ed.event_id,
-    1 - (ed.embedding <=> :query_vector) AS similarity_score
-FROM plugin_assistant.extracted_documents ed
-WHERE ed.embedding IS NOT NULL
-    AND ed.extraction_status = 'completed'
-ORDER BY ed.embedding <=> :query_vector
-LIMIT 10
-```
-
-IMPORTANT for vector search:
-- The `<=>` operator returns a FLOAT (distance), NOT a boolean
-- Do NOT use `<=>` in WHERE clause for comparison
-- ALWAYS use ORDER BY with `<=>` for similarity ranking
-- The `:query_vector` parameter will be substituted at execution time
 
 ### Template 5: Topic/Keyword Search (BROAD SEARCH) - MANDATORY FOR topic_search INTENT
 
