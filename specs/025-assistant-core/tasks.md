@@ -31,18 +31,22 @@ worktree": warn other sessions, `pg_dump` before a migration, restore afterwards
 
 ## Phase 1: Setup
 
-- [ ] T001 The plugin baseline: `pytest tests` in `~/indico-assistant/plugin-025` at `main` = `f85e798`. Record the
+- [x] T001 The plugin baseline: `pytest tests` in `~/indico-assistant/plugin-025` at `main` = `f85e798`. Record the
   pass, skip and fail counts here, and name any failures already on main.
-- [ ] T002 The eval worktree: `git -C ~/indico-assistant/eval worktree add ../eval-025 -b 025-acceptance-suite
+  - **Done 2026-10-05:** 2234 passed, 27 skipped, 7 failed. All 7 failures are in
+    `tests/integration/test_chat_citations.py`, already failing on main.
+- [x] T002 The eval worktree: `git -C ~/indico-assistant/eval worktree add ../eval-025 -b 025-acceptance-suite
   origin/main`, then `uv sync --extra dev` and `uv run pytest -q`. Record the counts here.
-- [ ] T003 [P] eval: `pyproject.toml`. Declare `httpx` (used, never declared), and add the console script
+  - **Done:** the eval repo has no remote, so the branch is cut from local `main` (`330c804`). `uv run pytest -q`:
+    129 passed.
+- [x] T003 [P] eval: `pyproject.toml`. Declare `httpx` (used, never declared), and add the console script
   `indico-assistant-scenarios = indico_assistant_eval.scenarios.run:main`.
 
 ---
 
 ## Phase 2: Foundational (blocks every story)
 
-- [ ] T004 The static test identity provider (clarification 5, research R8). **Approved by Lucas on 2026-10-05.** It
+- [x] T004 The static test identity provider (clarification 5, research R8). **Approved by Lucas on 2026-10-05.** It
   edits the shared `~/indico-assistant/instance/indico.conf`, so warn other sessions before restarting.
   - Add `AUTH_PROVIDERS`, `IDENTITY_PROVIDERS` and `PROVIDER_MAP` for a `static` provider `testidp`, with
     `trusted_email: True`, `group_cache_ttl: 0`, and the world's `idp` users and groups. Generate the users and
@@ -50,16 +54,26 @@ worktree": warn other sessions, `pg_dump` before a migration, restore afterwards
     match it.
   - Restart the web server and the worker, as the skill says.
   - Check: local login still works, and the group search shows `testidp` groups.
-- [ ] T005 [P] The world's documents (spec, Assumptions: public sources, never committed).
+  - **Done 2026-10-05:** `testidp` (group `physicists`: ida) is appended to `indico.conf`, after a backup at
+    `instance/backups/indico.conf.20261005-122056.bak`. The web server and worker were restarted from main with
+    the usual variables (all 43 peer sessions were idle).
+- [x] T005 [P] The world's documents (spec, Assumptions: public sources, never committed).
   - Record a source URL and sha256 for each of the study's files:
     - arXiv 1704.07983, 1706.03762v7 and 2410.15319v1;
     - CERN-THESIS-2011-112 from CDS.
   - `IDATalk_sm_reduced.pdf` (Lucas's seminar slides) and `transcript-2026-02-07-2100.txt` (the Aurora
     transcript) are committed to the eval repo: **approved by Lucas on 2026-10-05**. Never the CV.
+  - **Done:** every file is cached by sha256 in `~/.cache/indico-assistant-eval/files/`, seeded from the dev
+    archive.
+  - **Sources:**
+    - arXiv 1704.07983v2, 1706.03762v7 and 2410.15319v1 match their URLs byte for byte.
+    - The thesis is CDS record 1388275. CDS blocks scripted downloads with a proof-of-work page, so it comes only
+      from the cache.
+    - The IDA talk (33 MB) and the transcript are in eval: `data/world/`.
 
 ---
 
-- [ ] T006 The eval constitution 1.1.0: eval: `.specify/memory/constitution.md`, in the eval worktree (T002).
+- [x] T006 The eval constitution 1.1.0: eval: `.specify/memory/constitution.md`, in the eval worktree (T002).
   - Add a Sync Impact Report.
   - Scope §I (deterministic ground truth), §III (headless NL2SQL) and §IV (a clean database after every run) to the
     NL2SQL atoms harness.
@@ -72,6 +86,7 @@ worktree": warn other sessions, `pg_dump` before a migration, restore afterwards
     - an LLM judge counts only once its agreement with human labels is measured.
   - §V (MLflow) applies to scenario runs too.
   - Version 1.1.0, amended 2026-10-05, as Lucas approved.
+  - **Done:** eval commit `2fbf89a`.
 
 ---
 
@@ -85,14 +100,14 @@ FR-008, SC-001).
 
 ### Tests first (offline)
 
-- [ ] T007 [P] [US1] eval: `tests/test_scenarios_schema.py`. The scenario validator refuses:
+- [x] T007 [P] [US1] eval: `tests/test_scenarios_schema.py`. The scenario validator refuses:
   - an id repeated across sets;
   - an `expect` with no check;
   - `state` without `confirm: yes` on that turn;
   - `as`, `page`, `attach` or `wait_ready` naming a key that's missing from `world_ids.json` (or from `world.yaml`
     before the world is built);
   - a `judge` check without a criterion.
-- [ ] T008 [P] [US1] eval: `tests/test_scenarios_grade.py`. With recorded job results and session or trace JSON as
+- [x] T008 [P] [US1] eval: `tests/test_scenarios_grade.py`. With recorded job results and session or trace JSON as
   fixtures, check that each check passes and fails as it should:
   - `must` and `must_not` (regex, case-insensitive);
   - `cites` (document and an allowed page, read from `metadata.citations`, with `[p.N]` in the text as the fallback
@@ -102,7 +117,7 @@ FR-008, SC-001).
   - `plan` (an action and target in the plan card);
   - `state` (an SQL check run with psycopg2 against ids from `world_ids.json`, after the confirmed change);
   - `judge` (the LLM judge's verdict on a criterion, from a recorded judge response).
-- [ ] T009 [P] [US1] eval: `tests/test_scenarios_run.py`.
+- [x] T009 [P] [US1] eval: `tests/test_scenarios_run.py`.
   - The dry run makes no network call (httpx monkeypatched to fail) and prints counts and the estimate.
   - Turns are spread so no user goes over 200 a day, with 10 a minute pacing per user.
   - `--quick` selects exactly the `quick: true` scenarios.
@@ -112,12 +127,12 @@ FR-008, SC-001).
   - A run is logged to MLflow: a parent run, per-set and per-ability metrics, the report as an artifact.
   - The preflight refuses to run when fake GitHub mode, `actions_enabled` or `attach_file` is missing, or when
     `world_ids.json` doesn't match the world's hash.
-- [ ] T010 [P] [US1] eval: `tests/test_world_hash.py`. The world hash doesn't change with key order, and does change
+- [x] T010 [P] [US1] eval: `tests/test_world_hash.py`. The world hash doesn't change with key order, and does change
   when an attachment's sha256 or any field changes.
 
 ### Code
 
-- [ ] T011 [US1] eval: `src/indico_assistant_eval/chat.py`, moved out of `knowledge/run.py:70-171`. It provides:
+- [x] T011 [US1] eval: `src/indico_assistant_eval/chat.py`, moved out of `knowledge/run.py:70-171`. It provides:
   - `token`;
   - `ask(user, message, page_event_id, session_id, uploads=[], answer_id=None)`;
   - `upload(user, path) -> uuid` (`POST /chat/uploads`);
@@ -127,7 +142,7 @@ FR-008, SC-001).
   - `cleanup()`.
 
   `knowledge/run.py` imports it. `tests/test_knowledge.py` stays green.
-- [ ] T012 [US1] eval: `src/indico_assistant_eval/scenarios/world.yaml` (data-model, "World definition"). It
+- [x] T012 [US1] eval: `src/indico_assistant_eval/scenarios/world.yaml` (data-model, "World definition"). It
   contains:
   - **Users:** a world owner (admin); a manager; a viewer; a GitHub-connected and an unconnected user; and one
     user per access type: direct grant, local group, idp group, category inheritance, speaker, registrant, no
@@ -142,7 +157,7 @@ FR-008, SC-001).
     - one protected event per access type.
   - **Registration forms:** every publishing mode, and registrants with each consent.
   - **Contributions and speakers:** enough for the data set.
-- [ ] T013 [US1] eval: `src/indico_assistant_eval/scenarios/world.py`, users and groups. A CLI `build | status |
+- [x] T013 [US1] eval: `src/indico_assistant_eval/scenarios/world.py`, users and groups. A CLI `build | status |
   remove`, run with the Indico virtualenv's Python and `INDICO_CONFIG`. It works in an app context plus
   `test_request_context`, inside `acting_as(world owner)` (research R6, R8).
   - Users are local accounts with passwords.
@@ -150,18 +165,20 @@ FR-008, SC-001).
   - Local groups get their members.
   - The GitHub-connected user gets a fake-GitHub connection (`services/connectors/store.py`), matching the fake
     seed's `octo-dev` account.
-- [ ] T014 [US1] `world.py`: categories and events.
+- [x] T014 [US1] `world.py`: categories and events.
   - The root category is `__eval__ world`.
   - Events are created with `create_event(category, type, data)`, then given their protection mode and ACL through
     `update_principal`, for users, local groups, `GroupProxy(name, provider='testidp')` and registration forms.
   - Contributions, sessions and timetable entries follow `I/testing/fixtures/{contribution,session,timetable}.py`.
   - The `published` setting is set for contributions.
   - Every world event carries the `__eval__` keyword (eval constitution §II).
-- [ ] T015 [US1] `world.py`: registrations and notes.
+- [x] T015 [US1] `world.py`: registrations and notes.
   - Registration forms are created with their `publish_registrations_*` modes and participant-list columns.
   - Registrations are created through `create_registration(..., management=False)`, so consent applies.
   - Notes are created with `EventNote.get_or_create(obj).create_revision(...)`, and `note_added` is sent.
-- [ ] T016 [US1] `world.py`: attachments, versioning and status.
+- [x] T016 [US1] `world.py`: attachments, versioning and status. **Built live 2026-10-05:** 28 events, 18
+  registrations, 10 documents indexed in about 45 s. Two build bugs were fixed (contribution friendly ids need a
+  committed event; note autoflush). Mutable events and `reset` were added to keep the world reproducible.
   - **Attachments:**
     - Download each one and check its sha256.
     - Create it as `Attachment` + `AttachmentFile.save(bytes)` on the target event or contribution.
@@ -172,10 +189,10 @@ FR-008, SC-001).
   - **`world_ids.json`:** `build` and `status` write every key's id (users, events, contributions, sessions,
     attachments, registration forms) and the world hash to `eval: reports/world_ids.json`.
   - **`remove`:** deletes the category tree and the world's users.
-- [ ] T017 [US1] eval: `scenarios/grade.py`. The per-turn checks of T008. `state` checks are psycopg2 reads, and
+- [x] T017 [US1] eval: `scenarios/grade.py`. The per-turn checks of T008. `state` checks are psycopg2 reads, and
   `judge` uses `knowledge/judge.py`. The scenario passes when every turn passes.
   The report names the first failed check.
-- [ ] T018 [US1] eval: `scenarios/run.py` and `scenarios/compare.py`.
+- [x] T018 [US1] eval: `scenarios/run.py` and `scenarios/compare.py`.
   - **Loading:** sets are loaded and validated (T007 rules).
   - **The dry run** lists the scenarios, the users they're spread across, and the estimate per set
     (`ESTIMATE_USD`-style, calibrated after the baseline).
@@ -198,7 +215,7 @@ FR-008, SC-001).
   - **MLflow:** each run is a parent MLflow run, with per-set and per-ability metrics and the report as an artifact
     (eval constitution §V).
   - **`compare`:** two reports in, changed scenarios and score deltas out.
-- [ ] T019 [P] [US1] eval: `scenarios/sets/documents.yaml`.
+- [x] T019 [P] [US1] eval: `scenarios/sets/documents.yaml`.
   - Source: the study's 34 items (`~/thoth/scratch/indico_doc_qa_study/questions.json`).
   - Each item becomes a scenario: history turns become earlier turns, world keys replace filenames, evidence
     phrases become `must`, and `pdf_page` becomes `cites`.
@@ -206,7 +223,7 @@ FR-008, SC-001).
   - Scenarios that attach a file in chat use `wait_ready` before asking, except the one that tests "still being
     read".
   - About 8 are marked `quick`.
-- [ ] T020 [P] [US1] eval: `scenarios/sets/knowledge.yaml`, `chat.yaml`, `change.yaml`, `github.yaml`.
+- [x] T020 [P] [US1] eval: `scenarios/sets/knowledge.yaml`, `chat.yaml`, `change.yaml`, `github.yaml`.
   - Source: `knowledge/sets/{knowledge,routing,followups,connector}.yaml`, with their `must`, `must_not`, `items`
     and `mention` kept as checks.
   - Route-only expectations become outcome checks: refusal, a plan card, no lookup. Where none applies, they're
@@ -214,11 +231,11 @@ FR-008, SC-001).
   - Knowledge items with `expect: guide` or `honest` become a `judge` check with that criterion.
   - Ids are renamed to be unique (the connector `f01`/`c01` collisions).
   - About 12 are marked `quick`.
-- [ ] T021 [P] [US1] eval: `scenarios/sets/data.yaml`.
+- [x] T021 [P] [US1] eval: `scenarios/sets/data.yaml`.
   - About 25 data questions about the world's events, timetables, speakers, counts and notes, modelled on the data
     atoms' dimensions (`dimensions.py`), with facts the world defines.
   - About 6 are marked `quick`.
-- [ ] T022 [P] [US1] eval: `scenarios/sets/cross.yaml`. At least 20 scenarios (FR-007). They cover:
+- [x] T022 [P] [US1] eval: `scenarios/sets/cross.yaml`. At least 20 scenarios (FR-007). They cover:
   - documents and data;
   - notes, then a change, then a confirmation, with `state` checked;
   - GitHub plus an event;
@@ -228,20 +245,38 @@ FR-008, SC-001).
   - a turn that hits a limit, which should give a plain note.
 
   About 8 are marked `quick`.
-- [ ] T023 [P] [US1] eval: `scenarios/sets/access.yaml` (SC-007, clarification 3).
+- [x] T023 [P] [US1] eval: `scenarios/sets/access.yaml` (SC-007, clarification 3).
   - For each access-type user, questions about the protected events: answered or not, never revealed.
   - Registration questions as a manager, as a non-manager with a published list, and for a registrant without
     consent.
   - About 6 are marked `quick`.
-- [ ] T024 [US1] eval: `scenarios/calibrate.py` (FR-003).
+- [x] T024 [US1] eval: `scenarios/calibrate.py` (FR-003).
   - Export at least 40 answers that need the LLM judge from a report, as a labelling file for Lucas.
   - Compute the judge's true-pass and true-fail rates against his labels.
   - The report marks judge-graded results "uncalibrated" until then.
-- [ ] T025 [US1] Build the world on the dev stack (after T004, T005), wait for `status` to show every document
+- [x] T025 [US1] Build the world on the dev stack (after T004, T005), wait for `status` to show every document
   ready, and run both dry runs. **Quote the full and quick costs to Lucas.**
+  - **Done 2026-10-05:**
+    - The world (hash `baa444dbe026`) was rebuilt after giving world-managers the root, and adding `gil`, a manager
+      with GitHub. All 10 documents are indexed; `reset` was checked live.
+    - The sets total 273 scenarios and 346 turns: documents 36, knowledge 53, chat 14, change 28, routing_data 20,
+      github 50, data 27, cross 26, access 19.
+    - **Dry runs:** full $4.12, quick (40 scenarios) $0.61, both within the pre-approved ceilings.
 - [ ] T026 [US1] **Paid, on Lucas's go:** the baseline full run (≤ $5), saved to `eval: reports/baseline.json`.
   - Record its scores per set and ability here.
   - Then the calibration labels (T024), by Lucas.
+  - **In progress (paused 2026-10-05, Lucas's request):** two paid quick runs, used to fix the suite itself.
+    - **Run 1:** 12/40, $0.14 measured ($0.15 by the key). It exposed suite bugs:
+      - no answer's metadata was read (the API's key is message_id);
+      - fake GitHub refused the world's token;
+      - world users had the default time zone;
+      - an offer in words wasn't accepted as a plan.
+
+      All four were fixed in eval `88b485f`.
+    - **Run 2:** 18/40, $0.10 measured ($0.115 by the key). The six scenarios that had failed for suite reasons
+      pass. Time patterns were then widened to accept "4:00 PM" (eval `d055c1a`).
+    - **The full baseline is still to run:** estimated $1.58, pre-approved up to $5. Run it with the stack in fake
+      GitHub mode, then restore normal mode.
 - [ ] T027 [US1] The eval PR. `uv run pytest -q` and the repo's configured linters pass first. It carries the
   constitution amendment and a README section on scenarios, the world and paid runs. Hand the link to Lucas.
 
