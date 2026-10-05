@@ -52,7 +52,7 @@ class Document(db.Model):  # type: ignore[misc]  # (Indico's models are untyped)
     status = Column(String(16), nullable=False, default=DocumentStatus.QUEUED.value)
     error = Column(Text, nullable=True)  # why it failed (admins only)
     page_count = Column(Integer, nullable=True)  # pages, or slides
-    outline = Column(JSONB, nullable=True)  # [{number, title, level, page_start, page_end}]
+    outline = Column(JSONB(none_as_null=True), nullable=True)  # [{number, title, level, page_start, page_end}]
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
     def __repr__(self) -> str:

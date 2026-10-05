@@ -218,3 +218,10 @@ def test_syncs_read_an_event_now_or_queue_what_is_stale(db, attach, dummy_event,
         assert sync.sync_all_documents.run() == {"success": True, "attachments_queued": 0}
         assert sync.sync_all_documents.run(force=True)["attachments_queued"] == 2
     assert sorted(call.args[0] for call in delay.call_args_list) == sorted([first.id, second.id])
+
+
+def test_no_outline_is_null_not_json_null(db, read, attach):
+    sheet = attach(filename="budget.xlsx")
+    read(sheet)
+    assert db.session.execute(text(
+        "SELECT outline IS NULL FROM plugin_assistant.documents WHERE attachment_id = :id"), {"id": sheet.id}).scalar()
