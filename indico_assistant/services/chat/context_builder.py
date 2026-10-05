@@ -20,8 +20,10 @@ from indico_assistant.models.message import ChatMessage
 HIDDEN = "(An answer about Indico, not shown here.)"
 
 
-def _route(msg):
-    return ((msg.metadata_json or {}).get("route") or {}).get("route")
+def _github(msg):
+    """An answer that read GitHub: the connector route's (spec 023), or a turn that called ask_github (spec 025)."""
+    route = (msg.metadata_json or {}).get("route") or {}
+    return route.get("route") == "connector" or bool(route.get("private"))
 
 
 class ContextBuilder:
@@ -74,7 +76,7 @@ class ContextBuilder:
         #17): the user's own messages, and only the answers that came from GitHub. Never Indico's answers, nor the
         page note."""
         return [
-            {"role": msg.role, "content": msg.content if msg.role == "user" or _route(msg) == "connector" else HIDDEN}
+            {"role": msg.role, "content": msg.content if msg.role == "user" or _github(msg) else HIDDEN}
             for msg in self._recent(session_id, up_to) if msg.role in ("user", "assistant")
         ]
 

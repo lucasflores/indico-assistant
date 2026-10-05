@@ -43,6 +43,15 @@ DEFAULT_SETTINGS = {
     # OpenRouter directly (constitution 1.1.0, Principle III); without a key the classifier routes instead.
     "jev_api_key": None,
     "jev_timeout_seconds": 1.5,
+    # The turn (spec 025): Jev answers chat and out-of-scope messages on its own at this confidence or above; every
+    # other message is answered by the agent with its tools, within these limits.
+    "fast_path_confidence": 0.80,
+    "fast_path_out_of_scope": True,  # off: an out-of-scope decision goes to the agent too (research R2)
+    "turn_max_requests": 8,
+    "turn_max_tool_calls": 12,
+    "turn_max_cost_usd": 0.10,
+    "turn_deadline_seconds": 75,  # within the worker's 120 s soft limit
+    "turn_pin_model": True,  # the first step's ibis pick answers the rest of the turn (research R1)
     "max_tokens": 4096,
     # NL2SQL pipeline defaults (Feature 003)
     "nl2sql_enabled": True,
@@ -52,16 +61,11 @@ DEFAULT_SETTINGS = {
     "nl2sql_cache_ttl": 600,
     "nl2sql_allowed_tables": None,
     "max_retries": 2,
-    # Vector search settings (Feature 006)
+    # Documents (spec 025): attachments are read into documents the assistant can search and read
     "vector_search_enabled": True,
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "embedding_dimensions": 384,
-    "chunk_size": 1000,
-    "chunk_overlap": 200,
-    "similarity_threshold": 0.7,
-    "max_search_results": 5,
     "embedding_batch_size": 32,
-    "supported_extensions": [".pdf", ".docx", ".doc", ".txt", ".md"],
     # Chat widget settings (Feature 008)
     "chat_widget_enabled": True,
     "chainlit_server_url": "http://localhost:8000",

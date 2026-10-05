@@ -268,6 +268,7 @@ class LLMService:
         max_retries: int | None = None,
         timeout: float | None = None,
         messages: list[dict[str, str]] | None = None,
+        model: str | None = None,
     ) -> LLMResponse[T]:
         """Generate a structured LLM response.
         
@@ -279,6 +280,7 @@ class LLMService:
             timeout: Override default timeout from settings.
             messages: Earlier conversation turns ({"role": "user"|"assistant", "content": ...}), sent between
                 the system prompt and ``prompt`` (the chat-action planner passes the chat this way).
+            model: A model for this call instead of the setting's (spec 025: a turn pinned to ibis's first pick).
         
         Returns:
             LLMResponse[T] containing either:
@@ -325,15 +327,16 @@ class LLMService:
         # end in failure (each one is billed), by the client's one hook (_record_completion) into this
         # call's own list.
         calls: list[dict[str, Any]] = []
-        context_token = _current_calls.set((calls, response_model.__name__, settings["model"]))
+        requested = model or settings["model"]
+        context_token = _current_calls.set((calls, response_model.__name__, requested))
         # one analytics step per call (spec 024), with its text: the whole conversation sent, and what came back
         with recorder.step("llm", response_model.__name__) as step:
-            step.requested_model = settings["model"]
+            step.requested_model = requested
             recorder.text(step, "prompt", messages)
             try:
                 result = client.chat.completions.create(
                     messages=messages,
-                    model=settings["model"],
+                    model=requested,
                     response_model=response_model,
                     max_retries=effective_max_retries,
                     timeout=effective_timeout,

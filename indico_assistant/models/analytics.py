@@ -46,8 +46,8 @@ class Turn(db.Model):
     # what happened
     outcome = Column(String(24), nullable=True)  # answered | failed | timeout | access_denied | refusal | cannot_plan
     error_code = Column(String(48), nullable=True)
-    route = Column(String(16), nullable=True)
-    decided_by = Column(String(16), nullable=True)  # jev | classifier | shortcut | planner
+    route = Column(String(24), nullable=True)  # (024: 16; spec 025 adds fast:out_of_scope)
+    decided_by = Column(String(16), nullable=True)  # jev | none | shortcut (spec 025; 024 also classifier, planner)
     jev_confidence = Column(Float, nullable=True)
     fallback = Column(String(48), nullable=True)
     # totals: sums over the steps

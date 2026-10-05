@@ -12,6 +12,7 @@ import indico_assistant.controllers.chat as chat_module
 from indico_assistant.controllers.chat import RHChat, RHChatJob
 from indico_assistant.services.chat import jobs
 from indico_assistant.services.chat.service import ChatService
+from indico_assistant.services.turn.answer import Outcome
 from indico_assistant.tasks.chat import answer_chat
 
 
@@ -43,7 +44,10 @@ def test_chat_round_trip(monkeypatch):
             patch('indico_assistant.services.chat.get_chat_service', return_value=service), \
             patch.object(answer_chat, 'delay', side_effect=lambda *args: queued.append(args)), \
             patch.object(service, '_load_user', return_value=user), \
-            patch.object(service, '_process_with_nl2sql', return_value=("Hello from pipeline", {})), \
+            patch('indico_assistant.services.turn.answer.answer',
+                  return_value=Outcome("Hello from pipeline", {}, "agent")), \
+            patch('indico_assistant.services.turn.answer.disabled_for', return_value=False), \
+            patch('indico_assistant.services.actions.executor.open_plan', return_value=None), \
             patch('indico_assistant.services.chat.service.db'):
         request.get_json.return_value = {"message": "Hello"}
         response, status = rh(RHChat)._process()
