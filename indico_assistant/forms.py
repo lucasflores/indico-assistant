@@ -139,10 +139,6 @@ class SettingsForm(IndicoForm):
         validators=[InputRequired(), NumberRange(min=0)],
         description="The audit log holds users' questions, emails and IP addresses. 0 keeps it forever.",
     )
-    retention_sync_log_days = IntegerField(
-        "Keep document sync logs (days)", validators=[InputRequired(), NumberRange(min=0)],
-        description="0 keeps them forever.",
-    )
     retention_plan_days = IntegerField(
         "Keep chat action plans (days)", validators=[InputRequired(), NumberRange(min=0)],
         description="What the assistant planned and did, for audit. Undo only reaches back 24 hours. "

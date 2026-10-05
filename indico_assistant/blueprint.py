@@ -5,7 +5,6 @@ including health check and chat API endpoints, and also exposes the
 Chainlit widget bundle so it can be loaded from an absolute path.
 
 Feature: 004-chat-api
-Feature: 006-vector-search-rag (search endpoints)
 """
 
 import functools
@@ -221,19 +220,6 @@ def _register_routes():
     blueprint.add_url_rule("!/admin/assistant-analytics/", "admin_analytics", RHAnalyticsPage)
     blueprint.add_url_rule("!/admin/assistant-analytics/turns/<int:turn_id>/", "admin_analytics_turn",
                            RHAnalyticsTurnPage)
-
-    # Vector Search API endpoints (Feature 006)
-    from indico_assistant.controllers.search import (
-        RHVectorSearch,
-        RHSearchStatus,
-        RHSyncDocuments,
-        RHSyncAllDocuments,
-    )
-    
-    blueprint.add_url_rule("/search", "search", RHVectorSearch, methods=["POST"])
-    blueprint.add_url_rule("/search/status", "search_status", RHSearchStatus, methods=["GET"])
-    blueprint.add_url_rule("/search/sync", "search_sync", RHSyncDocuments, methods=["POST"])
-    blueprint.add_url_rule("/search/sync/all", "search_sync_all", RHSyncAllDocuments, methods=["POST"])
 
 
 # Defer route registration to avoid circular imports

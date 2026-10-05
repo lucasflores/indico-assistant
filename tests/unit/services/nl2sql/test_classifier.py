@@ -93,16 +93,6 @@ class TestQueryClassifierBasicClassification:
         call_args = mock_llm_service.generate.call_args
         assert "response_model" in call_args[1]
 
-    def test_classify_prompt_includes_document_content_intent(
-        self, classifier: QueryClassifier, mock_llm_service: MagicMock
-    ) -> None:
-        """Prompt should include document_content_query intent."""
-        classifier.classify("What does the presentation say about physics?")
-
-        call_args = mock_llm_service.generate.call_args
-        prompt = call_args[1]["prompt"]
-        assert "document_content_query" in prompt
-
 
 class TestQueryClassifierTimeReferenceDefaults:
     """Test time reference resolution (FR-003, FR-040)."""

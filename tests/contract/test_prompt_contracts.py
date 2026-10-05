@@ -69,17 +69,15 @@ def test_speaker_query_includes_group_by() -> None:
 
 
 @pytest.mark.contract
-def test_document_query_vector_pattern_in_prompt() -> None:
-    """Prompt includes vector search pattern in the document template."""
-    assert "plugin_assistant.extracted_documents" in SQL_GENERATION_PROMPT
-    assert "<=> :query_vector" in SQL_GENERATION_PROMPT
-    assert "ORDER BY" in SQL_GENERATION_PROMPT
+def test_no_document_content_in_sql() -> None:
+    """What files say is read by the document tools, never by SQL (spec 025)."""
+    assert "extracted_documents" not in SQL_GENERATION_PROMPT and ":query_vector" not in SQL_GENERATION_PROMPT
 
 
 @pytest.mark.contract
-def test_classification_includes_document_content_intent() -> None:
-    """Classifier prompt includes document_content_query intent."""
-    assert "document_content_query" in CLASSIFICATION_PROMPT
+def test_classification_has_no_document_content_intent() -> None:
+    """The document intent is gone with the old document path (spec 025)."""
+    assert "document_content_query" not in CLASSIFICATION_PROMPT
 
 
 @pytest.mark.contract
@@ -87,12 +85,6 @@ def test_classification_includes_attachment_metadata_rule() -> None:
     """Classifier prompt distinguishes attachment metadata queries."""
     assert "attachment_query" in CLASSIFICATION_PROMPT
     assert "FILE METADATA" in CLASSIFICATION_PROMPT
-
-
-@pytest.mark.contract
-def test_classification_includes_hybrid_rule() -> None:
-    """Classifier prompt documents hybrid query routing behavior."""
-    assert "Hybrid Queries" in CLASSIFICATION_PROMPT
 
 
 @pytest.mark.contract

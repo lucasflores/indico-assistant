@@ -39,7 +39,6 @@ class SchemaContext:
             "events.notes",
             "events.contributions",
             "events.sessions",
-            "plugin_assistant.extracted_documents",
         ],
         # Basic queries - single table focus
         "event_query": [
@@ -74,12 +73,6 @@ class SchemaContext:
             "attachments.folders",
             "events.events",
             "events.contributions",
-        ],
-        "document_content_query": [
-            "plugin_assistant.extracted_documents",
-            "attachments.attachments",
-            "attachments.files",
-            "events.events",
         ],
         "schedule_query": [
             "events.events",

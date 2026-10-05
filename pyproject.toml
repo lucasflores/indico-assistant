@@ -30,11 +30,11 @@ dependencies = [
     "instructor>=1.15",  # hooks: completion:response and completion:error per attempt
     "openai>=1.0.0",
     "ollama>=0.3.0",
-    # Vector search dependencies (Feature 006)
+    # Documents (spec 025): reading PDF, Word and PowerPoint; the embedding model
     "sentence-transformers>=2.2.0",
-    "PyPDF2>=3.0.0",
-    "python-docx>=0.8.11",
-    "pgvector>=0.2.0",
+    "pypdf>=6.0",
+    "python-docx>=1.0",
+    "python-pptx==1.0.2",
     # Chat widget dependencies (Feature 008)
     "PyJWT>=2.8.0",
     # Connectors (spec 023): the stored tokens are encrypted with Fernet

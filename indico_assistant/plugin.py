@@ -210,15 +210,24 @@ _PENDING_INDEXING = 'indico_assistant_pending_indexing'
 
 
 def _on_attachment_changed(attachment, **kwargs):
-    """Remember the attachment; it is queued once its transaction commits (see _queue_pending_indexing).
+    """Mark the document queued in the upload's own transaction, and remember the attachment: its reading is
+    queued once that transaction commits (see _queue_pending_indexing).
 
-    Indico sends these signals after flush but before commit: queueing right away let a fast worker
-    look for a row that was not visible yet and give up.
+    Indico sends these signals after flush but before commit: queueing the task right away let a fast worker
+    look for a row that was not visible yet and give up. The status row never fails the upload (a savepoint).
     """
     from flask import g
 
+    from indico.core.db import db
+
+    from indico_assistant.services.document import store
+    from indico_assistant.tasks.indexing import skip_reason
+
     try:
         g.setdefault(_PENDING_INDEXING, set()).add(attachment.id)
+        if skip_reason(attachment) is None:
+            with db.session.begin_nested():
+                store.queue(attachment)
     except Exception:
         logger.exception('Could not schedule indexing for attachment %s', getattr(attachment, 'id', None))
 
@@ -239,22 +248,20 @@ def _queue_pending_indexing(sender, **kwargs):
 
 
 def _drop_chunks(attachment_ids):
-    """Drop chunks in the deleting request's transaction, so deleted files stop being searchable at once.
+    """Drop the documents in the deleting request's transaction, so deleted files stop being readable at once.
 
     Never fails the user's delete: a savepoint keeps an error out of the outer transaction, and the
     nightly cleanup_orphaned_documents removes anything missed.
     """
     from indico.core.db import db
 
-    from indico_assistant.services.vector_search.store import VectorStore
+    from indico_assistant.services.document import store
 
     try:
         with db.session.begin_nested():
-            store = VectorStore()
-            for attachment_id in attachment_ids:
-                store.delete_attachment_chunks(attachment_id, commit=False)
+            store.delete(attachment_ids)
     except Exception:
-        logger.exception('Could not drop search chunks of attachments %s', attachment_ids)
+        logger.exception('Could not drop the documents of attachments %s', attachment_ids)
 
 
 def _on_attachment_deleted(attachment, **kwargs):

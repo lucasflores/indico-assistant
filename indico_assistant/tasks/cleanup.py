@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 RETENTION = [
     ('plugin_assistant.chat_sessions', 'updated_at', 'retention_chat_days'),
     ('plugin_assistant.query_audit_log', 'created_at', 'retention_audit_days'),
-    ('plugin_assistant.document_sync_log', 'started_at', 'retention_sync_log_days'),
     ('plugin_assistant.action_plans', 'created_at', 'retention_plan_days'),
     # counted from closing: a report that is not closed has no closed_at, so it never matches (spec 021 FR-020)
     ('plugin_assistant.issue_reports', 'closed_at', 'retention_report_days'),

@@ -69,7 +69,6 @@ DEFAULT_SETTINGS = {
     # Retention in days, applied nightly; 0 = keep forever
     "retention_chat_days": 90,  # chat sessions idle this long (their messages and feedback go with them)
     "retention_audit_days": 90,  # NL2SQL audit log: questions, emails, IP addresses
-    "retention_sync_log_days": 90,
     "retention_plan_days": 90,  # chat action plans (their audit trail; undo only reaches back 24 h)
     "retention_report_days": 365,  # issue reports, counted from closing; open ones are never purged (spec 021)
     # Analytics (spec 024): every answer's turn record and steps, and their text (prompts, answers, SQL), for admins

@@ -218,7 +218,7 @@ class ChatService:
                 route = "change" if planned is not None else None
             if route in (None, "data"):
                 if route is None or decision.intent is None:
-                    fallback = "classifier"  # it routes, or (Jev's intent was not one of the 11) picks the kind
+                    fallback = "classifier"  # it routes, or (Jev's intent was not one of the 10) picks the kind
                 response_text, metadata = self._process_with_nl2sql(
                     message, context, event_id, user_id=viewer.id, auth_user=viewer,
                     intent=decision.intent if route == "data" else None,
