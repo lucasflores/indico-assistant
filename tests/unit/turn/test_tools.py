@@ -161,3 +161,11 @@ def test_the_registry_offers_data_and_github_only_when_on():
     assert names == ["list_documents", "read_document", "search_documents", "ask_guide", "propose_change"]
     names = [t.name for t in abilities.registry(ctx, nl2sql=True, github=True)]
     assert "query_data" in names and "ask_github" in names
+
+
+def test_change_requests_name_meetings_not_ids(db, create_event):
+    budget = create_event(title="Budget Review")
+    assert abilities.by_name(f"Move event {budget.id} to 3pm", page_event_id=None) == 'Move "Budget Review" to 3pm'
+    assert abilities.by_name(f"Move Budget Review (event {budget.id}) to 3pm", None) == "Move Budget Review to 3pm"
+    assert abilities.by_name("Move event 1803 to Friday", page_event_id=1803) == "Move this meeting to Friday"
+    assert abilities.by_name("Move event 999999 to Friday", None) == "Move event 999999 to Friday"

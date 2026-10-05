@@ -80,6 +80,7 @@ def answered():
             patch("indico_assistant.services.turn.loop.run", s.agent),
             patch("indico_assistant.services.turn.abilities.plan", s.plan),
             patch("indico_assistant.services.turn.memory.load", return_value=[]),
+            patch("indico_assistant.services.document.reader.documents", return_value=[]),
             patch("indico_assistant.services.turn.memory.usable", side_effect=lambda user, entries: entries),
             patch("indico.modules.events.Event.get", return_value=s.event),
             patch("indico_assistant.services.chat.service.db"),

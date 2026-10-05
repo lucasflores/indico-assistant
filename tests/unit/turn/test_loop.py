@@ -222,3 +222,17 @@ def test_no_transaction_stays_open_through_the_next_model_call():
         db.session.commit.side_effect = lambda: order.append("commit")
         run(ctx(Recording(ok(call("a")), ok(answer("ok")))), tools=(tool, OTHER))
     assert order == ["model", "tool", "commit", "model"]
+
+
+def test_the_page_and_its_documents_are_in_every_prompt():
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.page_event_id = 5
+    c.page_documents = [{"document": 7, "filename": "guest-notes.md", "status": "ready"}]
+    run(c)
+    assert '"filename": "guest-notes.md"' in llm.sent[0].prompt and "page of event 5" in llm.sent[0].prompt
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.page_event_id = 5
+    run(c)
+    assert "No documents attached to it" in llm.sent[0].prompt

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -154,8 +155,9 @@ def _ask_github(ctx: Ctx, args: AskGithubArgs) -> str:
 
 class ProposeChangeArgs(BaseModel):
     """Plan a change in Indico for the user to confirm: create or change a meeting or its talks, add a speaker, a
-    reminder, a Teams meeting or material, cancel or undo. Write the request with the ids and names you found. The
-    user sees the plan and confirms it; nothing changes until they do."""
+    reminder, a Teams meeting or material, cancel or undo. Write the request in the user's words, naming meetings and
+    talks by their titles (never by ids); the page's event is "this meeting". The user sees the plan and confirms it;
+    nothing changes until they do."""
 
     tool: Literal["propose_change"]
     request: str
@@ -196,8 +198,29 @@ def plan(
     return turn.reply, metadata, turn.plan
 
 
+_EVENT_ID = re.compile(r"\s*\(?\b(?:event|meeting)\s+(?:id\s+)?#?(\d+)\)?", re.I)
+
+
+def by_name(request: str, page_event_id: int | None) -> str:
+    """The request with "event 1803" put back as the meeting's title (or "this meeting" for the page's): the
+    planner finds meetings by name, and the model sometimes wrote their ids (quick run 2)."""
+    from indico.modules.events import Event
+
+    def title(match: re.Match[str]) -> str:
+        event_id = int(match.group(1))
+        if event_id == page_event_id:
+            return " this meeting"
+        event = Event.get(event_id, is_deleted=False)
+        if event is None:
+            return match.group(0)
+        return "" if event.title.lower() in request.lower() else f' "{event.title}"'
+
+    return _EVENT_ID.sub(title, request).strip()
+
+
 def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
-    planned = plan(ctx.user, ctx.session_id, args.request, ctx.history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
+    request = by_name(args.request, ctx.page_event_id)
+    planned = plan(ctx.user, ctx.session_id, request, ctx.history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
     if planned is None or (planned[1].get("cannot_plan") and ctx.waiting_plan is None):
         return planned[0] if planned else "That is not a change the assistant can plan."
     ctx.plan = planned

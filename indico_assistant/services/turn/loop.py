@@ -10,6 +10,7 @@ step's ibis pick is sent as the model for the rest of the turn.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -89,9 +90,15 @@ def mark(text: str) -> str:
 def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any, str]], final: str | None) -> str:
     page = (
         f'The user is on the page of event {ctx.page_event_id}: "this event" and "this meeting" mean it.'
-        if ctx.page_event_id
+        if ctx.page_event_id is not None
         else "The user is not on an event page."
     )
+    if ctx.page_documents:  # FR-011: known without a lookup
+        page += "\nDocuments attached to it:\n" + "\n".join(
+            json.dumps(d, ensure_ascii=False) for d in ctx.page_documents
+        )
+    elif ctx.page_event_id is not None:
+        page += "\nNo documents attached to it that the user can open."
     lines = [
         "## The page",
         page,

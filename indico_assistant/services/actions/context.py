@@ -27,9 +27,9 @@ def acting_as(user):
     session.lang = user.settings.get('lang') or config.DEFAULT_LOCALE
     session.timezone = user_timezone(user).zone
     g.pop('memoize_cache', None)
-    if session.user != user:
-        raise RuntimeError(f'Could not act as {user}')
     try:
+        if session.user != user:  # (inside the try: a failed switch still restores the session)
+            raise RuntimeError(f'Could not act as {user}')
         yield user
     finally:
         for key in ('_user_id', '_lang', '_timezone'):

@@ -161,6 +161,12 @@ def _agent(
         offer=offer,
         started=started,
     )
+    if page_event_id is not None:  # FR-011: the turn knows the page's documents without a lookup
+        from indico_assistant.services.document import reader
+
+        ctx.page_documents = [reader.describe(d) for d in reader.documents(user, event_id=page_event_id)]
+        for d in ctx.page_documents:
+            ctx.memory.add("document", {"attachment_id": d["document"]}, d["filename"])
     nl2sql = (
         bool(event_setting(plugin, event, "nl2sql_enabled"))
         if event is not None
