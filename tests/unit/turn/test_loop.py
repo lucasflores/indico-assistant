@@ -207,3 +207,18 @@ def test_a_step_is_either_a_call_or_an_answer():
         step()
     with pytest.raises(ValueError):
         step(call=EchoArgs(tool="echo", word="a"), answer=loop.Final(reply="x"))
+
+
+def test_no_transaction_stays_open_through_the_next_model_call():
+    order = []
+
+    class Recording(Script):
+        def generate(self, prompt, response_model, **kwargs):
+            order.append("model")
+            return super().generate(prompt, response_model, **kwargs)
+
+    tool = Tool("echo", EchoArgs, lambda ctx, args: order.append("tool") or "read")
+    with patch("indico.core.db.db") as db:
+        db.session.commit.side_effect = lambda: order.append("commit")
+        run(ctx(Recording(ok(call("a")), ok(answer("ok")))), tools=(tool, OTHER))
+    assert order == ["model", "tool", "commit", "model"]

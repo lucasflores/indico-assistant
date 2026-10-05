@@ -217,16 +217,17 @@ def run(
 
 def _call(ctx: Ctx, tool: Tool, call: Any, result: TurnResult, now: Callable[[], float]) -> str:
     """Run one tool as an analytics step (its name, time and outcome). Its failure is text for the model."""
+    from indico.core.db import db
+
     began, ok = now(), True
     with recorder.step("tool", "turn", tool.name) as tool_step:
         try:
             text = tool.run(ctx, call)
+            db.session.commit()  # no transaction stays open through the next model call
         except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout)
             raise
         except Exception:  # noqa: BLE001 - one tool failing must not fail the answer
             logger.exception("The %s tool failed", tool.name)
-            from indico.core.db import db
-
             db.session.rollback()
             text, ok = "The lookup failed.", False
             tool_step.error_code = "failed"
