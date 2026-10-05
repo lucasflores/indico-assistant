@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+from indico_assistant.services.turn.answer import Outcome
 from indico_assistant.services.chat.service import (
     ChatResult,
     ChatService,
@@ -106,30 +107,32 @@ class TestChatService:
         validate.assert_called_once_with(user, 456)
         mock_session_manager.add_user_message.assert_not_called()
 
-    def test_answer_runs_pipeline_as_the_user_with_no_transaction_open(
-        self, chat_service, mock_session_manager, mock_context_builder
-    ):
+    def test_answer_reads_everything_before_the_turn(self, chat_service, mock_session_manager, mock_context_builder):
         session_id = uuid4()
         mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=456)
         mock_session_manager.page_event_of.side_effect = lambda message_id, fallback: fallback  # (spec 020)
         mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+        mock_session_manager.offer_before.return_value = None
         mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
         user = MagicMock(id=123, is_admin=True)
         calls = []
 
-        def pipeline(message, context, event_id, user_id=None, auth_user=None, **routed):
-            calls.append('pipeline')
-            assert (auth_user.id, auth_user.is_admin, event_id, user_id) == (123, True, 456, 123)
-            return "Answer", {"confidence": 0.9}
+        def turn(who, session, message, message_id, context, event_id, **kwargs):
+            calls.append('turn')
+            assert (who, session, message, event_id) == (user, session_id, "hi", 456)
+            return Outcome("Answer", {}, "agent")
 
         with patch.object(chat_service, '_load_user', return_value=user), \
                 patch.object(chat_service, '_validate_event_access') as validate, \
-                patch.object(chat_service, '_process_with_nl2sql', side_effect=pipeline), \
+                patch('indico_assistant.services.turn.answer.answer', side_effect=turn), \
+                patch('indico_assistant.services.turn.answer.disabled_for', return_value=False), \
+                patch('indico_assistant.services.actions.executor.open_plan', return_value=None), \
+                patch('indico.modules.events.Event.get', return_value=MagicMock()), \
                 patch('indico_assistant.services.chat.service.db') as db:
             db.session.commit.side_effect = lambda: calls.append('commit')
             result = chat_service.answer(123, session_id, "hi", message_id="q1")
 
-        assert calls == ['commit', 'pipeline']  # reads committed before any LLM call
+        assert calls == ['commit', 'turn']  # reads committed before any LLM call
         validate.assert_called_once_with(user, 456)
         # a question sent while this one was queued is not in its context
         mock_context_builder.build_context.assert_called_once_with(session_id, up_to="q1")
@@ -148,10 +151,10 @@ class TestChatService:
         mock_session_manager.get_session.return_value = MagicMock(event_id=456)
         with patch.object(chat_service, '_load_user', return_value=MagicMock()), \
                 patch.object(chat_service, '_validate_event_access', side_effect=EventAccessDeniedError(456)), \
-                patch.object(chat_service, '_process_with_nl2sql') as pipeline:
+                patch('indico_assistant.services.turn.answer.answer') as turn:
             with pytest.raises(EventAccessDeniedError):
                 chat_service.answer(123, uuid4(), "hi")
-        pipeline.assert_not_called()
+        turn.assert_not_called()
 
     # --- spec 020 US2: "this event" is the page each message is sent from -----------------------------
 
@@ -178,72 +181,22 @@ class TestChatService:
         mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=351)
         mock_session_manager.page_event_of.return_value = 352
         mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
+        mock_session_manager.offer_before.return_value = None
         mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
         mock_context_builder.page_note.return_value = {"role": "system", "content": "page 352"}
-        nl2sql = MagicMock(return_value=("An answer", {}))
+        turn = MagicMock(return_value=Outcome("An answer", {}, "agent"))
         with patch.object(chat_service, '_load_user', return_value=MagicMock(id=123, is_admin=False)), \
                 patch.object(chat_service, '_validate_event_access') as check, \
-                patch.object(chat_service, '_process_with_nl2sql', nl2sql), \
+                patch('indico_assistant.services.turn.answer.answer', turn), \
+                patch('indico_assistant.services.turn.answer.disabled_for', return_value=False), \
                 patch('indico_assistant.services.actions.executor.open_plan', return_value=None), \
+                patch('indico.modules.events.Event.get', return_value=MagicMock()), \
                 patch('indico_assistant.services.chat.service.db'):
             chat_service.answer(123, session_id, "hi", message_id)
         mock_session_manager.page_event_of.assert_called_once_with(message_id, 351)
-        assert check.call_args.args[1] == 352 and nl2sql.call_args.args[2] == 352
-        history = nl2sql.call_args.args[1]
-        assert history[-2] == {"role": "system", "content": "page 352"} and history[-1]["content"] == "hi"
-
-    @pytest.fixture
-    def routed(self, chat_service, mock_session_manager, mock_context_builder):
-        """answer() with the planner and NL2SQL stubbed; returns (run, plan stub, nl2sql stub)."""
-        session_id = uuid4()
-        mock_session_manager.get_session.return_value = MagicMock(id=session_id, event_id=None)
-        mock_session_manager.add_assistant_message.return_value = MagicMock(id=uuid4())
-        mock_context_builder.build_context.return_value = [{"role": "user", "content": "hi"}]
-        plan, nl2sql, waiting = MagicMock(), MagicMock(return_value=("An answer", {})), MagicMock()
-
-        def run(waiting_plan=None):
-            waiting.return_value = waiting_plan
-            with patch.object(chat_service, '_load_user', return_value=MagicMock(id=123, is_admin=False)), \
-                    patch.object(chat_service, '_plan', plan), \
-                    patch.object(chat_service, '_process_with_nl2sql', nl2sql), \
-                    patch('indico_assistant.services.actions.executor.open_plan', waiting), \
-                    patch('indico_assistant.services.chat.service.db'):
-                return chat_service.answer(123, session_id, "hi")
-        return run, plan, nl2sql
-
-    def test_a_follow_up_on_an_open_plan_goes_to_the_planner(self, routed):
-        run, plan, nl2sql = routed
-        plan.return_value = ("Updated the plan.", {"plan_id": "p2"}, {"id": "p2"})
-        result = run(waiting_plan=MagicMock())
-        assert (result.response, result.plan) == ("Updated the plan.", {"id": "p2"})
-        nl2sql.assert_not_called()
-
-    def test_a_question_despite_an_open_plan_goes_to_nl2sql(self, routed):
-        run, plan, nl2sql = routed
-        plan.return_value = None  # the planner said "unrelated"
-        assert run(waiting_plan=MagicMock()).response == "An answer"
-        nl2sql.assert_called_once()
-
-    def test_a_change_request_goes_to_the_planner(self, routed):
-        run, plan, nl2sql = routed
-        nl2sql.return_value = ("", {"write_request": True})
-        plan.return_value = ("Here is the plan.", {"plan_id": "p1"}, {"id": "p1"})
-        result = run()
-        assert result.plan == {"id": "p1"} and plan.call_args.args[-1] is None  # no open plan
-
-    def test_a_change_request_the_planner_turns_down_gets_the_knowledge_answer(self, routed, chat_service):
-        # (code review, PR #3) never a blank bubble; spec 022: the knowledge answer says what it can and can't do
-        from indico_assistant.services.knowledge.answer import KnowledgeResult
-        run, plan, nl2sql = routed
-        nl2sql.return_value = ("", {"write_request": True})
-        plan.return_value = None
-        with patch.object(chat_service, '_knowledge', return_value=KnowledgeResult("I can't do that; here's how.")):
-            assert run().response == "I can't do that; here's how."
-
-    def test_questions_never_reach_the_planner(self, routed):
-        run, plan, nl2sql = routed
-        assert run().plan is None
-        plan.assert_not_called()
+        assert check.call_args.args[1] == 352 and turn.call_args.args[5] == 352
+        context = turn.call_args.args[4]
+        assert context[-2] == {"role": "system", "content": "page 352"} and context[-1]["content"] == "hi"
 
     def test_answer_for_vanished_session(self, chat_service, mock_session_manager):
         mock_session_manager.get_session.return_value = None

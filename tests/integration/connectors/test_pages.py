@@ -264,6 +264,7 @@ def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fak
     from indico_assistant.controllers import connections as api_module
     from indico_assistant.services.chat.service import _route_record
     from indico_assistant.services.connectors import loop
+    from indico_assistant.services.turn.answer import Outcome
 
     caplog.set_level(logging.DEBUG)
     issued, seen = set(), []
@@ -301,7 +302,8 @@ def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fak
     result = loop.answer(makoto.id, "which of my PRs are open?", [], llm=Recording(), settings=settings,
                          base_url="http://indico.test", profile_url="http://indico.test/user/assistant-connections/")
     remember()
-    seen += [repr(prompts), repr(_route_record("connector", result)), result.text]
+    record = _route_record("agent", Outcome(result.text, {}, "agent", result=result, tools=result.tools, private=True))
+    seen += [repr(prompts), repr(record), result.text]
     with app.test_request_context():
         session.set_session_user(makoto)
         store.disconnect(makoto.id, github.app_for(settings))

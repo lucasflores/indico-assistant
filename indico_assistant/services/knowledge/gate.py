@@ -10,6 +10,12 @@ classifier's 10 data intents, used only for data). The state is the format ibis'
 message. The criteria are the ones the router probe measured (thread E study, jev_router_probe.py), with two changes
 Lucas made on 2026-09-30: a "can you ...?" naming a concrete change is a change (the plan card is the offer, as the
 classifier has it), and chat answers from the conversation, informed by general knowledge.
+
+Spec 025: the turn acts only on ``chat`` and ``out_of_scope`` (its fast path); everything else goes to the agent. The
+``data``, ``chat`` and ``out_of_scope`` criteria carry the document study's "revised 2" sentences in full, the
+combination it measured (scratch/indico_doc_qa_study/routing.py, REVISED_2): what a file says is data, also as a
+follow-up; chat is only what the conversation itself says, when no file needs reading; a named paper, thesis, report,
+talk or slides is never out of scope.
 """
 
 import math
@@ -27,24 +33,30 @@ PLAN_WAITING = "(A plan made in this chat is waiting for the user to confirm it.
 OFFERED = "(The assistant's last answer offered to make this change: {offer})"
 
 ROUTES = {
-    "knowledge": "How to do something in Indico, where a page or setting is, or what the assistant itself can or "
-                 "cannot do in general (\"what can you do?\", \"can you create meetings?\", \"are you able to "
+    "knowledge": "How to do something in Indico, where a page or setting is, or what the assistant itself can"
+                 " or cannot do in general (\"what can you do?\", \"can you create meetings?\", \"are you able to "
                  "send emails?\").",
     "change": "A request to make a change in Indico now (create, change, move, add, attach, cancel or undo "
-              "something), including a polite one naming a concrete change (\"can you move it to 3pm?\", "
-              "\"could you add a Teams meeting to this event?\"), or an agreement to a change the assistant just "
-              "offered or planned. Asking how to make a change, or what the assistant can do in general, is not a "
-              "change.",
-    "data": "A question about information stored in Indico: events, meetings, talks, speakers, sessions, schedules, "
-            "registrations, participants, minutes and notes, attached files and what they say. Unfamiliar project, "
-            "topic or meeting names are usually things stored in Indico.",
-    "chat": "Something the assistant can answer from the conversation so far, using general knowledge to explain "
-            "it, without looking anything up in Indico or changing it: a follow-up about its last answer or about "
-            "something the conversation mentions (a term, a result, a process), a request to rephrase, summarise, "
-            "translate or reformat, drafting a text about the user's meetings, thanks or a greeting.",
-    "out_of_scope": "Clearly unrelated to Indico, its content or this conversation: weather, sports, coding help, "
-                    "general trivia. A question naming a project, topic, team or meeting, however unfamiliar the "
-                    "name, is never out of scope: it asks about what is stored in Indico.",
+              "something), including a polite one naming a concrete change (\"can you move it to 3pm?\", \"could"
+              " you add a Teams meeting to this event?\"), or an agreement to a change the assistant just "
+              "offered or planned. Asking how to make a change, or what the assistant can do in general, is "
+              "not a change.",
+    "data": "A question about information stored in Indico: events, meetings, talks, speakers, sessions, "
+            "schedules, registrations, participants, minutes and notes, attached files and what they say. "
+            "Unfamiliar project, topic or meeting names are usually things stored in Indico. That includes "
+            "what a file or document the conversation mentions says, as a follow-up too: its summary, its "
+            "findings, a definition in it, a page or section of it. A question about a named paper, thesis, "
+            "report, talk or slides asks what a file stored in Indico says, even when its subject sounds like"
+            " general science.",
+    "chat": "Something the assistant can answer from the conversation so far, using general knowledge to "
+            "explain it, without looking anything up in Indico or changing it: a follow-up about its last "
+            "answer, or about something the conversation itself says (a term, a result, a process), when no "
+            "file needs reading; a request to rephrase, summarise, translate or reformat the assistant's own "
+            "answers, drafting a text about the user's meetings, thanks or a greeting.",
+    "out_of_scope": "Clearly unrelated to Indico, its content or this conversation: weather, sports, coding "
+                    "help, general trivia. A question naming a project, topic, team or meeting, however "
+                    "unfamiliar the name, is never out of scope: it asks about what is stored in Indico. A "
+                    "question about a named paper, thesis, report, talk or slides is never out of scope.",
 }
 #: The classifier's data intents, in its own words (services/nl2sql/classifier.py; a test keeps them equal).
 INTENTS = {

@@ -74,34 +74,39 @@ def test_an_answer_is_answered_unless_the_service_says_otherwise(question):
     assert run(question, refused).outcome == 'refusal'
 
 
-def describe(metadata, route='data', plan=None, answer=None):
+def describe(metadata, route='agent', plan=None, outcome=None):
     turn = recorder._Turn(1, text_on=True)
     token = recorder._current.set(turn)
     try:
-        _record_turn(uuid4(), route, None, None, {'route': {}, **metadata}, plan, answer)
+        _record_turn(uuid4(), route, outcome, {'route': {}, **metadata}, plan)
     finally:
         recorder._current.reset(token)
     return turn
 
 
-@pytest.mark.parametrize(('route', 'metadata', 'outcome', 'code'), [
-    ('refusal', {'problem': 'out_of_scope'}, 'refusal', None),
-    ('change', {'cannot_plan': True, 'problem': 'cannot_do'}, 'cannot_plan', None),
-    ('change', {'problem': 'not_understood'}, 'cannot_plan', None),
-    ('data', {'problem': 'failed', 'pipeline_error': {'error_type': 'execution_failed'}}, 'failed', 'execution_failed'),
-    ('knowledge', {'problem': 'failed'}, 'failed', 'model_error'),  # a model call failed, answered politely
-    ('data', {}, None, None),  # (the task's default: answered)
+UNAVAILABLE = SimpleNamespace(decision=None, result=SimpleNamespace(stop='unavailable'), tools=[])
+
+
+@pytest.mark.parametrize(('route', 'metadata', 'turn_outcome', 'outcome', 'code'), [
+    ('fast:out_of_scope', {'problem': 'out_of_scope'}, None, 'refusal', None),
+    ('change', {'cannot_plan': True, 'problem': 'cannot_do'}, None, 'cannot_plan', None),
+    ('change', {'problem': 'not_understood'}, None, 'cannot_plan', None),
+    ('agent', {'problem': 'failed'}, None, 'failed', 'model_error'),  # a model call failed, answered politely
+    ('agent', {'problem': 'failed'}, UNAVAILABLE, 'failed', 'unavailable'),  # the provider was down (FR-028)
+    ('agent', {}, None, None, None),  # (the task's default: answered)
 ])
-def test_the_service_sets_the_outcome_of_answers_that_are_not_plain_answers(route, metadata, outcome, code):
-    turn = describe(metadata, route)
+def test_the_service_sets_the_outcome_of_answers_that_are_not_plain_answers(route, metadata, turn_outcome, outcome,
+                                                                            code):
+    turn = describe(metadata, route, outcome=turn_outcome)
     assert (turn.outcome, turn.error_code) == (outcome, code)
 
 
 def test_the_service_describes_the_turn():
-    turn = describe({'evidence': {'intent': 'time_range', 'correction_attempts': 1, 'row_count': 4}},
-                    plan={'id': str(uuid4())}, answer=SimpleNamespace(tools=[{'name': 'x'}], stop='answered'))
+    outcome = SimpleNamespace(decision=None, result=SimpleNamespace(stop='answered'), tools=[{'name': 'x'}])
+    turn = describe({'evidence': {'queries': [{'intent': 'time_range', 'corrections': 1, 'row_count': 4}]}},
+                    plan={'id': str(uuid4())}, outcome=outcome)
     fields = turn.fields
     assert (fields['route'], fields['decided_by'], fields['intent'], fields['corrections'], fields['row_count']) == (
-        'data', 'shortcut', 'time_range', 1, 4)
-    assert fields['tool_calls'] == 1 and fields['record']['connector_stop'] == 'answered'
+        'agent', 'none', 'time_range', 1, 4)
+    assert fields['tool_calls'] == 1 and fields['record']['turn_stop'] == 'answered'
     assert describe({}, plan={'id': 'not-a-uuid'}).fields['plan_id'] is None  # (never an error in an answer)

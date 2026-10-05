@@ -91,6 +91,38 @@ class SettingsForm(IndicoForm):
         description="A slower decision is ignored and the classifier routes instead (0.2-10 seconds).",
     )
 
+    # The turn (spec 025)
+    fast_path_confidence = FloatField(
+        "Fast path confidence",
+        validators=[InputRequired(), NumberRange(min=0.5, max=1)],
+        description="Jev answers a thank-you or an unrelated question on its own when it is at least this sure "
+                    "(0.5-1). Everything else goes to the assistant's tools.",
+    )
+    fast_path_out_of_scope = BooleanField(
+        "Refuse unrelated questions on the fast path",
+        description="Off: a question Jev finds unrelated is still looked at by the assistant (one model call more).",
+    )
+    turn_max_requests = IntegerField(
+        "Model requests per answer", validators=[InputRequired(), NumberRange(min=2, max=20)],
+        description="The answer is written from what was found once this many requests were made (2-20).",
+    )
+    turn_max_tool_calls = IntegerField(
+        "Tool calls per answer", validators=[InputRequired(), NumberRange(min=1, max=30)],
+        description="Lookups (documents, data, the guide, GitHub) per answer (1-30).",
+    )
+    turn_max_cost_usd = FloatField(
+        "Cost limit per answer (USD)", validators=[InputRequired(), NumberRange(min=0.001, max=5)],
+        description="Once an answer has cost this much, it is written from what was found.",
+    )
+    turn_deadline_seconds = IntegerField(
+        "Time limit per answer (seconds)", validators=[InputRequired(), NumberRange(min=20, max=110)],
+        description="The answer is written from what was found after this long (the worker stops at 120 s).",
+    )
+    turn_pin_model = BooleanField(
+        "One model per answer",
+        description="With the ibis router, the model it picks for an answer's first step answers the rest of it.",
+    )
+
     # NL2SQL Pipeline Settings (003-nl2sql-pipeline)
     nl2sql_enabled = BooleanField(
         "Enable NL2SQL",

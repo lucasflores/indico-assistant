@@ -47,15 +47,13 @@ AI-powered assistant plugin for [Indico](https://getindico.io/) - the open-sourc
 - **Structured Outputs**: All LLM responses validated via Pydantic models with automatic retry logic
 - **Provider Abstraction**: Swap LLM providers via configuration without code changes
 
-### Document Intelligence
+### Documents and one way in
 
-- **Vector Search RAG**: Semantic search across documents using pgvector and sentence-transformers embeddings. See [Vector Search Setup](docs/VECTOR_SEARCH_SETUP.md)
-- **Real-time Document Indexing**: Automatically indexes PDF, DOCX, DOC, TXT, and Markdown files when uploaded as attachments, making them immediately searchable
-  - Immediate Search: Documents become searchable within seconds of upload
-  - Duplicate Detection: Skips re-indexing identical documents based on content hash
-  - Graceful Degradation: Continues working even when vector search is unavailable
-  - File Size Tiers: Fast indexing (<10MB), best-effort (10-50MB), automatic rejection (>50MB)
-  - Supported Formats: PDF, DOCX, DOC, TXT, MD (silently ignores images, videos, archives)
+- **Every message goes through one turn** (spec 025): Jev answers thanks and unrelated questions on its own; everything
+  else is answered by an agent with tools: the event's documents, Indico data (NL2SQL), the user guide, the user's
+  GitHub, and planned changes the user confirms. See `services/turn/`.
+- **Documents**: every attached PDF, Word, PowerPoint, text or Markdown file is read with its pages and sections,
+  searched by keyword and meaning, and cited by page. See [Documents](docs/DOCUMENTS.md).
 
 ### User Interface
 
@@ -313,20 +311,21 @@ See [Deployment Guide](docs/DEPLOYMENT.md) for complete setup instructions.
 | Keep trace text (days) | Then the text goes; 0 keeps it forever | 30 |
 | Keep turn records (days) | Each answer's record and steps, without text; 0 keeps them forever | 0 |
 
-### Vector Search Settings
-
-Configure vector search for document intelligence:
+### Documents and the turn
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Vector Search Enabled | Enable semantic document search | True |
+| Vector Search Enabled | Read attached documents so the assistant can use them | True |
 | Embedding Model | Sentence transformer model | BAAI/bge-small-en-v1.5 |
-| Chunk Size | Document chunk size (characters) | 1000 |
-| Chunk Overlap | Overlap between chunks | 200 |
-| Similarity Threshold | Minimum similarity score (0-1) | 0.7 |
-| Max Search Results | Maximum results per query | 5 |
+| Fast path confidence | Jev answers thanks and unrelated questions on its own at this confidence | 0.80 |
+| Refuse unrelated questions on the fast path | Off: they go to the agent too | On |
+| Model requests / tool calls per answer | The answer is written from what was found at either limit | 8 / 12 |
+| Cost limit per answer (USD) | Measured cost, never estimated | 0.10 |
+| Time limit per answer (seconds) | Within the worker's 120 s | 75 |
+| One model per answer | With ibis, the first step's pick answers the rest | On |
 
-See [Vector Search Setup](docs/VECTOR_SEARCH_SETUP.md) for detailed configuration and PostgreSQL extension setup.
+An event's own settings (event management → Assistant) can turn the assistant or NL2SQL off for that event, limit the
+tables NL2SQL may read, and add instructions for the event.
 
 ## API Endpoints
 
@@ -397,15 +396,13 @@ concurrency is the cluster-wide cap on simultaneous answers) and `assistant_bulk
 indexing, syncs, nightly cleanup; low concurrency is fine). For example
 `indico celery worker -Q celery,assistant,assistant_bulk`, or dedicated pools per queue.
 
-**Document index lifecycle**: an uploaded or edited attachment is indexed after its transaction
-commits; deleting an attachment or folder removes its chunks in the same transaction. Chunks record
-the Indico file version they came from, so a sync (`POST /api/assistant/search/sync/all`) finds what
-changed in SQL without reading files, and queues only that. Text already indexed for another
-attachment (cloned events) is copied instead of re-embedded. A nightly task removes chunks of
-attachments deleted while the plugin was off and closes sync runs whose worker died.
+**Documents**: an uploaded or changed attachment is queued in its own transaction and read after it
+commits; deleting an attachment or folder removes its document in the same transaction. Each document
+records the Indico file version it came from, so `indico assistant sync-documents` finds what changed
+in SQL without reading files, and queues only that. See [Documents](docs/DOCUMENTS.md).
 
 **Retention**: a nightly task (03:11, queue `assistant_bulk`, needs Celery beat) deletes chat sessions
-idle 90 days (with their messages and feedback), audit-log rows after 90 days, sync logs after 90 days,
+idle 90 days (with their messages and feedback), audit-log rows after 90 days,
 and the analytics' trace text after 30 days (their turn records stay, unless an admin sets a limit). Each period is an admin setting (Admin → Plugins → Assistant);
 0 keeps that data forever.
 
@@ -474,38 +471,6 @@ contract is `specs/021-issue-reports/contracts/api.md`.
 "last_used_at", "needs_renewal"}]`, never a token. `DELETE /api/assistant/connections/github` disconnects. Connecting
 needs a browser (GitHub's sign-in), so it is the profile page's. A write made with the Indico session cookie needs the
 `X-CSRF-Token` header.
-
-### Vector Search
-
-#### POST /api/assistant/search
-
-Perform semantic search across indexed documents. Requires a logged-in user and the
-[NL2SQL database role](#nl2sql-database-role): the search runs as that role, so it only returns
-chunks from events and attachments the user may see. `event_id` is checked with Indico's
-`can_access` (no access: empty results); `event_ids` only narrows the search.
-
-```json
-{
-  "query": "budget allocation process",
-  "event_id": 123,
-  "max_results": 5
-}
-```
-
-Response:
-
-```json
-{
-  "results": [
-    {
-      "content": "The budget allocation follows...",
-      "document_name": "Financial Guidelines.pdf",
-      "similarity_score": 0.89,
-      "page": 5
-    }
-  ]
-}
-```
 
 ## NL2SQL Pipeline
 
@@ -705,26 +670,26 @@ indico_assistant/
 │   ├── chat.py             # Chat API endpoint
 │   ├── sessions.py         # Session management
 │   ├── feedback.py         # Feedback submission
-│   ├── search.py           # Vector search endpoints
 │   └── analytics.py        # Admin analytics API and pages (spec 024)
 ├── services/                # Business logic layer
 │   ├── llm/                # LLM provider abstraction
 │   ├── nl2sql/             # Natural language to SQL pipeline
 │   ├── chat/               # Chat orchestration service
 │   ├── embedding/          # Document embedding service
-│   ├── vector_search/      # Semantic search with pgvector
+│   ├── document/           # Reading, storing, searching and reading back documents
+│   ├── turn/               # The single turn: fast path, the agent's loop and tools, memory, citations
 │   ├── feedback/           # Feedback collection service
 │   └── analytics/          # Each answer's turn record and steps, and the analytics' stats
 ├── models/                  # SQLAlchemy database models
 │   ├── session.py          # Chat session model
 │   ├── message.py          # Message model
 │   ├── feedback.py         # Feedback model
-│   ├── document.py         # Indexed document model
+│   ├── document.py         # Documents and their chunks
 │   └── audit.py            # Query audit log model
 ├── schemas/                 # Pydantic validation schemas
 └── tasks/                   # Background Celery tasks
-    ├── indexing.py         # Document indexing worker
-    ├── sync.py             # Document sync worker
+    ├── indexing.py         # Reading one attachment into its document
+    ├── sync.py             # Document syncs and the nightly cleanup
     └── cleanup.py          # Session cleanup worker
 ```
 
@@ -771,7 +736,7 @@ Additional documentation for advanced topics:
 
 - **[Deployment Guide](docs/DEPLOYMENT.md)**: Chat widget deployment, bundle injection, JavaScript configuration, noscript fallbacks
 - **[Accessibility](docs/ACCESSIBILITY.md)**: Screen reader support, keyboard navigation, ARIA labels, WCAG 2.1 compliance
-- **[Vector Search Setup](docs/VECTOR_SEARCH_SETUP.md)**: PostgreSQL pgvector extension installation, embedding configuration, index optimization
+- **[Documents](docs/DOCUMENTS.md)**: what is read and when, search, pgvector, the sync command
 
 ## License
 

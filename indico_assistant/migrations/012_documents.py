@@ -8,6 +8,7 @@ Feature: 025-assistant-core (story 2)
 
 There are no users, so the old index is dropped rather than migrated: a sync reads every attachment again.
 The downgrade recreates the old tables empty.
+Also widens turns.route (spec 024) to 24 characters for the turn's routes ("fast:out_of_scope").
 """
 
 import importlib
@@ -65,11 +66,15 @@ def upgrade():
     # ponytail: no ANN index, an exact scan is fine for thousands of chunks; add HNSW past ~100k
     if op.get_bind().execute(sa.text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar():
         op.execute(f"ALTER TABLE {SCHEMA}.document_chunks ADD COLUMN embedding vector(384)")
+    # the turn's routes (spec 025): "fast:out_of_scope" is 17 characters
+    op.alter_column("turns", "route", type_=sa.String(24), schema=SCHEMA)
     op.drop_table("document_sync_log", schema=SCHEMA)
     op.drop_table("extracted_documents", schema=SCHEMA)
 
 
 def downgrade():
+    op.execute(f"UPDATE {SCHEMA}.turns SET route = left(route, 16) WHERE length(route) > 16")
+    op.alter_column("turns", "route", type_=sa.String(16), schema=SCHEMA)
     op.drop_table("document_chunks", schema=SCHEMA)
     op.drop_table("documents", schema=SCHEMA)
     importlib.import_module("indico_assistant.migrations.004_create_extracted_documents").upgrade()

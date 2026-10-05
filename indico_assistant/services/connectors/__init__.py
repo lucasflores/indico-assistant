@@ -16,7 +16,7 @@ class Tool:
 
     name: str
     args: type[BaseModel]
-    run: Callable[[Any, BaseModel], str]
+    run: Callable[[Any, Any], str]  # (client or the turn's ctx, the args model)
 
     @property
     def description(self):

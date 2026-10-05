@@ -90,7 +90,16 @@ their pull requests, reviews, issues and repositories. It only reads.
 - **Who sees what:** only Indico admins see the page and the traces, and through them the text of users' questions
   and answers for 30 days. GitHub answers, and later answers in the same chat, keep no text.
 
-### 5. Content Security Policy
+### 5. Documents and the turn (spec 025)
+- **Upgrading:** migration `012_documents` creates `documents` and `document_chunks` and **drops**
+  `extracted_documents` and `document_sync_log`: take a `pg_dump` first. Then read every attachment again with
+  `indico assistant sync-documents` (a worker on `assistant_bulk` does the reading).
+- **Dependencies:** `python-pptx` 1.0.2 is new (PowerPoint), `pypdf` replaces `PyPDF2`. Restart the web server and
+  the worker after installing.
+- **Removed:** `POST /api/assistant/search` and the admin `/search/status` and `/search/sync` endpoints. The health
+  endpoint reports document status counts instead. See [Documents](DOCUMENTS.md).
+
+### 6. Content Security Policy
 - Indico must allow the panel's frame: `frame-src 'self' https://assistant.example.org`.
 - With Indico's `CSP_ENABLED`, the panel's inline `<head>` snippet carries Indico's nonce. Nothing else is needed.
 - The page loads no script from Chainlit and makes no requests to it. Only the frame talks to Chainlit.
