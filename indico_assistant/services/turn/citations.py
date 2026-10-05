@@ -45,8 +45,6 @@ def on_page(quote: str, page_text: str) -> bool:
 def validate(user: Any, citations: list[Citation]) -> list[dict[str, Any]]:
     """The citations that hold, for the answer's metadata: one per (document, page), in order, with a link to the
     file at that page. Only documents the user can open are cited."""
-    from indico.modules.attachments.models.attachments import Attachment
-
     from indico_assistant.models.document import Document
     from indico_assistant.services.document.reader import pages_text
     from indico_assistant.services.document.search import accessible
@@ -60,10 +58,35 @@ def validate(user: Any, citations: list[Citation]) -> list[dict[str, Any]]:
         doc = Document.query.get(c.document) if c.document in allowed else None
         text = pages_text(c.document, [c.page]).get(c.page, "") if doc is not None else ""
         if doc is None or not on_page(c.quote, text):
-            logger.info("A citation was dropped: %r is not on p.%s of document %s", c.quote[:80], c.page, c.document)
+            logger.warning("A citation was dropped: %r is not on p.%s of document %s", c.quote[:80], c.page, c.document)
             continue
         seen.add((c.document, c.page))
-        attachment = Attachment.get(c.document)
-        url = f"{attachment.absolute_download_url}#page={c.page}" if attachment is not None else None
-        kept.append({"attachment_id": c.document, "filename": doc.filename, "page": c.page, "url": url})
+        kept.append(_entry(doc, c.page))
     return kept
+
+
+def _entry(doc: Any, page: int) -> dict[str, Any]:
+    from indico.modules.attachments.models.attachments import Attachment
+
+    attachment = Attachment.get(doc.attachment_id)
+    url = f"{attachment.absolute_download_url}#page={page}" if attachment is not None else None
+    return {"attachment_id": doc.attachment_id, "filename": doc.filename, "page": page, "url": url}
+
+
+def from_markers(text: str, pages_seen: dict[int, set[int]], kept: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Citations for the text's [p.N] markers that no checked citation covers, when exactly one document the turn
+    read or searched has that page: the statement points to a page the turn actually saw (models paraphrase their
+    quotes, and a paraphrase is dropped above)."""
+    from indico_assistant.models.document import Document
+
+    covered = {c["page"] for c in kept}
+    added: list[dict[str, Any]] = []
+    for page in dict.fromkeys(markers(text)):
+        documents = [d for d, pages in pages_seen.items() if page in pages]
+        if page in covered or len(documents) != 1:
+            continue
+        doc = Document.query.get(documents[0])
+        if doc is not None:
+            added.append(_entry(doc, page))
+            covered.add(page)
+    return added

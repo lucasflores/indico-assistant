@@ -37,6 +37,7 @@ class Passage:
     section: str | None
     text: str
     score: float
+    event_id: int | None = None
 
 
 def accessible(user: Any, attachment_ids: Iterable[int]) -> list[int]:
@@ -85,7 +86,7 @@ WITH kw AS (
 ranked AS (
     SELECT id, sum(1.0 / (:k + r)) AS score FROM (SELECT * FROM kw {vec_union}) both_lists GROUP BY id
 )
-SELECT c.attachment_id, d.filename, c.page, c.section, c.text, ranked.score
+SELECT c.attachment_id, d.filename, c.page, c.section, c.text, ranked.score, d.event_id
 FROM ranked
 JOIN plugin_assistant.document_chunks c ON c.id = ranked.id
 JOIN plugin_assistant.documents d ON d.attachment_id = c.attachment_id
@@ -129,4 +130,4 @@ def search(
             "top": top,
         },
     )
-    return [Passage(row[0], row[1], row[2], row[3], row[4], float(row[5])) for row in rows]
+    return [Passage(row[0], row[1], row[2], row[3], row[4], float(row[5]), row[6]) for row in rows]
