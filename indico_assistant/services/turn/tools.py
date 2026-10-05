@@ -51,6 +51,7 @@ class Ctx:
     github_urls: set[str] = field(default_factory=set)
     private: bool = False  # GitHub was read: no text is kept (spec 024)
     pages_seen: dict[int, set[int]] = field(default_factory=dict)  # document -> pages a tool returned (citations)
+    page_documents: list[dict[str, Any]] = field(default_factory=list)  # the page's documents, in the prompt (FR-011)
 
     def saw(self, document: int, pages: Any) -> None:
         self.pages_seen.setdefault(document, set()).update(pages)
