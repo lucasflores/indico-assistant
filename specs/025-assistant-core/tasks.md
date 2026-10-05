@@ -262,7 +262,7 @@ FR-008, SC-001).
     - The sets total 273 scenarios and 346 turns: documents 36, knowledge 53, chat 14, change 28, routing_data 20,
       github 50, data 27, cross 26, access 19.
     - **Dry runs:** full $4.12, quick (40 scenarios) $0.61, both within the pre-approved ceilings.
-- [ ] T026 [US1] **Paid, on Lucas's go:** the baseline full run (≤ $5), saved to `eval: reports/baseline.json`.
+- [x] T026 [US1] **Paid, on Lucas's go:** the baseline full run (≤ $5), saved to `eval: reports/baseline.json`.
   - Record its scores per set and ability here.
   - Then the calibration labels (T024), by Lucas.
   - **In progress (paused 2026-10-05, Lucas's request):** two paid quick runs, used to fix the suite itself.
@@ -277,8 +277,20 @@ FR-008, SC-001).
       pass. Time patterns were then widened to accept "4:00 PM" (eval `d055c1a`).
     - **The full baseline is still to run:** estimated $1.58, pre-approved up to $5. Run it with the stack in fake
       GitHub mode, then restore normal mode.
-- [ ] T027 [US1] The eval PR. `uv run pytest -q` and the repo's configured linters pass first. It carries the
+  - **Baseline, 2026-10-05** (eval `reports/baseline.json`, world `baa444dbe026`, plugin main `f85e798`):
+    **135/273 passed**; $0.52 measured from the traces, $0.85 on the key (the judge's calls included; the $1.58
+    estimate was high).
+    - By set: chat 14/14, github 43/50, change 20/28, data 16/27, routing_data 10/20, access 7/19, knowledge 14/53,
+      cross 6/26, **documents 5/36**.
+    - By ability: chat 21/28, github 44/56, change 23/42, data 38/89, knowledge 25/67, access 8/22, documents 7/48.
+    - Knowledge's low score is mostly the judge's "partial" verdicts. They count only once the judge is calibrated
+      (Lucas's 40 labels, T024's `calibrate export`).
+- [x] T027 [US1] The eval PR. `uv run pytest -q` and the repo's configured linters pass first. It carries the
   constitution amendment and a README section on scenarios, the world and paid runs. Hand the link to Lucas.
+
+  - **Done 2026-10-05:** README section committed (eval `e13d0eb`), plus a spending cap in the runner (`6f60de9`:
+    `--max-usd`, default $1 quick / $5 full). The branch `025-acceptance-suite` is Lucas's to merge locally (the eval
+    repo has no remote).
 
 **Checkpoint:** the baseline exists. Every later story is accepted against it.
 
