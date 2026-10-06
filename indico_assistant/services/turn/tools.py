@@ -147,22 +147,36 @@ def _read_document(ctx: Ctx, args: ReadDocumentArgs) -> str:
     return text
 
 
+FULL_PAGES = 2  # the best pages come whole: a definition in a footnote or a figure beside the passage is on them
+
+
 def _search_documents(ctx: Ctx, args: SearchDocumentsArgs) -> str:
+    """The best passages; the top pages whole, the rest as passages. (Answers built from a passage alone missed the
+    footnote that defined a term and the figure beside it: story 2's documents runs.)"""
+    from indico_assistant.services.document.reader import pages_text
     from indico_assistant.services.document.search import search
 
     hits = search(ctx.user, args.query, attachment_id=args.document, event_id=args.event, embedder=_embedder(ctx))
     if not hits:
         return "No passages found."
-    out = []
     titles = _events(h.event_id for h in hits)
+    whole = list(dict.fromkeys((h.attachment_id, h.page) for h in hits))[:FULL_PAGES]
+    out, shown = [], set()
     for h in hits:
         ctx.memory.add("document", {"attachment_id": h.attachment_id}, h.filename)
         ctx.saw(h.attachment_id, [h.page])
+        if (h.attachment_id, h.page) in shown:
+            continue
         event = f", in event {h.event_id}: {titles.get(h.event_id, '')}" if h.event_id is not None else ""
         where = f"document {h.attachment_id} ({h.filename}{event}), [p.{h.page}]" + (
             f", {h.section}" if h.section else ""
         )
-        out.append(f"{where}:\n{h.text}")
+        if (h.attachment_id, h.page) in whole:
+            shown.add((h.attachment_id, h.page))
+            page = pages_text(h.attachment_id, [h.page]).get(h.page, h.text)
+            out.append(f"{where} (the whole page):\n{page}")
+        else:
+            out.append(f"{where}:\n{h.text}")
     return "\n\n".join(out)
 
 
