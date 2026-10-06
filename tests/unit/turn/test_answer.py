@@ -220,7 +220,7 @@ def test_a_turn_that_reads_github_keeps_no_text_not_even_jevs(answered):
 
     run, s = answered
 
-    def reads_github(ctx, message, tools, system_prompt):
+    def reads_github(ctx, message, tools, system_prompt, **kwargs):
         ctx.private = True
         recorder.private()
         return TurnResult("Open: #16")
@@ -285,3 +285,22 @@ def test_an_event_page_without_its_own_settings_inherits_the_global_ones(answere
     ctx, _, tools = s.agent.call_args.args
     assert ctx.allowed_tables is None and "query_data" in [t.name for t in tools]
     assert s.agent.call_args.kwargs["system_prompt"].endswith("addresses the tools returned.")
+
+
+def test_documents_in_play_require_a_first_lookup(answered):
+    run, s = answered
+    run("What is the weather like?")
+    assert s.agent.call_args.kwargs["lookup_first"] is False
+    run("What does the thesis say about pile-up?")
+    assert s.agent.call_args.kwargs["lookup_first"] is True
+
+
+def test_the_answers_order_numbers_the_documents():
+    from indico_assistant.services.turn.answer import in_presented_order
+
+    touched = [
+        {"kind": "document", "ref": {"attachment_id": a}, "title": f"d{a}", "position": n}
+        for n, a in enumerate([4, 9, 7], 1)
+    ] + [{"kind": "event", "ref": {"event_id": 1}, "title": "E", "position": 1}]
+    ordered = in_presented_order(touched, [7, 4])
+    assert [(e["ref"].get("attachment_id"), e["position"]) for e in ordered] == [(7, 1), (4, 2), (9, 3), (None, 1)]

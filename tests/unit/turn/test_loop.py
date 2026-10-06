@@ -174,8 +174,14 @@ def test_a_provider_outage_gives_a_clear_message_and_changes_nothing(error_type)
     planned.assert_not_called()
 
 
-def test_a_step_the_model_garbled_still_gets_an_answer():
-    llm = Script(fail(ErrorType.VALIDATION_ERROR), ok(answer("plain answer")))
+def test_a_garbled_step_is_asked_again_once():
+    llm = Script(fail(ErrorType.VALIDATION_ERROR), ok(call("a")), ok(answer("found it")))
+    result = run(ctx(llm))
+    assert result.stop == "answered" and result.text == "found it" and len(result.tools) == 1
+
+
+def test_two_garbled_steps_still_get_an_answer():
+    llm = Script(fail(ErrorType.VALIDATION_ERROR), fail(ErrorType.VALIDATION_ERROR), ok(answer("plain answer")))
     result = run(ctx(llm))
     assert result.stop == "failed_step" and result.text == "plain answer"
 
@@ -236,3 +242,16 @@ def test_the_page_and_its_documents_are_in_every_prompt():
     c.page_event_id = 5
     run(c)
     assert "No documents attached to it" in llm.sent[0].prompt
+
+
+def test_a_first_lookup_can_be_required():
+    llm = Script(ok(call("a")), ok(answer("ok")))
+    run_ = loop.run(ctx(llm), "hi", TOOLS, system_prompt="R", now=lambda: 1.0, lookup_first=True)
+    assert llm.sent[0].schema.__name__ == "Lookup" and llm.sent[1].schema.__name__ == "Step"
+    assert run_.tools[0]["name"] == "echo"
+    assert "answer" not in loop.lookup_model(TOOLS).model_fields
+
+
+def test_the_answer_says_which_documents_it_presented_in_order():
+    llm = Script(ok(loop.step_model(TOOLS)(answer=loop.Final(reply="1. B 2. A", presented=[9, 4]))))
+    assert run(ctx(llm)).presented == [9, 4]

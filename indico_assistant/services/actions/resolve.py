@@ -524,7 +524,7 @@ def _describe(steps):
 
 # --- changing a meeting (US6) --------------------------------------------------------------------------
 
-IT = {'', 'it', 'this', 'that', 'the meeting', 'this meeting', 'that meeting'}
+IT = {'', 'it', 'this', 'that', 'the meeting', 'this meeting', 'that meeting', 'the event', 'this event', 'that event'}
 ORDINALS = {'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2, 'fourth': 3, 'last': -1}
 
 

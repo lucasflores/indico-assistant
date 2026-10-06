@@ -9,6 +9,7 @@ the agent with its tools (``loop.run``): documents, data, the guide, GitHub and 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -18,6 +19,23 @@ from indico_assistant.services.turn.loop import TurnResult
 logger = logging.getLogger(__name__)
 
 DISABLED = "The assistant is turned off for this event."
+DOCUMENT_WORDS = re.compile(
+    r"\b(papers?|thesis|theses|reports?|slides?|talks?|documents?|surveys?|articles?|pdfs?|files?|attachments?|"
+    r"minutes|notes|proposals?|chapters?|sections?|page \d+)\b",
+    re.I,
+)
+
+
+def in_presented_order(touched: list[dict[str, Any]], presented: list[int]) -> list[dict[str, Any]]:
+    """The touched list with its documents in the order the answer showed them (the ones it named, then the others,
+    as looked up), positions renumbered: "the second one" is the answer's second."""
+    rank = {doc: i for i, doc in enumerate(dict.fromkeys(presented))}
+    documents = sorted(
+        (e for e in touched if e["kind"] == "document"),
+        key=lambda e: rank.get(e["ref"]["attachment_id"], len(rank)),
+    )
+    others = [e for e in touched if e["kind"] != "document"]
+    return [{**e, "position": n} for n, e in enumerate(documents, 1)] + others
 
 
 @dataclass
@@ -164,9 +182,7 @@ def _agent(
     if page_event_id is not None:  # FR-011: the turn knows the page's documents without a lookup
         from indico_assistant.services.document import reader
 
-        ctx.page_documents = [reader.describe(d) for d in reader.documents(user, event_id=page_event_id)]
-        for d in ctx.page_documents:
-            ctx.memory.add("document", {"attachment_id": d["document"]}, d["filename"])
+        ctx.page_documents = reader.describe_all(reader.documents(user, event_id=page_event_id))
     nl2sql = (
         bool(event_setting(plugin, event, "nl2sql_enabled"))
         if event is not None
@@ -174,8 +190,14 @@ def _agent(
     )
     custom = event_setting(plugin, event, "custom_system_prompt") if event is not None else None
     db.session.commit()  # no transaction stays open through the model calls
+    # documents in play (the page's, the conversation's, or one named): the first step must look something up
+    lookup_first = bool(ctx.page_documents or ctx.memory.documents() or DOCUMENT_WORDS.search(message))
     result: TurnResult = loop.run(
-        ctx, message, registry(ctx, nl2sql=nl2sql, github=github_on), system_prompt=rules(custom)
+        ctx,
+        message,
+        registry(ctx, nl2sql=nl2sql, github=github_on),
+        system_prompt=rules(custom),
+        lookup_first=lookup_first,
     )
 
     plan = None
@@ -205,7 +227,7 @@ def _agent(
             {"type": "event", "event_id": i, "url": f"{base_url}/event/{i}/"} for i in ctx.data["event_ids"]
         ]
         metadata["evidence"] = {"queries": ctx.data.get("evidence"), "sql": ctx.data.get("sql")}
-    metadata["touched"] = ctx.memory.touched
+    metadata["touched"] = in_presented_order(ctx.memory.touched, result.presented)
     return Outcome(
         text,
         metadata,
