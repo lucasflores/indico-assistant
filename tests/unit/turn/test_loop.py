@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.llm.errors import ErrorType, LLMError
 from indico_assistant.services.llm.models import LLMResponse
-from indico_assistant.services.llm.service import _request_calls
+from indico_assistant.services.llm.service import _request_calls, _until
 from indico_assistant.services.turn import loop
 from indico_assistant.services.turn.citations import Citation
 from indico_assistant.services.turn.tools import Ctx
@@ -271,3 +271,16 @@ def test_a_first_lookup_can_be_required():
 def test_the_answer_says_which_documents_it_presented_in_order():
     llm = Script(ok(loop.step_model(TOOLS)(answer=loop.Final(reply="1. B 2. A", presented=[9, 4]))))
     assert run(ctx(llm)).presented == [9, 4]
+
+
+def test_a_tools_model_calls_end_by_the_turns_deadline():
+    """(review of #22) the tools run inside the turn's deadline, less the answer's own time."""
+    seen = []
+
+    def timed(ctx, args):
+        seen.append(_until.get())
+        return "done"
+
+    c = ctx(Script(ok(call("a")), ok(answer("ok"))), turn_deadline_seconds=75)
+    run(c, tools=(Tool("echo", EchoArgs, timed), OTHER))
+    assert seen == [c.deadline] and c.deadline is not None

