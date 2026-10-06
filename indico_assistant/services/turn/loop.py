@@ -124,7 +124,9 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         page,
         "",
         "## Remembered from earlier answers",
-        mark(ctx.memory.render()),  # (titles from documents and events: data too)
+        # (titles from documents and events: data too; an empty memory unmarked, or it reads as a lookup that found
+        # nothing: quick run 1 of story 3 answered "I couldn't retrieve" without looking anything up)
+        mark(ctx.memory.render()) if ctx.memory.earlier else ctx.memory.render(),
         "",
         "## Tools",
         *(f"- {t.name}: {t.description}" for t in tools),
