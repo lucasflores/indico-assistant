@@ -141,3 +141,14 @@ def test_a_listing_shows_how_each_document_begins(db, dummy_user, dummy_event, d
     doc = document(dummy_event, "Attention Is All You Need\nAshish Vaswani\nThe dominant sequence models...")
     [entry] = reader.describe_all(reader.documents(dummy_user, event_id=dummy_event.id))
     assert entry["document"] == doc.id and entry["begins"].startswith("Attention Is All You Need Ashish Vaswani")
+
+
+def test_a_term_with_a_footnote_mark_is_found(db, dummy_user, dummy_event, document, no_meaning):
+    """The thesis defines pile-up in a footnote: pypdf gives "pile-up1" and "1pile-up" (story 2's full run)."""
+    doc = document(
+        dummy_event,
+        f"{FILLER}\ndescribing event pile-up1 correctly.\n1pile-up: in-time and out-of-time\n" f"{FILLER}",
+        embedder=no_meaning,
+    )
+    hits = search(dummy_user, "pile-up", attachment_id=doc.id, embedder=no_meaning)
+    assert "in-time and out-of-time" in hits[0].text

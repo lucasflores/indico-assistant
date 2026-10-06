@@ -223,5 +223,6 @@ def test_syncs_read_an_event_now_or_queue_what_is_stale(db, attach, dummy_event,
 def test_no_outline_is_null_not_json_null(db, read, attach):
     sheet = attach(filename="budget.xlsx")
     read(sheet)
-    assert db.session.execute(text(
-        "SELECT outline IS NULL FROM plugin_assistant.documents WHERE attachment_id = :id"), {"id": sheet.id}).scalar()
+    assert db.session.execute(
+        text("SELECT outline IS NULL FROM plugin_assistant.documents WHERE attachment_id = :id"), {"id": sheet.id}
+    ).scalar()

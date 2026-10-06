@@ -8,6 +8,7 @@ contextual retrieval without model calls.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,6 +71,16 @@ def chunk_pages(
 def indexed_text(title: str, section: str | None, text: str) -> str:
     """What is embedded and keyword-indexed: the title and section give a passage its context."""
     return "\n".join(part for part in (title, section, text) if part)
+
+
+_GLUED = re.compile(r"(?<=[^\W\d_])(?=\d)|(?<=\d)(?=[^\W\d_])")
+
+
+def keyword_text(text: str) -> str:
+    """The text for the keyword index: as written, plus a copy with letters and digits apart where they touch, so a
+    footnote mark glued to a word ("pile-up1", "1pile-up") doesn't hide the word, while "H2O" stays findable."""
+    apart = _GLUED.sub(" ", text)
+    return text if apart == text else f"{text}\n{apart}"
 
 
 def join(pieces: list[tuple[int, str]]) -> str:

@@ -45,3 +45,12 @@ def test_indexed_text_has_the_title_and_section_first():
         "thesis.pdf\n4.4.1 Fit Quality Measure\nThe chi2"
     )
     assert indexed_text("notes.txt", None, "text") == "notes.txt\ntext"
+
+
+def test_a_footnote_mark_glued_to_a_word_does_not_hide_it():
+    from indico_assistant.services.document.chunker import keyword_text
+
+    assert keyword_text("event pile-up1 correctly. 1pile-up: in-time") == (
+        "event pile-up1 correctly. 1pile-up: in-time\nevent pile-up 1 correctly. 1 pile-up: in-time"
+    )
+    assert keyword_text("no digits here") == "no digits here"

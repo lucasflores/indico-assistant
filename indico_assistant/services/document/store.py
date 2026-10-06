@@ -16,6 +16,7 @@ from indico.core.db import db
 from sqlalchemy import text
 
 from indico_assistant.models.document import Document, DocumentStatus
+from indico_assistant.services.document.chunker import keyword_text
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ def write(
             "offset": c.offset,
             "section": c.section,
             "text": c.text,
-            "indexed": indexed[i],
+            "indexed": keyword_text(indexed[i]),
             "embedding": "[" + ",".join(f"{x:.7g}" for x in embeddings[i]) + "]" if vector and embeddings else None,
         }
         for i, c in enumerate(chunks)
