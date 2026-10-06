@@ -284,3 +284,17 @@ def test_a_tools_model_calls_end_by_the_turns_deadline():
     c = ctx(Script(ok(call("a")), ok(answer("ok"))), turn_deadline_seconds=75)
     run(c, tools=(Tool("echo", EchoArgs, timed), OTHER))
     assert seen == [c.deadline] and c.deadline is not None
+
+
+def test_an_empty_memory_is_not_marked_as_data():
+    """(story 3's quick run 1) a marked "(nothing yet)" read as a lookup that found nothing."""
+    from indico_assistant.services.turn.memory import Memory
+
+    llm = Script(ok(answer("ok")))
+    run(ctx(llm))
+    assert f"<{loop.MARK}>" not in llm.sent[0].prompt.split("## Tools")[0]
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.memory = Memory(earlier=[{"kind": "event", "ref": {"event_id": 5}, "title": "Sync", "position": 1}])
+    run(c)
+    assert f"<{loop.MARK}>\n- event #1: Sync" in llm.sent[0].prompt
