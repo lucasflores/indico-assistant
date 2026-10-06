@@ -15,9 +15,10 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 from indico.core.db import db
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from indico_assistant.services.connectors import Tool
+from indico_assistant.services.knowledge.gate import INTENTS
 from indico_assistant.services.turn.tools import Ctx
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,9 @@ def _plugin() -> Any:
 # --- data ---------------------------------------------------------------------------------------------------------
 
 
+Kind = Literal[tuple(INTENTS)]  # type: ignore[valid-type]  # the classifier's data intents
+
+
 class QueryDataArgs(BaseModel):
     """Look up information stored in Indico with one question in plain words: events and meetings (dates, places,
     descriptions), talks and their speakers, sessions, timetables, registrations, minutes and notes, attached files'
@@ -39,6 +43,13 @@ class QueryDataArgs(BaseModel):
 
     tool: Literal["query_data"]
     question: str
+    kind: Kind | None = Field(  # type: ignore[valid-type]
+        None,
+        description="The kind of question, when clear: "
+        + "; ".join(f"{name}: {text}" for name, text in INTENTS.items())
+        + " (who speaks or presents is speaker_query; when something starts, ends or how long it lasts is "
+        "schedule_query)",
+    )
 
 
 def _query_data(ctx: Ctx, args: QueryDataArgs) -> str:
@@ -54,6 +65,9 @@ def _query_data(ctx: Ctx, args: QueryDataArgs) -> str:
         user=viewer,
         event_ids=[ctx.page_event_id] if ctx.page_event_id else None,
         conversation_history=ctx.history,
+        # the kind the agent named, as Jev's intent was before (spec 022): the classifier took "Who is speaking at Q3
+        # Planning?" for a topic search, whose template has no speakers (story 2's full run)
+        **({"intent": args.kind} if args.kind else {}),
     )
     for flag, tool in (
         ("write_request", "propose_change"),

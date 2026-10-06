@@ -55,6 +55,11 @@ _DOWN = {"connection_error", "timeout", "rate_limit", "authentication_error", "m
 class Final(BaseModel):
     reply: str = Field(..., description="The answer to the user, in markdown, citing document pages as [p.N]")
     citations: list[Citation] = Field(default_factory=list, description="One per cited document page")
+    presented: list[int] = Field(
+        default_factory=list,
+        description='The ids of the documents the reply presents or lists, in the order it shows them (so "the '
+        'second one" can be resolved later); empty when it shows none',
+    )
 
 
 class _Step(BaseModel):
@@ -66,12 +71,24 @@ class _Step(BaseModel):
         return self
 
 
+def _calls(tools: tuple[Tool, ...]) -> Any:
+    calls = tuple(t.args for t in tools)
+    # a plain union (anyOf), not a discriminated one: some providers behind ibis take a subset of JSON Schema
+    return Union[calls] if len(calls) > 1 else calls[0]  # noqa: UP007
+
+
+@cache
+def lookup_model(tools: tuple[Tool, ...]) -> type[BaseModel]:
+    """``Lookup``: a first step that must call a tool. Used when documents are in play: answered from the model's
+    memory, a question about a paper got wrong figures and a "couldn't find" without a search (story 2's full
+    run), as the connector's loop once invented reviewers."""
+    return create_model("Lookup", call=(_calls(tools), Field(..., description="The tool to call first")))
+
+
 @cache
 def step_model(tools: tuple[Tool, ...]) -> type[BaseModel]:
     """``Step``: one of ``tools``' calls (told apart by ``tool``), or the answer."""
-    calls = tuple(t.args for t in tools)
-    # a plain union (anyOf), not a discriminated one: some providers behind ibis take a subset of JSON Schema
-    call = Union[calls] if len(calls) > 1 else calls[0]  # noqa: UP007
+    call = _calls(tools)
     return create_model(
         "Step",
         __base__=_Step,
@@ -125,6 +142,7 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
 class TurnResult:
     text: str = NOT_ANSWERED
     citations: list[Citation] = field(default_factory=list)
+    presented: list[int] = field(default_factory=list)  # documents, in the order the answer shows them
     tools: list[dict[str, Any]] = field(default_factory=list)  # {name, ms, ok} per call
     stop: str = "answered"  # answered | requests | tools | cost | budget | repeated | failed_step | plan | unavailable
     failed: bool = False
@@ -136,9 +154,16 @@ def _cost(calls: list[dict[str, Any]]) -> float:
 
 
 def run(
-    ctx: Ctx, message: str, tools: Sequence[Tool], *, system_prompt: str, now: Callable[[], float] = time.monotonic
+    ctx: Ctx,
+    message: str,
+    tools: Sequence[Tool],
+    *,
+    system_prompt: str,
+    now: Callable[[], float] = time.monotonic,
+    lookup_first: bool = False,
 ) -> TurnResult:
-    """Answer ``message`` with ``tools``; the conversation before it is ``ctx.history``."""
+    """Answer ``message`` with ``tools``; the conversation before it is ``ctx.history``. ``lookup_first``: the
+    first step must call a tool."""
     from indico_assistant.services.llm.service import collect_calls
 
     tools = tuple(tools)
@@ -153,7 +178,8 @@ def run(
     result, seen = TurnResult(stop="requests"), set()
     done: list[tuple[Any, str]] = []
     model: str | None = None
-    answered, spent = False, 0.0
+    answered, spent, failures = False, 0.0, 0
+    first = lookup_model(tools) if lookup_first else step
     with collect_calls() as calls:
         for _ in range(max_requests - 1):  # (the last request is kept for the answer)
             left = deadline - (now() - started)
@@ -168,7 +194,7 @@ def run(
                 break
             response = ctx.llm.generate(
                 _prompt(ctx, message, tools, done, None),
-                step,
+                first if not done else step,
                 system_prompt=system_prompt,
                 messages=ctx.history,
                 timeout=min(STEP_SECONDS, left),
@@ -184,10 +210,14 @@ def run(
                     result.calls = calls
                     return result
                 logger.warning("A turn step failed (%s)", error_type)
+                failures += 1
+                if failures < 2:  # (a garbled step is asked again once: one failure left the turn with nothing)
+                    continue
                 result.stop = "failed_step"
                 break
             if response.result.call is None:
-                result.text, result.citations = response.result.answer.reply, response.result.answer.citations
+                final = response.result.answer
+                result.text, result.citations, result.presented = final.reply, final.citations, final.presented
                 result.stop, answered = "answered", True
                 break
             call = response.result.call
@@ -212,6 +242,7 @@ def run(
             )
             if response.success:
                 result.text, result.citations = response.result.reply, response.result.citations
+                result.presented = response.result.presented
                 if reason:  # FR-025: the user is told the answer may be incomplete
                     result.text += f"\n\n_({reason}: ask me to go on if something is missing.)_"
             else:

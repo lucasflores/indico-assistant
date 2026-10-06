@@ -126,8 +126,8 @@ def _list_documents(ctx: Ctx, args: ListDocumentsArgs) -> str:
     for d in docs:
         ctx.memory.add("document", {"attachment_id": d.attachment_id}, d.filename)
     return "\n".join(
-        json.dumps({**reader.describe(d), "event": f"{d.event_id}: {titles.get(d.event_id, '')}"}, ensure_ascii=False)
-        for d in docs
+        json.dumps({**entry, "event": f"{d.event_id}: {titles.get(d.event_id, '')}"}, ensure_ascii=False)
+        for d, entry in zip(docs, reader.describe_all(docs), strict=True)
     )
 
 

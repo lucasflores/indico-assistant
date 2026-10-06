@@ -83,3 +83,29 @@ def test_the_planners_problem_reaches_the_answer():
     ):
         reply, metadata, plan = abilities.plan(MagicMock(), "s1", "move it", [], None, None)
     assert metadata == {"plan_id": None, "cannot_plan": False, "problem": "not_understood"} and plan is None
+
+
+def test_the_agent_can_name_the_kind_of_data_question():
+    """The classifier took "Who is speaking at Q3 Planning?" for a topic search (no speakers in its template)."""
+    ctx = Ctx(
+        user=MagicMock(id=1, is_admin=False),
+        session_id=uuid4(),
+        message_id=None,
+        page_event_id=None,
+        history=[],
+        settings={},
+        llm=MagicMock(),
+        base_url="x",
+    )
+    pipeline = MagicMock()
+    pipeline.process.return_value = PipelineResult(success=True, answer="Makoto and Priya.")
+    with (
+        patch("indico_assistant.plugin.AssistantPlugin"),
+        patch("indico_assistant.services.nl2sql.create_nl2sql_pipeline_from_plugin", return_value=pipeline),
+        patch("indico.modules.events.Event.query"),
+    ):
+        args = abilities.QueryDataArgs(tool="query_data", question="Who speaks at Q3 Planning?", kind="speaker_query")
+        abilities._query_data(ctx, args)
+        assert pipeline.process.call_args.kwargs["intent"] == "speaker_query"
+        abilities._query_data(ctx, abilities.QueryDataArgs(tool="query_data", question="Q"))
+        assert "intent" not in pipeline.process.call_args.kwargs

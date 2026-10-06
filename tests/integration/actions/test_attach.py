@@ -284,3 +284,24 @@ def test_an_attached_upload_cannot_be_used_again(db, upload, people, dummy_event
     again, token = executor.create_plan(lucas, chat.id, steps=[step], summary='again')
     executor.confirm(again.id, lucas, token)
     assert executor.run(again.id).status == 'refused'
+
+
+@pytest.mark.parametrize('said', ['this event', 'the event', 'this meeting'])
+def test_this_event_is_the_page_s_meeting_like_this_meeting(db, upload, people, create_event, said):
+    """(spec 025 baseline and full run: "Please attach this thesis to this event" was answered "I could not find
+    the meeting 'this event'")"""
+    lucas = people['manager']
+    page = create_event(title='Thesis Club', start_dt=now_utc() + timedelta(days=1),
+                        end_dt=now_utc() + timedelta(days=1, hours=1), creator=lucas, creator_has_privileges=True)
+    chat = ChatSession(user_id=lucas.id, event_id=page.id)
+    db.session.add(chat)
+    db.session.flush()
+    _, sent = upload(PDF, 'thesis.pdf')
+    db.session.add(ChatMessage(session_id=chat.id, role='user', content=f'attach this thesis to {said}',
+                               metadata_json={'uploads': [{'uuid': sent['uuid'], 'filename': 'thesis.pdf'}]}))
+    db.session.flush()
+    draft = PlanDraft.model_validate({'decision': 'new_request', 'steps': [
+        {'action': 'attach', 'target': said, 'upload': 'this'}]})
+    with acting_as(lucas):
+        result = resolve.draft_to_plan(draft, lucas, chat_session_id=chat.id, page_event_id=page.id)
+    assert result.questions == [] and result.steps[0]['args']['target_id'] == page.id

@@ -54,6 +54,26 @@ def describe(doc: Document) -> dict[str, Any]:
     return entry
 
 
+PREVIEW_CHARS = 300
+
+
+def describe_all(docs: list[Document]) -> list[dict[str, Any]]:
+    """``describe`` for each, with how its first page begins (where the title usually is: filenames like
+    1706.03762v7.pdf don't name a paper)."""
+    ids = [d.attachment_id for d in docs if d.status == DocumentStatus.READY.value]
+    begins: dict[int, str] = {}
+    if ids:
+        rows = db.session.execute(
+            text("""
+                SELECT DISTINCT ON (attachment_id) attachment_id, left(text, :n) FROM plugin_assistant.document_chunks
+                WHERE attachment_id = ANY(:ids) ORDER BY attachment_id, chunk_index
+                """),
+            {"ids": ids, "n": PREVIEW_CHARS},
+        )
+        begins = {row[0]: " ".join(row[1].split()) for row in rows}
+    return [{**describe(d), **({"begins": begins[d.attachment_id]} if d.attachment_id in begins else {})} for d in docs]
+
+
 def pages_text(attachment_id: int, numbers: list[int]) -> dict[int, str]:
     """Those pages' text, rebuilt from their chunks."""
     rows = db.session.execute(

@@ -8,7 +8,10 @@ by using the tools, one call per step, then writing the answer.
 Where things are:
 - Files attached to events (papers, theses, slides, reports, minutes kept as files): the document tools. To find a
   file by its name or topic anywhere, search_documents with no document or event. Results say which event each file
-  is attached to.
+  is attached to, and a listed document shows how it begins: its title is usually there, not in its file name.
+- A summary of a document comes from its start (read_document with no pages); its conclusions or results from its
+  last pages or its conclusion section (the outline shows where). A figure or a definition: search for it, then read
+  the page it is on.
 - Everything else stored in Indico: events and meetings (dates, times, places), talks, their speakers and sessions,
   timetables, registrations and participants, and meeting notes and minutes written in Indico: query_data. Ask it
   one precise question.

@@ -135,3 +135,9 @@ def test_a_document_not_ready_says_why(db, dummy_user, dummy_event, create_attac
         "dummy_file.txt is still being read; try again in a minute."
     )
     assert reader.describe(reader.documents(dummy_user, event_id=dummy_event.id)[0])["note"].startswith("is still")
+
+
+def test_a_listing_shows_how_each_document_begins(db, dummy_user, dummy_event, document):
+    doc = document(dummy_event, "Attention Is All You Need\nAshish Vaswani\nThe dominant sequence models...")
+    [entry] = reader.describe_all(reader.documents(dummy_user, event_id=dummy_event.id))
+    assert entry["document"] == doc.id and entry["begins"].startswith("Attention Is All You Need Ashish Vaswani")
