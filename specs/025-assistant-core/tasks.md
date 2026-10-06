@@ -491,6 +491,22 @@ baseline (SC-004). Fast-path messages cost no more (SC-005).
   - **Paid, on Lucas's go:** quick runs while fixing (≤ $1 each), then a full run (≤ $5).
   - Record SC-002, SC-004 and SC-005 against the baseline here.
   - Restore the stack.
+  - **In progress, 2026-10-05:**
+    - `pg_dump` (`instance/backups/indico_2026-10-05_pre012.dump`), migration 012, the stack on this worktree with
+      fake GitHub and `--reloader none`, `indico assistant sync-documents`: 39 attachments, 36 ready and 3
+      unsupported (a Keynote file, two images); all 10 world documents ready, 4,927 chunks with embeddings.
+    - **Quick runs** (40 scenarios; the old assistant's quick run 2: 18/40):
+      1. 14/40, $0.13. An event page without its own settings raised (17 turns); the agent didn't know which tool
+         holds what.
+      2. Aborted at 30 (29 scored: 14 passed, against 11 in run 1), $0.15. The dev server's reloader restarted on
+         a test edit; the runner now fails one scenario on an error instead of the run.
+      3. 31/40, $0.17. Documents 8/8.
+    - **Full run 1:** 166/273 (baseline 135; 136 re-graded with plain quotes), $0.86 measured, $1.15 on the key.
+      Documents 22/36 (SC-002 not met), chat −3 and routing_data −3 (SC-004 not met), fast path $0.00016 per
+      message against today's $0.00021 (SC-005 met). Fixed in `119b993` (see its message).
+    - The suite's cleanup hit the world users' used-up daily chat limit and retried for an hour: it now gives up
+      on a 429 (eval `d1d7cfc`). The world users' rate-limit counters in the dev Redis were cleared to save the
+      report, and before later runs.
 - [ ] T056 [US2] The plugin PR: this branch's spec, plan and tasks, plus the US2 code. Hand the link to Lucas.
   After the merge, US3 starts on `025-us3-combined-turn`, branched from main in the same worktree.
 
