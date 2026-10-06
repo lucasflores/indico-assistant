@@ -129,7 +129,8 @@ def test_ask_github_is_private_once_github_was_read(dummy_user, access, private)
         patch("indico_assistant.services.analytics.recorder.private") as recorded,
     ):
         text = abilities._ask_github(ctx, abilities.AskGithubArgs(tool="ask_github", question="my PRs?"))
-    assert text == "Open: #16" and ctx.private is private and recorded.called is private
+    assert text == "Open: #16" and ctx.private is private
+    assert recorded.called  # (before it ran: a loop that fails half-way has read GitHub too)
     assert answer.call_args.args[2] == []  # (the question itself isn't its own history)
     assert ctx.github_urls == {"https://github.com/o/r/pull/16"}
 
@@ -169,6 +170,13 @@ def test_change_requests_name_meetings_not_ids(db, create_event):
     assert abilities.by_name(f"Move Budget Review (event {budget.id}) to 3pm", None) == "Move Budget Review to 3pm"
     assert abilities.by_name("Move event 1803 to Friday", page_event_id=1803) == "Move this meeting to Friday"
     assert abilities.by_name("Move event 999999 to Friday", None) == "Move event 999999 to Friday"
+    for quantity in (
+        f"move the meeting {budget.id} hours later",
+        f"push this event {budget.id} minutes back",
+        f"move the meeting {budget.id} pm",
+        f"start the meeting {budget.id}:30",
+    ):
+        assert abilities.by_name(quantity, None) == quantity
 
 
 def test_search_gives_the_best_pages_whole(db, dummy_user, dummy_event, document, fake_embedder):

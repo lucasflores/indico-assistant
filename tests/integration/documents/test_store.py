@@ -6,7 +6,7 @@ import pytest
 from indico.modules.attachments.models.attachments import AttachmentFile, AttachmentType
 from sqlalchemy import text
 
-from indico_assistant.models.document import Document
+from indico_assistant.models.document import Document, DocumentStatus
 from indico_assistant.services.document import store
 from indico_assistant.tasks import indexing, sync
 
@@ -71,7 +71,7 @@ def test_reading_is_visible_while_it_happens(db, read, attach, monkeypatch):
     attachment = attach()
     seen = []
     real = indexing._read
-    monkeypatch.setattr(indexing, "_read", lambda a, e: seen.append(doc(a).status) or real(a, e))
+    monkeypatch.setattr(indexing, "_read", lambda a, f, e: seen.append(doc(a).status) or real(a, f, e))
     read(attachment)
     assert seen == ["reading"]
 
@@ -124,6 +124,7 @@ def test_a_newer_file_wins_over_a_slow_read(db, read, attach):
     store.queue(attachment)
     db.session.commit()
     assert store.write(attachment.id, old_file, 1, [], [], [], None) == 0  # the old read finished last
+    store.mark(attachment.id, old_file, DocumentStatus.NO_TEXT)  # nor does its status land on the new file
     assert doc(attachment).status == "queued"
 
 

@@ -178,7 +178,7 @@ def run(
     result, seen = TurnResult(stop="requests"), set()
     done: list[tuple[Any, str]] = []
     model: str | None = None
-    answered, spent, failures = False, 0.0, 0
+    answered, failures = False, 0
     first = lookup_model(tools) if lookup_first else step
     with collect_calls() as calls:
         for _ in range(max_requests - 1):  # (the last request is kept for the answer)
@@ -186,7 +186,7 @@ def run(
             if left < MIN_STEP_SECONDS:
                 result.stop = "budget"
                 break
-            if spent >= max_cost:
+            if _cost(calls) >= max_cost:  # (the whole turn so far, the tools' own model calls too: spec 024)
                 result.stop = "cost"
                 break
             if len(result.tools) >= max_tools:
@@ -200,7 +200,6 @@ def run(
                 timeout=min(STEP_SECONDS, left),
                 model=model,
             )
-            spent += _cost(response.calls)  # (measured, never estimated: spec 024)
             if pin and model is None:
                 model = next((c.get("ibis_chosen") for c in reversed(response.calls) if c.get("ibis_chosen")), None)
             if not response.success:

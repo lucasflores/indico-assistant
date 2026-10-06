@@ -69,13 +69,14 @@ def _query_data(ctx: Ctx, args: QueryDataArgs) -> str:
         # Planning?" for a topic search, whose template has no speakers (story 2's full run)
         **({"intent": args.kind} if args.kind else {}),
     )
-    for flag, tool in (
-        ("write_request", "propose_change"),
-        ("knowledge_request", "ask_guide"),
-        ("connector_request", "ask_github"),
+    for flag, use in (
+        ("write_request", "use propose_change"),
+        ("knowledge_request", "use ask_guide"),
+        ("connector_request", "use ask_github"),
+        ("chat_request", "answer it from the conversation"),
     ):
         if getattr(result, flag, False):
-            return f"That is not a question about stored data: use {tool}."
+            return f"That is not a question about stored data: {use}."
     if not result.success:
         return f"The lookup failed: {result.error.user_message if result.error else 'no answer'}"
     ids = list(getattr(result, "source_event_ids", None) or [])
@@ -140,9 +141,11 @@ class AskGithubArgs(BaseModel):
 def _ask_github(ctx: Ctx, args: AskGithubArgs) -> str:
     from indico.core.plugins import url_for_plugin
 
+    from indico_assistant.services.analytics import recorder
     from indico_assistant.services.chat.context_builder import get_context_builder
     from indico_assistant.services.connectors.loop import answer
 
+    recorder.private()  # before it runs: a loop that fails half-way has read GitHub too (spec 024 FR-009)
     history = get_context_builder().connector_history(ctx.session_id, up_to=ctx.message_id)
     history = history[:-1] if history and history[-1].get("role") == "user" else history
     result = answer(
@@ -155,11 +158,8 @@ def _ask_github(ctx: Ctx, args: AskGithubArgs) -> str:
         profile_url=url_for_plugin("assistant.user_connections", _external=True),
         started=ctx.started,
     )
-    if result.access is None:  # (the loop ran: GitHub's data is in this turn)
-        from indico_assistant.services.analytics import recorder
-
+    if result.access is None:  # (the loop ran: GitHub's data is in this answer, and later prompts)
         ctx.private = True
-        recorder.private()
     ctx.github_urls.update(result.urls)
     return str(result.text)
 
@@ -212,7 +212,11 @@ def plan(
     return turn.reply, metadata, turn.plan
 
 
-_EVENT_ID = re.compile(r"\s*\(?\b(?:event|meeting)\s+(?:id\s+)?#?(\d+)\)?", re.I)
+_EVENT_ID = re.compile(
+    r"\s*\(?\b(?:event|meeting)\s+(?:id\s+)?#?(\d+)\b"
+    r"(?![.:]\d|\s*(?:%|[ap]\.?m\b|h\b|hrs?\b|hours?\b|min|sec|days?\b|weeks?\b|months?\b|years?\b|times?\b))\)?",
+    re.I,
+)  # (a quantity is not an id: "move the meeting 2 hours later")
 
 
 def by_name(request: str, page_event_id: int | None) -> str:

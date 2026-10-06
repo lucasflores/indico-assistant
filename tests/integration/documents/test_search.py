@@ -52,6 +52,14 @@ def test_an_exact_term_only_the_keyword_channel_finds_ranks_top_3(db, dummy_user
     assert hits[0].filename == "notes.md" and hits[0].page == 1
 
 
+def test_a_failing_embedder_leaves_keyword_search(db, dummy_user, dummy_event, document, no_meaning):
+    doc = document(dummy_event, f"# Report\nThe board approved contract SC-2291.\n{FILLER}", embedder=no_meaning)
+    broken = MagicMock()
+    broken.embed_text.side_effect = RuntimeError("Vector search is disabled")
+    hits = search(dummy_user, "SC-2291", attachment_id=doc.id, embedder=broken)
+    assert any("SC-2291" in h.text for h in hits)
+
+
 def test_meaning_and_keywords_are_fused(db, dummy_user, dummy_event, document, fake_embedder):
     doc = document(
         dummy_event, "# Talk\nThe look-up table is stored as ROOT histograms.\n" + FILLER, embedder=fake_embedder
@@ -147,7 +155,7 @@ def test_a_term_with_a_footnote_mark_is_found(db, dummy_user, dummy_event, docum
     """The thesis defines pile-up in a footnote: pypdf gives "pile-up1" and "1pile-up" (story 2's full run)."""
     doc = document(
         dummy_event,
-        f"{FILLER}\ndescribing event pile-up1 correctly.\n1pile-up: in-time and out-of-time\n" f"{FILLER}",
+        f"{FILLER}\ndescribing event pile-up1 correctly.\n1pile-up: in-time and out-of-time\n{FILLER}",
         embedder=no_meaning,
     )
     hits = search(dummy_user, "pile-up", attachment_id=doc.id, embedder=no_meaning)

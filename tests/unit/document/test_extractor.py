@@ -98,6 +98,12 @@ def test_text_and_markdown_are_one_page(tmp_path):
     assert md.pages[0][md.headings[1].offset :].startswith("## 2 Steps")
 
 
+def test_heading_offsets_are_on_the_stored_text(tmp_path):
+    (tmp_path / "c.md").write_bytes(b"# Plan\r\n" + b"intro line\r\n" * 40 + b"## 2 Steps\r\ndo it")
+    md = extract(tmp_path / "c.md")
+    assert md.pages[0][md.headings[-1].offset :].startswith("## 2 Steps")
+
+
 def test_type_comes_from_the_filename(tmp_path):
     (tmp_path / "upload.tmp").write_text("from remote storage")
     assert extract(tmp_path / "upload.tmp", "notes.txt").pages == ["from remote storage"]
