@@ -116,3 +116,67 @@ def test_a_document_question_is_answered_with_citations(
 
 def test_the_old_search_endpoint_is_gone(app):
     assert not [rule.rule for rule in app.url_map.iter_rules() if rule.rule.startswith("/api/assistant/search")]
+
+
+def test_a_lookup_then_a_proposal_then_a_typed_yes_applies_it(
+    db, dummy_user, dummy_event, thesis, fake_embedder, monkeypatch
+):
+    """Story 3 (T060): the turn looks something up and proposes a change from what it found; nothing changes until
+    the user's typed "yes", which runs the plan as spec 019 does."""
+    from indico_assistant.default_settings import DEFAULT_SETTINGS
+    from indico_assistant.schemas.actions import PlanView
+    from indico_assistant.services.actions import executor
+    from indico_assistant.services.chat.service import get_chat_service
+    from indico_assistant.services.turn import abilities
+
+    title = dummy_event.title
+    dummy_event.update_principal(dummy_user, full_access=True)  # (a manager: the change is theirs to make)
+
+    class Model:
+        def __init__(self):
+            self.n = 0
+
+        def generate(self, prompt, response_model, **kwargs):
+            self.n += 1
+            call = {
+                1: tools.SearchDocumentsArgs(tool="search_documents", query="pile-up kinds"),
+                2: abilities.ProposeChangeArgs(tool="propose_change", request="rename this event to Pile-up Review"),
+            }[self.n]
+            return LLMResponse(success=True, result=response_model(call=call), latency_ms=1, calls=[])
+
+    proposed = []
+
+    def first_plan(user, session_id, message, history, waiting_plan, page_event_id, offer=None):
+        proposed.append(message)
+        steps = [{"n": 1, "action": "update_event", "args": {"event_id": dummy_event.id, "title": "Pile-up Review"}}]
+        plan, token = executor.create_plan(user, session_id, steps=steps, summary="Rename the event")
+        return (
+            "Here is the plan. Confirm it to go ahead.",
+            {"plan_id": str(plan.id), "cannot_plan": False},
+            (PlanView.of(plan, token).model_dump(mode="json")),
+        )
+
+    plugin = MagicMock(llm_service=Model())
+    plugin.settings.get_all.return_value = {**DEFAULT_SETTINGS, "jev_api_key": None, "actions_enabled": True}
+    plugin.settings.get.side_effect = lambda key, default=None: plugin.settings.get_all.return_value.get(key, default)
+    plugin.event_settings.get.return_value = None
+    service = get_chat_service()
+    session = service._session_manager.create_session(dummy_user.id, dummy_event.id)
+    db.session.commit()
+    real_plan = abilities.plan
+    with (
+        patch("indico_assistant.plugin.AssistantPlugin", MagicMock(instance=plugin, settings=plugin.settings)),
+        patch.object(tools, "_embedder", return_value=fake_embedder),
+        patch.object(abilities, "plan", side_effect=first_plan) as planner,
+    ):
+        message = service._session_manager.add_user_message(session, "Rename this event after what the thesis covers")
+        db.session.commit()
+        first = service.answer(dummy_user.id, session.id, message.content, message_id=message.id)
+        assert first.plan is not None and dummy_event.title == title  # proposed, not applied
+        assert proposed and "Pile-up Review" in proposed[0]
+        planner.side_effect = real_plan
+        message = service._session_manager.add_user_message(session, "yes")
+        db.session.commit()
+        second = service.answer(dummy_user.id, session.id, "yes", message_id=message.id)
+    db.session.refresh(dummy_event)
+    assert dummy_event.title == "Pile-up Review" and second.metadata["route"]["route"] == "change"

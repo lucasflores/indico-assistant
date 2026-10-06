@@ -1,4 +1,4 @@
-"""The turn's tool loop (spec 025, research R1), generalised from the connector's (``services/connectors/loop.py``).
+"""The turn's tool loop (spec 025, research R1), generalised from spec 023's connector loop, which it replaced.
 
 Each step is one ``LLMService.generate`` returning a validated ``Step``: one tool call, or the answer (constitution
 III: any provider can run it, through Instructor). One tool per step, in sequence, which the recorder's step stack
@@ -117,6 +117,8 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         )
     elif ctx.page_event_id is not None:
         page += "\nNo documents attached to it that the user can open."
+    if ctx.github_note:  # (GitHub is on, but its tools aren't offered: the user can fix that)
+        page += "\n" + ctx.github_note
     lines = [
         "## The page",
         page,
@@ -179,6 +181,8 @@ def run(
     deadline = float(settings.get("turn_deadline_seconds") or 75)
     pin = bool(settings.get("turn_pin_model", True))
     started = now() if ctx.started is None else ctx.started
+    # tools finish by the turn's deadline (less the answer's own time), on the real clock their calls read
+    ctx.deadline = time.monotonic() + deadline - FINAL_SECONDS - (now() - started)
     result, seen = TurnResult(stop="requests"), set()
     done: list[tuple[Any, str]] = []
     model: str | None = None
@@ -260,10 +264,13 @@ def _call(ctx: Ctx, tool: Tool, call: Any, result: TurnResult, now: Callable[[],
     """Run one tool as an analytics step (its name, time and outcome). Its failure is text for the model."""
     from indico.core.db import db
 
+    from indico_assistant.services.llm.service import until
+
     began, ok = now(), True
     with recorder.step("tool", "turn", tool.name) as tool_step:
         try:
-            text = tool.run(ctx, call)
+            with until(ctx.deadline):
+                text = tool.run(ctx, call)
             db.session.commit()  # no transaction stays open through the next model call
         except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout)
             raise

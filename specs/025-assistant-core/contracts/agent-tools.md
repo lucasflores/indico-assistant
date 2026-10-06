@@ -31,8 +31,8 @@
 |---|---|---|---|
 | `query_data` | `question` | the NL2SQL pipeline (`services/nl2sql/`), unchanged | removed in story 4 unless the suite shows it's needed (decision 4) |
 | `ask_guide` | `question` | the knowledge answer (`services/knowledge/answer.py`) | returns the guide passages and links |
-| `ask_github` | `question` | the connector's whole answer (`services/connectors/loop.py`, `answer()`), unchanged | story 2 only; only when the user has connected GitHub; marks the turn private |
-| `github_*` | as today (`services/connectors/github.py`) | the connector's own tools, called by the turn directly | story 3: replaces `ask_github`, and `connectors/loop.py` is deleted |
+| `ask_github` | `question` | the connector's whole answer (spec 023's loop), unchanged | story 2 only (removed in story 3) |
+| `github_*` | as today (`services/connectors/github.py`) | the connector's own tools, called by the turn directly over one client per turn, within the turn's deadline | story 3: replaces `ask_github`; offered only to a connected user (otherwise the prompt says how to connect); a turn that calls one is private, and the items it returns are remembered as `github` |
 | `propose_change` | `request` (what to change, with the ids the turn found) | the planner (`services/actions/planner.py`) | creates the plan; the answer shows the plan card. Confirmation stays outside the turn (button or a typed "yes", as in spec 019), so the agent never applies a change. |
 
 ## Typed lookups (story 4)

@@ -157,7 +157,7 @@ def test_the_cost_limit_wraps_up():
 
 
 def test_the_cost_limit_counts_the_tools_own_model_calls():
-    def pricey(ctx, args):  # (a tool that asks a model itself: query_data, ask_github, the planner)
+    def pricey(ctx, args):  # (a tool that asks a model itself: query_data, the guide, the planner)
         for request in _request_calls.get():
             request.append({"cost_usd": "0.20"})
         return "spent"

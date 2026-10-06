@@ -65,4 +65,4 @@ def test_a_document_whose_access_was_revoked_is_dropped_on_use(
     assert memory.usable(other, entries) == entries
     event.update_principal(other, read_access=False)
     db.session.flush()
-    assert [e["kind"] for e in memory.usable(other, entries)] == ["event"]
+    assert memory.usable(other, entries) == []  # (the event too, since story 3: FR-021 re-checks every kind)

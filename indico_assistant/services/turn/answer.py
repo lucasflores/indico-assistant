@@ -100,7 +100,7 @@ def answer(
     history = _history(context)
     base_url = base_url_of(settings)
 
-    decision = gate.decide(context, settings, plan_waiting=waiting_plan is not None, offer=offer, connector=github_on)
+    decision = gate.decide(context, settings, connector=github_on)
     sure = not decision.skipped and (decision.confidence or 0.0) >= float(settings.get("fast_path_confidence") or 0.8)
     if sure and decision.route == "chat":
         chat = chat_answer(message, history, llm=plugin.llm_service, base_url=base_url)
@@ -189,16 +189,24 @@ def _agent(
         else bool(settings.get("nl2sql_enabled", True))
     )
     custom = event_setting(plugin, event, "custom_system_prompt") if event is not None else None
+    if github_on:  # (GitHub's tools for a connected user; otherwise the prompt says how to connect)
+        from indico_assistant.services.turn.abilities import github_note
+
+        ctx.github_note = github_note(ctx)
     db.session.commit()  # no transaction stays open through the model calls
     # documents in play (the page's, the conversation's, or one named): the first step must look something up
     lookup_first = bool(ctx.page_documents or ctx.memory.documents() or DOCUMENT_WORDS.search(message))
-    result: TurnResult = loop.run(
-        ctx,
-        message,
-        registry(ctx, nl2sql=nl2sql, github=github_on),
-        system_prompt=rules(custom),
-        lookup_first=lookup_first,
-    )
+    try:
+        result: TurnResult = loop.run(
+            ctx,
+            message,
+            registry(ctx, nl2sql=nl2sql, github=github_on and ctx.github_note is None),
+            system_prompt=rules(custom),
+            lookup_first=lookup_first,
+        )
+    finally:
+        if ctx.github is not None:
+            ctx.github.close()
 
     plan = None
     if ctx.plan is not None:  # the planner's reply and plan card are the answer
@@ -206,15 +214,9 @@ def _agent(
         metadata = dict(metadata)
     else:
         paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
+        urls = ctx.github_urls | earlier_github(history)
         text = (
-            links.check(
-                links.strip_images(result.text),
-                sorted(paths | ctx.link_paths),
-                guide | ctx.guide_urls,
-                base_url,
-                urls=ctx.github_urls,
-                strict=True,
-            )
+            clean(result.text, sorted(paths | ctx.link_paths), guide | ctx.guide_urls, base_url, urls)
             or loop.NOT_ANSWERED
         )
         metadata = {"problem": "failed"} if result.failed else {}
@@ -241,6 +243,33 @@ def _agent(
         private=ctx.private,
         offer=ctx.knowledge_offer,
     )
+
+
+GITHUB_URL = re.compile(r"https://github\.com/[^\s<>()\[\]\"'`]+")
+
+
+def earlier_github(history: list[dict[str, str]]) -> set[str]:
+    """The GitHub items earlier answers linked (checked when they were given): the answer may link them again."""
+    return {
+        u.rstrip(".,;:!?")
+        for m in history
+        if m.get("role") == "assistant"
+        for u in GITHUB_URL.findall(m.get("content") or "")
+    }
+
+
+def clean(text: str, paths: list[str], guide: set[str], base_url: str, urls: set[str]) -> str | None:
+    """The answer's links checked until checking changes nothing: one pass can rebuild an image out of nested
+    markup, e.g. ``!![[x](…)](//evil…)`` (spec 023's fresh-review). Markup still changing after 10 passes is
+    refused."""
+    from indico_assistant.services.knowledge import links
+
+    for _ in range(10):
+        cleaned = links.check(links.strip_images(text), paths, guide, base_url, urls=urls, strict=True)
+        if cleaned == text:
+            return text
+        text = cleaned
+    return None
 
 
 def _history(context: list[dict[str, str]]) -> list[dict[str, str]]:

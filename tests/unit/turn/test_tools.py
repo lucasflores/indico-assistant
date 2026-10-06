@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 from indico.modules.attachments.models.attachments import AttachmentFile
 
-from indico_assistant.services.connectors.loop import ConnectorResult
 from indico_assistant.services.knowledge.answer import KnowledgeResult
 from indico_assistant.services.turn import abilities, tools
 from indico_assistant.services.turn.memory import Memory
@@ -116,25 +115,6 @@ def test_ask_guide_answers_and_keeps_its_links_and_offer(dummy_user):
     assert ctx.guide_urls == {"https://learn.getindico.io/x/"}
 
 
-@pytest.mark.parametrize(("access", "private"), [(None, True), ("not_connected", False)])
-def test_ask_github_is_private_once_github_was_read(dummy_user, access, private):
-    ctx = make_ctx(dummy_user)
-    result = ConnectorResult("Open: #16", urls={"https://github.com/o/r/pull/16"}, access=access)
-    builder = MagicMock()
-    builder.connector_history.return_value = [{"role": "user", "content": "my PRs?"}]
-    with (
-        patch("indico_assistant.services.connectors.loop.answer", return_value=result) as answer,
-        patch("indico_assistant.services.chat.context_builder.get_context_builder", return_value=builder),
-        patch("indico.core.plugins.url_for_plugin", return_value="https://indico.test/connections"),
-        patch("indico_assistant.services.analytics.recorder.private") as recorded,
-    ):
-        text = abilities._ask_github(ctx, abilities.AskGithubArgs(tool="ask_github", question="my PRs?"))
-    assert text == "Open: #16" and ctx.private is private
-    assert recorded.called  # (before it ran: a loop that fails half-way has read GitHub too)
-    assert answer.call_args.args[2] == []  # (the question itself isn't its own history)
-    assert ctx.github_urls == {"https://github.com/o/r/pull/16"}
-
-
 def test_propose_change_keeps_the_plan_or_says_why_not(dummy_user):
     ctx = make_ctx(dummy_user)
     args = abilities.ProposeChangeArgs(tool="propose_change", request="move Budget to 3pm")
@@ -161,7 +141,7 @@ def test_the_registry_offers_data_and_github_only_when_on():
     names = [t.name for t in abilities.registry(ctx, nl2sql=False, github=False)]
     assert names == ["list_documents", "read_document", "search_documents", "ask_guide", "propose_change"]
     names = [t.name for t in abilities.registry(ctx, nl2sql=True, github=True)]
-    assert "query_data" in names and "ask_github" in names
+    assert "query_data" in names and "github_my_pull_requests" in names
 
 
 def test_change_requests_name_meetings_not_ids(db, create_event):

@@ -35,6 +35,22 @@ _request_calls: contextvars.ContextVar[tuple] = contextvars.ContextVar("llm_requ
 CALL_LOG_MAX = 1000  # the shared call_log keeps only the most recent records
 
 
+# The time (time.monotonic) by which model calls in this context must be done: a tool's, inside a turn (spec 025).
+_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("llm_until", default=None)
+
+
+@contextlib.contextmanager
+def until(deadline: float | None):
+    """Model calls inside the block end by ``deadline`` (``time.monotonic``); one that would start after it fails as
+    a timeout. A tool the turn started late (NL2SQL, the guide, the planner) can't keep the turn's own answer from
+    being written before the worker's time limit (review of #22)."""
+    token = _until.set(deadline)
+    try:
+        yield
+    finally:
+        _until.reset(token)
+
+
 @contextlib.contextmanager
 def collect_calls():
     """Collect the completion records of every LLM call made inside the block, in this thread/task.
@@ -306,6 +322,12 @@ class LLMService:
         if left is not None:
             if left <= 0:
                 raise SoftTimeLimitExceeded()
+            effective_timeout = min(effective_timeout, left)
+        if (deadline := _until.get()) is not None:  # (a tool's call, inside a turn)
+            left = deadline - time.monotonic()
+            if left <= 0:
+                error = LLMError(error_type=ErrorType.TIMEOUT, message="The turn has no time left for this call")
+                return LLMResponse.error_response(error=error, latency_ms=0, retries=0)
             effective_timeout = min(effective_timeout, left)
 
         # Ensure client is ready

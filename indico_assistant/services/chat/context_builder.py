@@ -21,7 +21,7 @@ HIDDEN = "(An answer about Indico, not shown here.)"
 
 
 def _github(msg):
-    """An answer that read GitHub: the connector route's (spec 023), or a turn that called ask_github (spec 025)."""
+    """An answer that read GitHub: the connector route's (spec 023), or a turn that called a GitHub tool (spec 025)."""
     route = (msg.metadata_json or {}).get("route") or {}
     return route.get("route") == "connector" or bool(route.get("private"))
 

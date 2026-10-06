@@ -260,11 +260,13 @@ def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fak
     for in the logs, the redirects, the page's data, the API's body, the model's prompts and the route record."""
     import logging
     from datetime import UTC, datetime
+    from uuid import uuid4
 
     from indico_assistant.controllers import connections as api_module
     from indico_assistant.services.chat.service import _route_record
-    from indico_assistant.services.connectors import loop
+    from indico_assistant.services.turn import abilities, loop
     from indico_assistant.services.turn.answer import Outcome
+    from indico_assistant.services.turn.tools import Ctx
 
     caplog.set_level(logging.DEBUG)
     issued, seen = set(), []
@@ -294,13 +296,16 @@ def test_no_token_leaks_through_a_whole_connection(app, db, users, rendered, fak
     class Recording:
         def generate(self, prompt, response_model, **kwargs):
             prompts.append((prompt, kwargs))
-            step = (response_model(call={"tool": "my_pull_requests"}) if len(prompts) == 1
+            step = (response_model(call={"tool": "github_my_pull_requests"}) if len(prompts) == 1
                     else response_model(**({"reply": "Done."} if "reply" in response_model.model_fields
-                                           else {"answer": "Done."})))
-            return MagicMock(success=True, result=step)
+                                           else {"answer": {"reply": "Done."}})))
+            return MagicMock(success=True, result=step, calls=[])
 
-    result = loop.answer(makoto.id, "which of my PRs are open?", [], llm=Recording(), settings=settings,
-                         base_url="http://indico.test", profile_url="http://indico.test/user/assistant-connections/")
+    ctx = Ctx(user=makoto, session_id=uuid4(), message_id=None, page_event_id=None, history=[], settings=settings,
+              llm=Recording(), base_url="http://indico.test")
+    result = loop.run(ctx, "which of my PRs are open?", abilities.registry(ctx, nl2sql=False, github=True),
+                      system_prompt="RULES")
+    ctx.github.close()
     remember()
     record = _route_record("agent", Outcome(result.text, {}, "agent", result=result, tools=result.tools, private=True))
     seen += [repr(prompts), repr(record), result.text]

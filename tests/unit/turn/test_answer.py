@@ -12,6 +12,7 @@ from indico_assistant.services.knowledge.gate import Decision
 from indico_assistant.services.nl2sql.pipeline import OUT_OF_SCOPE_MESSAGE
 from indico_assistant.services.turn import loop
 from indico_assistant.services.turn.loop import TurnResult
+from indico_assistant.services.turn.rules import RULES
 
 PLAN = ("Here is the plan.", {"plan_id": "p1", "cannot_plan": False}, {"id": "p1"})
 SETTINGS = {
@@ -175,13 +176,18 @@ def test_the_events_own_settings_reach_the_agent(answered):
     assert "query_data" in [t.name for t in s.agent.call_args.args[2]]
 
 
-def test_github_is_offered_only_while_it_is_on(answered):
+def test_github_is_offered_only_while_it_is_on_and_connected(answered):
     run, s = answered
     run("my PRs?")
-    assert "ask_github" not in [t.name for t in s.agent.call_args.args[2]]
+    assert "github_my_pull_requests" not in [t.name for t in s.agent.call_args.args[2]]
     s.settings["github_enabled"] = True
-    run("my PRs?")
-    assert "ask_github" in [t.name for t in s.agent.call_args.args[2]]
+    with patch("indico_assistant.services.turn.abilities.github_note", return_value="GitHub: not connected"):
+        run("my PRs?")
+    assert "github_my_pull_requests" not in [t.name for t in s.agent.call_args.args[2]]
+    assert s.agent.call_args.args[0].github_note == "GitHub: not connected"
+    with patch("indico_assistant.services.turn.abilities.github_note", return_value=None):
+        run("my PRs?")
+    assert "github_my_pull_requests" in [t.name for t in s.agent.call_args.args[2]]
 
 
 def test_a_provider_outage_on_the_fast_path_or_in_the_loop_is_a_clear_message(answered):
@@ -285,7 +291,7 @@ def test_an_event_page_without_its_own_settings_inherits_the_global_ones(answere
     assert metadata["route"]["route"] == "agent"
     ctx, _, tools = s.agent.call_args.args
     assert ctx.allowed_tables is None and "query_data" in [t.name for t in tools]
-    assert s.agent.call_args.kwargs["system_prompt"].endswith("addresses the tools returned.")
+    assert s.agent.call_args.kwargs["system_prompt"] == RULES  # (no event prompt appended)
 
 
 def test_documents_in_play_require_a_first_lookup(answered):
