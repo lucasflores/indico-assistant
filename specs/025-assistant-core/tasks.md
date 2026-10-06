@@ -485,7 +485,7 @@ baseline (SC-004). Fast-path messages cost no more (SC-005).
     - `pytest tests`: 2079 passed, 0 failed. New code: ruff and black clean; `mypy --strict` clean
       (`--allow-untyped-calls` for calls into the untyped older modules); coverage 96% over `services/turn` and
       `services/document`.
-- [ ] T055 [US2] **Live window:**
+- [x] T055 [US2] **Live window:**
   - `pg_dump`, migration 012, and the stack switched to this worktree.
   - Re-index every attachment with `tasks/sync.py`, and confirm `world status` is all ready.
   - **Paid, on Lucas's go:** quick runs while fixing (≤ $1 each), then a full run (≤ $5).
@@ -507,6 +507,22 @@ baseline (SC-004). Fast-path messages cost no more (SC-005).
     - The suite's cleanup hit the world users' used-up daily chat limit and retried for an hour: it now gives up
       on a 429 (eval `d1d7cfc`). The world users' rate-limit counters in the dev Redis were cleared to save the
       report, and before later runs.
+    - After full run 1: a targeted run (documents 31/36, chat 14/14, routing_data 8/20, $0.21), fixes `47eedb0`
+      (a footnote mark glued to a word hid it from keyword search) and `9e52fb1` (the best two search pages come
+      whole), and two documents runs: 27/36 and 29/36 ($0.09, $0.07). The eval's `doc-still-reading` now accepts a
+      thesis already read (a race the suite can't control: reading takes seconds; eval `3b9b2ab`).
+    - **Full run 2 (final, `reports/us2-full-2.json`): 179/273** against the baseline's 135 (136 re-graded), $0.78
+      measured, $1.10 on the key. Story 2's paid runs: about $3.1 of its $5.
+      - **SC-002 not met:** documents 28/36 = 78% (target 90%). Across five runs on the last code: 27–31 of 36. What
+        still fails moves from run to run: the exact word a check wants ("representation", "spurious", "neglected",
+        "per mil"), the page cited, a figure missed. Lucas decides: accept, try a stronger model dial, or loosen
+        those checks.
+      - **SC-004 met:** every other set within 2 of the baseline: access 7→11, change 20→22, chat 14→14, cross 6→14,
+        data 16→17, github 43→48, knowledge 14→16, routing_data 10→9.
+      - **SC-005 met:** the fast path costs $0.00018 a message, today's chat and refusal answers $0.00021 (21 and 53
+        messages). An agent turn costs $0.0024 on average.
+    - Restored after the window: migration 012 rolled back (the old index's rows put back from the dump), the
+      stack on main in normal mode.
 - [ ] T056 [US2] The plugin PR: this branch's spec, plan and tasks, plus the US2 code. Hand the link to Lucas.
   After the merge, US3 starts on `025-us3-combined-turn`, branched from main in the same worktree.
 
