@@ -169,3 +169,15 @@ def test_change_requests_name_meetings_not_ids(db, create_event):
     assert abilities.by_name(f"Move Budget Review (event {budget.id}) to 3pm", None) == "Move Budget Review to 3pm"
     assert abilities.by_name("Move event 1803 to Friday", page_event_id=1803) == "Move this meeting to Friday"
     assert abilities.by_name("Move event 999999 to Friday", None) == "Move event 999999 to Friday"
+
+
+def test_search_gives_the_best_pages_whole(db, dummy_user, dummy_event, document, fake_embedder):
+    filler = " ".join(f"Sentence {i} about calorimeters." for i in range(60))
+    doc = document(
+        dummy_event, f"The pile-up1 of events matters. {filler}\n1pile-up: in-time and out-of-time.", "t.txt"
+    )
+    found = run(
+        by_name("search_documents"), make_ctx(dummy_user, embedder=fake_embedder), query="pile-up", document=doc.id
+    )
+    assert "(the whole page):" in found and "in-time and out-of-time" in found
+    assert found.count("[p.1]") == 1  # (the page once, not once per passage)
