@@ -129,7 +129,12 @@ def create_nl2sql_pipeline_from_plugin(
     timeout = settings.get("nl2sql_timeout", 10)
     max_rows = settings.get("nl2sql_max_rows", 1000)
     max_corrections = settings.get("nl2sql_max_corrections", 3)
-    allowed_tables = allowed_tables or settings.get("nl2sql_allowed_tables")  # (an event's own list first)
+    admin = settings.get("nl2sql_allowed_tables")
+    if isinstance(admin, str):  # (older settings: comma-separated)
+        admin = [t.strip() for t in admin.split(",") if t.strip()]
+    if allowed_tables and admin:  # an event's own list narrows the admin's, never widens it
+        allowed_tables = [t for t in allowed_tables if t in admin] or admin
+    allowed_tables = allowed_tables or admin
 
     return create_nl2sql_pipeline(
         llm_service=llm_service,

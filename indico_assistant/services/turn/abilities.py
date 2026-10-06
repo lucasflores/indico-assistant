@@ -214,9 +214,10 @@ def plan(
 
 _EVENT_ID = re.compile(
     r"\s*\(?\b(?:event|meeting)\s+(?:id\s+)?#?(\d+)\b"
-    r"(?![.:]\d|\s*(?:%|[ap]\.?m\b|h\b|hrs?\b|hours?\b|min|sec|days?\b|weeks?\b|months?\b|years?\b|times?\b))\)?",
+    r"(?![.:]\d|\s*(?:%|[ap]\.?m\b|h\b|hrs?\b|hours?\b|min|sec|days?\b|weeks?\b|months?\b|years?\b|times?\b"
+    r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b))\)?",
     re.I,
-)  # (a quantity is not an id: "move the meeting 2 hours later")
+)  # (a quantity or a date is not an id: "move the meeting 2 hours later", "a meeting 12 November")
 
 
 def by_name(request: str, page_event_id: int | None) -> str:

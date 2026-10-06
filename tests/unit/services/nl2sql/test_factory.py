@@ -353,3 +353,17 @@ class TestFactoryIntegration:
         assert 'timeout_seconds' in call_kwargs
         assert 'max_correction_attempts' in call_kwargs
         assert 'allowed_tables' in call_kwargs
+
+
+@pytest.mark.parametrize(('event', 'admin', 'allowed'), [
+    (['events.events', 'event_registration.registrations'], ['events.events'], ['events.events']),
+    (['event_registration.registrations'], 'events.events, events.contributions',
+     ['events.events', 'events.contributions']),
+    (['events.events'], None, ['events.events']),
+    (None, ['events.events'], ['events.events']),
+])
+def test_an_events_own_tables_narrow_the_admins_never_widen_them(event, admin, allowed):
+    plugin = MagicMock(settings={'nl2sql_allowed_tables': admin})
+    with patch('indico_assistant.services.nl2sql.factory.create_nl2sql_pipeline') as create:
+        create_nl2sql_pipeline_from_plugin(plugin, allowed_tables=event)
+    assert create.call_args.kwargs['allowed_tables'] == allowed

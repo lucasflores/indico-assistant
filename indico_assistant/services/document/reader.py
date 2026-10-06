@@ -89,10 +89,12 @@ def pages_text(attachment_id: int, numbers: list[int]) -> dict[int, str]:
     return {page: join(parts) for page, parts in pieces.items()}
 
 
-def _labelled(attachment_id: int, numbers: list[int], budget: int = MAX_CHARS) -> str:
+def _labelled(
+    attachment_id: int, numbers: list[int], budget: int = MAX_CHARS, texts: dict[int, str] | None = None
+) -> str:
     out: list[str] = []
     used = 0
-    texts = pages_text(attachment_id, numbers)
+    texts = pages_text(attachment_id, numbers) if texts is None else texts
     for n in numbers:
         page = texts.get(n, "")
         if used + len(page) > budget and out:
@@ -121,7 +123,16 @@ def read(
             return f"No section {section!r} in {doc.filename}. Its top-level sections: {titles}."
         numbers = list(range(match["page_start"], match["page_end"] + 1))
         more = f" (the section runs to p.{match['page_end']})" if len(numbers) > MAX_PAGES else ""
-        return f"{doc.filename}, {label(match)}{more}:\n\n" + _labelled(doc.attachment_id, numbers[:MAX_PAGES])
+        texts = pages_text(doc.attachment_id, numbers[:MAX_PAGES])
+        outline = doc.outline or []
+        after = next((s for s in outline[outline.index(match) + 1 :] if s["level"] <= match["level"]), None)
+        if after and after.get("offset") and after["page_start"] in texts:  # the next section starts on a page shown
+            texts[after["page_start"]] = texts[after["page_start"]][: after["offset"]]
+        if match.get("offset") and match["page_start"] in texts:  # (a one-page file: the section is inside it)
+            texts[match["page_start"]] = texts[match["page_start"]][match["offset"] :]
+        return f"{doc.filename}, {label(match)}{more}:\n\n" + _labelled(
+            doc.attachment_id, numbers[:MAX_PAGES], texts=texts
+        )
     if pages:
         wanted = [p for p in dict.fromkeys(pages) if 1 <= p <= count][:MAX_PAGES]
         if not wanted:

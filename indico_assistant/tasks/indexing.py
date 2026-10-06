@@ -108,7 +108,12 @@ def _read(attachment, file_id, embedder):
     chunks = chunk_pages(pages, sections)
     title = attachment.title or filename
     indexed = [indexed_text(title, c.section, c.text) for c in chunks]
-    embeddings = (embedder or _embedder()).embed_batch(indexed) if store.check_pgvector_available() else None
+    embeddings = None
+    if store.check_pgvector_available():
+        try:
+            embeddings = (embedder or _embedder()).embed_batch(indexed)
+        except Exception:  # (vector search off, a model that won't load): the document is still found by keyword
+            logger.exception("Embedding attachment %s failed: keyword search only", attachment.id)
     written = store.write(attachment.id, file_id, len(pages), sections, chunks, indexed, embeddings)
     return {"status": DocumentStatus.READY.value, "chunks": written}
 

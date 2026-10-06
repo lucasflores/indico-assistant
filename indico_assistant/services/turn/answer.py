@@ -226,7 +226,9 @@ def _agent(
         metadata["data_sources"] = [
             {"type": "event", "event_id": i, "url": f"{base_url}/event/{i}/"} for i in ctx.data["event_ids"]
         ]
-        metadata["evidence"] = {"queries": ctx.data.get("evidence"), "sql": ctx.data.get("sql")}
+    if ctx.data.get("evidence"):  # for a report's triage (spec 021 R5): each lookup, and the SQL it ran
+        metadata["evidence"] = {"queries": ctx.data["evidence"]}
+        metadata["sql_generated"] = "\n\n".join(s for s in ctx.data.get("sql") or [] if s) or None
     metadata["touched"] = in_presented_order(ctx.memory.touched, result.presented)
     return Outcome(
         text,

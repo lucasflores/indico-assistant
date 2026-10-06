@@ -29,7 +29,7 @@ def make_pdf(path, pages, outline=()):
 def test_pdf_pages_and_outline(tmp_path):
     path = make_pdf(
         tmp_path / "paper.pdf",
-        ["Title page", "1 Introduction\nWhy it matters", "2.1 Setup\nThe rig"],
+        ["Title page", "1 Introduction\nWhy it matters", "2 Methods\nAn overview.\n2.1 Setup\nThe rig"],
         outline=[("1 Introduction", 2, 1), ("2 Methods", 3, 1), ("2.1 Setup", 3, 2)],
     )
     doc = extract(path)
@@ -40,6 +40,8 @@ def test_pdf_pages_and_outline(tmp_path):
         ("2", "Methods", 1, 3),
         ("2.1", "Setup", 2, 3),
     ]
+    setup = doc.headings[2]
+    assert doc.pages[2][setup.offset :].startswith("2.1 Setup")  # (where its title is, not the page's top)
 
 
 def test_pdf_ligatures_read_as_letters(monkeypatch, tmp_path):
