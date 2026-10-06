@@ -116,7 +116,7 @@ def _docx(path: Path) -> Extracted:
     for paragraph in Document(str(path)).paragraphs:
         if paragraph.contains_page_break and pages[-1]:  # Word saved where its pages broke: before this one
             pages.append([])
-        text = paragraph.text.strip()
+        text = clean(paragraph.text).strip()  # (cleaned first: the heading offsets are on the stored text)
         if text:
             style = paragraph.style.name if paragraph.style is not None else ""
             level = re.match(r"Heading (\d)", style or "")
@@ -167,7 +167,7 @@ def _text(path: Path) -> Extracted:
 
 
 def _markdown(path: Path) -> Extracted:
-    text = _read_text(path)
+    text = clean(_read_text(path))  # (cleaned first: the heading offsets are on the stored text)
     headings = []
     for match in re.finditer(r"^(#{1,6})\s+(.+?)\s*#*\s*$", text, re.MULTILINE):
         number, title = _split_number(match.group(2))

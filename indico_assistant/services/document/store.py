@@ -26,18 +26,24 @@ _pgvector: bool | None = None
 
 
 def check_pgvector_available() -> bool:
-    """Whether the ``vector`` extension is installed (cached per process). Without it, search is keyword-only."""
+    """Whether chunks have an embedding column: migration 012 adds it only where the ``vector`` extension was
+    installed (cached per process). Without it, search is keyword-only."""
     global _pgvector
     if _pgvector is None:
         try:
             _pgvector = bool(
-                db.session.execute(text("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')")).scalar()
+                db.session.execute(
+                    text(
+                        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'plugin_assistant'"
+                        " AND table_name = 'document_chunks' AND column_name = 'embedding')"
+                    )
+                ).scalar()
             )
         except Exception:
             logger.exception("Could not check for pgvector")
             return False
         if not _pgvector:
-            logger.warning("pgvector is not installed: document search is keyword-only")
+            logger.warning("No embedding column (pgvector was not installed for migration 012): search is keyword-only")
     return _pgvector
 
 
@@ -69,12 +75,13 @@ def is_current(attachment: Any) -> bool:
     return doc is not None and doc.file_id == attachment.file_id and doc.status in DONE
 
 
-def mark(attachment_id: int, status: DocumentStatus, error: str | None = None) -> None:
-    """Set a status and commit, so the chat sees it at once."""
-    doc = db.session.get(Document, attachment_id)
-    if doc is not None:
-        doc.status, doc.error = status.value, error
-        db.session.commit()
+def mark(attachment_id: int, file_id: int, status: DocumentStatus, error: str | None = None) -> None:
+    """Set the status of this file version and commit, so the chat sees it at once. A newer file's row is left
+    alone: its own task marks it."""
+    Document.query.filter_by(attachment_id=attachment_id, file_id=file_id).update(
+        {"status": status.value, "error": error}, synchronize_session="fetch"
+    )
+    db.session.commit()
 
 
 def write(
@@ -113,9 +120,9 @@ def write(
         db.session.execute(
             text(f"""
             INSERT INTO plugin_assistant.document_chunks
-                (attachment_id, chunk_index, page, "offset", section, text, search{', embedding' if vector else ''})
+                (attachment_id, chunk_index, page, "offset", section, text, search{", embedding" if vector else ""})
             VALUES (:attachment_id, :chunk_index, :page, :offset, :section, :text, to_tsvector('simple', :indexed)
-                    {', CAST(:embedding AS vector)' if vector else ''})
+                    {", CAST(:embedding AS vector)" if vector else ""})
         """),
             rows,
         )

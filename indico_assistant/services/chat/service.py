@@ -192,6 +192,8 @@ class ChatService:
         if turn.disabled_for(event):
             route, response_text, metadata = "disabled", turn.DISABLED, {}
         else:
+            if offer and NEGATIVE.fullmatch(message):
+                waiting_plan = None  # it turns down the offer: nothing may cancel the waiting plan
             if offer and AFFIRMATIVE.fullmatch(message):
                 planned = plan_change(user, session.id, message, history, None, event_id, offer)
             elif exact_reply(waiting_plan, message):
@@ -201,8 +203,6 @@ class ChatService:
             if planned is not None:
                 route, (response_text, metadata, plan) = "change", planned
             else:
-                if offer and NEGATIVE.fullmatch(message):
-                    waiting_plan = None  # it turns down the offer: nothing may cancel the waiting plan
                 outcome = turn.answer(
                     user,
                     session.id,

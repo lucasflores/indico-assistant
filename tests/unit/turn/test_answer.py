@@ -143,7 +143,8 @@ def test_the_plan_shortcuts_run_before_the_turn(answered):
 def test_a_plain_no_to_an_offer_never_reaches_the_waiting_plan(answered):
     run, s = answered
     s.decide.return_value = jev("data")
-    run("no", waiting_plan=MagicMock(), offer="add a reminder")
+    run("no", waiting_plan=MagicMock(questions=[], suggestions=[], draft={}), offer="add a reminder")
+    s.plan.assert_not_called()  # (the plan's own "no" shortcut would cancel it)
     assert s.agent.call_args.args[0].waiting_plan is None
 
 

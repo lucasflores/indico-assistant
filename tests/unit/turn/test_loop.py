@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.llm.errors import ErrorType, LLMError
 from indico_assistant.services.llm.models import LLMResponse
+from indico_assistant.services.llm.service import _request_calls
 from indico_assistant.services.turn import loop
 from indico_assistant.services.turn.citations import Citation
 from indico_assistant.services.turn.tools import Ctx
@@ -65,6 +66,8 @@ class Script:
     def generate(self, prompt, response_model, **kwargs):
         self.sent.append(SimpleNamespace(prompt=prompt, schema=response_model, **kwargs))
         response = self.responses.pop(0)
+        for request in _request_calls.get():  # (as the real service records them: the turn's own list)
+            request.extend(response.calls or [])
         if response.success and response_model is loop.Final and not isinstance(response.result, loop.Final):
             response = ok(loop.Final(reply=response.result.answer.reply))
         return response
@@ -151,6 +154,17 @@ def test_the_cost_limit_wraps_up():
     llm = Script(ok(call("a"), cost="0.20"), ok(answer("pricey")))
     result = run(ctx(llm, turn_max_cost_usd=0.10))
     assert result.stop == "cost" and "cost limit" in result.text
+
+
+def test_the_cost_limit_counts_the_tools_own_model_calls():
+    def pricey(ctx, args):  # (a tool that asks a model itself: query_data, ask_github, the planner)
+        for request in _request_calls.get():
+            request.append({"cost_usd": "0.20"})
+        return "spent"
+
+    llm = Script(ok(call("a")), ok(answer("done")))
+    result = run(ctx(llm, turn_max_cost_usd=0.10), tools=(Tool("echo", EchoArgs, pricey), OTHER))
+    assert result.stop == "cost"
 
 
 def test_the_model_is_pinned_after_the_first_step():

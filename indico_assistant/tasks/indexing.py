@@ -74,34 +74,35 @@ def index_attachment(attachment, force=False, embedder=None):
     db.session.commit()
     if not force and store.is_current(attachment):
         return {"status": doc.status, "skipped": "current"}
+    attachment_id, file_id = attachment.id, attachment.file_id  # (this version: a newer one has its own task)
     if reason := unreadable_reason(attachment):
-        store.mark(attachment.id, DocumentStatus.UNSUPPORTED, reason)
+        store.mark(attachment_id, file_id, DocumentStatus.UNSUPPORTED, reason)
         return {"status": DocumentStatus.UNSUPPORTED.value}
-    store.mark(attachment.id, DocumentStatus.READING)
+    store.mark(attachment_id, file_id, DocumentStatus.READING)
     try:
-        return _read(attachment, embedder)
+        return _read(attachment, file_id, embedder)
     except SoftTimeLimitExceeded:
         db.session.rollback()
-        store.mark(attachment.id, DocumentStatus.FAILED, "Time limit reached")
+        store.mark(attachment_id, file_id, DocumentStatus.FAILED, "Time limit reached")
         raise
     except UnsupportedFileTypeError as exc:
         db.session.rollback()
-        store.mark(attachment.id, DocumentStatus.UNSUPPORTED, str(exc))
+        store.mark(attachment_id, file_id, DocumentStatus.UNSUPPORTED, str(exc))
         return {"status": DocumentStatus.UNSUPPORTED.value}
     except Exception as exc:  # the file, the embedder or the database: the row says so, nothing else fails
         db.session.rollback()
-        logger.exception("Reading attachment %s failed", attachment.id)
-        store.mark(attachment.id, DocumentStatus.FAILED, f"{type(exc).__name__}: {exc}"[:500])
+        logger.exception("Reading attachment %s failed", attachment_id)
+        store.mark(attachment_id, file_id, DocumentStatus.FAILED, f"{type(exc).__name__}: {exc}"[:500])
         return {"status": DocumentStatus.FAILED.value}
 
 
-def _read(attachment, embedder):
-    file_id, filename = attachment.file_id, attachment.file.filename
+def _read(attachment, file_id, embedder):
+    filename = attachment.file.filename
     with attachment.file.get_local_path() as path:
         extracted = extract(path, filename)
     pages = extracted.pages
     if not any(p.strip() for p in pages):
-        store.mark(attachment.id, DocumentStatus.NO_TEXT)
+        store.mark(attachment.id, file_id, DocumentStatus.NO_TEXT)
         return {"status": DocumentStatus.NO_TEXT.value}
     sections = outline(extracted.headings or numbered_headings(pages), len(pages))
     chunks = chunk_pages(pages, sections)

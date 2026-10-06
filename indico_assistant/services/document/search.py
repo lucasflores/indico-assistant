@@ -8,6 +8,7 @@ can open, checked by Indico itself, as that user.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -20,13 +21,17 @@ from sqlalchemy import text
 from indico_assistant.services.actions.context import acting_as
 from indico_assistant.services.document import store
 
+logger = logging.getLogger(__name__)
+
 TOP = 8
 DEPTH = 30  # candidates per channel
 RRF_K = 60
 
-_STOP = set("""a an and are as at be by can do does for from has have how i in is it its me my of on or our so
+_STOP = set(
+    """a an and are as at be by can do does for from has have how i in is it its me my of on or our so
 than that the their them then there these they this to was we were what when where which who why will with you
-your about into page pages section document documents paper thesis talk slides""".split())
+your about into page pages section document documents paper thesis talk slides""".split()
+)
 
 
 @dataclass
@@ -117,7 +122,12 @@ def search(
         return []
     embedding = None
     if embedder is not None and store.check_pgvector_available():
-        embedding = "[" + ",".join(f"{x:.7g}" for x in embedder.embed_text(query)) + "]"
+        try:
+            embedding = "[" + ",".join(f"{x:.7g}" for x in embedder.embed_text(query)) + "]"
+        except Exception:  # (vector search turned off, or the model won't load): keyword search still works
+            logger.exception("Embedding the query failed: keyword search only")
+    if not (terms or embedding):
+        return []
     sql = _SEARCH.format(vec=_VEC if embedding else "", vec_union="UNION ALL SELECT * FROM vec" if embedding else "")
     rows = db.session.execute(
         text(sql),
