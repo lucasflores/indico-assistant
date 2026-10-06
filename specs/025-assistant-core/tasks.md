@@ -539,40 +539,42 @@ No regressions (SC-004). Timing and cost targets met (SC-006). No replaced compo
 
 ### Tests first
 
-- [ ] T057 [P] [US3] `tests/unit/turn/test_memory_kinds.py`.
+- [x] T057 [P] [US3] `tests/unit/turn/test_memory_kinds.py`.
   - `query_data`'s `data_sources` become `event` items.
   - Plans become `plan` items.
   - GitHub items are kept only in private turns.
   - Each kind resolves across turns.
-- [ ] T058 [P] [US3] `tests/unit/turn/test_github_tools.py`.
+- [x] T058 [P] [US3] `tests/unit/turn/test_github_tools.py`.
   - `github_*` tools are called from the turn, and their results are marked untrusted.
   - The turn is private.
   - An unconnected user doesn't get the tools.
-- [ ] T059 [P] [US3] `tests/unit/turn/test_propose_change.py`.
+- [x] T059 [P] [US3] `tests/unit/turn/test_propose_change.py`.
   - A lookup, then `propose_change` with the ids found, creates a plan card.
   - The loop never applies a change.
   - A document carrying "delete this event" produces no plan.
-- [ ] T060 [P] [US3] `tests/integration/test_cross_turn.py`: a lookup, a proposal, then a typed "yes" applies it
+- [x] T060 [P] [US3] `tests/integration/test_chat_turn.py` (beside story 2's whole-chat test, sharing its set-up):
+  a lookup, a proposal, then a typed "yes" applies it
   (spec 019 semantics unchanged).
 
 ### Code
 
-- [ ] T061 [US3] Memory of every kind: `indico_assistant/services/turn/abilities.py` and `memory.py`. Each tool
+- [x] T061 [US3] Memory of every kind: `indico_assistant/services/turn/abilities.py` and `memory.py`. Each tool
   reports what it touched.
-- [ ] T062 [US3] GitHub inside the turn: `indico_assistant/services/turn/abilities.py`.
+- [x] T062 [US3] GitHub inside the turn: `indico_assistant/services/turn/abilities.py`.
   - Register `connectors/github.py`'s tools directly, and remove `ask_github`.
   - Delete `indico_assistant/services/connectors/loop.py`, moving its rules text and URL cleaning into
     `turn/tools.py` where they're still needed.
   - Tools get the turn's time left: today the deadline is checked only before each step, so a tool started late
     (the connector loop runs to 100 s from the turn's start, NL2SQL, the planner) can reach the worker's 120 s
     limit before the answer (review of #22).
-- [ ] T063 [US3] `propose_change` passes the ids found earlier in the turn to the planner's request:
-  `indico_assistant/services/turn/abilities.py`.
-- [ ] T064 [US3] The state notes go: `PLAN_WAITING`, `OFFERED` and their arguments in
+- [x] T063 [US3] `propose_change` passes the ids found earlier in the turn to the planner's request:
+  `indico_assistant/services/turn/abilities.py`. Done as the meetings' titles and dates: the planner finds meetings
+  by name (story 2's quick run 2: written ids made it fail, hence `by_name`).
+- [x] T064 [US3] The state notes go: `PLAN_WAITING`, `OFFERED` and their arguments in
   `indico_assistant/services/knowledge/gate.py`, and the calls in `services/chat/service.py`.
   - The conversation text and memory carry plans and offers instead.
   - The typed yes/no shortcuts stay.
-- [ ] T065 [US3] The gates pass (`ruff check`, `black --check`, `mypy`, `pytest tests --cov` ≥ 80% on services),
+- [x] T065 [US3] The gates pass (`ruff check`, `black --check`, `mypy`, `pytest tests --cov` ≥ 80% on services),
   and `grep -rn "PLAN_WAITING\|OFFERED\|connectors.loop"
   indico_assistant` finds nothing (SC-009). Commit.
 - [ ] T066 [US3] **Live window, paid on Lucas's go:** quick runs, then a full run. Record SC-003, SC-004, SC-006 and

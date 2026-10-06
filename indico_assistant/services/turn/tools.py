@@ -43,6 +43,9 @@ class Ctx:
     waiting_plan: Any = None
     offer: str | None = None
     started: float | None = None
+    deadline: float | None = None  # (time.monotonic) tools' model and GitHub calls end by it: the answer keeps its time
+    github: Any = None  # the user's GitHub client, opened by the first GitHub tool and closed with the turn
+    github_note: str | None = None  # why GitHub's tools aren't offered, for the prompt (not connected, must renew)
     # gathered by the tools
     plan: tuple[str, dict[str, Any], dict[str, Any] | None] | None = None  # the planner's (reply, metadata, plan)
     knowledge_offer: str | None = None  # a change the guide's answer offered to make

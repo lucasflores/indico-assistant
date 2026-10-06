@@ -39,8 +39,6 @@ def test_the_state_is_the_web_gate_format():
     assert state.endswith("LATEST MESSAGE: yes please")
     assert "x" * 401 not in state and "event 657" not in state  # replies cut to 400; only user/assistant turns
     assert gate.state_of([{"role": "user", "content": "What can you do?"}]) == "What can you do?"
-    assert gate.state_of(TALK, plan_waiting=True).endswith(
-        "(A plan made in this chat is waiting for the user to confirm it.)\nLATEST MESSAGE: yes please")
 
 
 def test_one_call_asks_both_questions():
@@ -99,14 +97,15 @@ def test_a_malformed_intent_is_dropped_too():
     assert gate.decide(TALK, SETTINGS, transport=_transport(body=body)).intent is None
 
 
-def test_an_offer_is_noted_for_jev():
-    """The offer usually ends a reply, past the 400 characters Jev sees of it."""
-    state = gate.state_of(TALK, offer="add a Teams meeting to Sync")
-    assert state.endswith("(The assistant's last answer offered to make this change: add a Teams meeting to Sync)\n"
-                          "LATEST MESSAGE: yes please")
-    sent = []
-    gate.decide(TALK, SETTINGS, offer="add a Teams meeting to Sync", transport=_transport(record=sent))
-    assert "add a Teams meeting to Sync" in sent[0][0]["state"]
+def test_an_offer_at_the_end_of_a_long_reply_reaches_jev():
+    """Story 3: the conversation carries offers, not a note. An offer usually ends a reply, so Jev sees a long
+    reply's start and its end."""
+    reply = "Here is what I found. " + "x" * 600 + " Shall I add a Teams meeting to Sync?"
+    talk = [{"role": "user", "content": "is Sync online?"}, {"role": "assistant", "content": reply},
+            {"role": "user", "content": "yes please"}]
+    state = gate.state_of(talk)
+    assert "Here is what I found." in state and "Shall I add a Teams meeting to Sync?" in state
+    assert "x" * 400 not in state
 
 
 def test_an_unknown_intent_is_dropped_not_fatal():

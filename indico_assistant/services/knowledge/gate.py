@@ -29,8 +29,6 @@ JEV_URL = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.13"
 CONTEXT_EXCHANGES = 2
 ASSISTANT_CHARS = 400
-PLAN_WAITING = "(A plan made in this chat is waiting for the user to confirm it.)"
-OFFERED = "(The assistant's last answer offered to make this change: {offer})"
 
 ROUTES = {
     "knowledge": "How to do something in Indico, where a page or setting is, or what the assistant itself can"
@@ -124,9 +122,17 @@ def _skipped(reason, ms=0, cost=None):
     return Decision(None, None, True, reason, ms=ms, cost=cost)
 
 
-def state_of(messages, plan_waiting=False, offer=None):
-    """What Jev reads: user and assistant turns only, the last two exchanges and the latest message, with a note of
-    a waiting plan or an offer (a reply is cut to 400 characters, and an offer usually comes at its end)."""
+def _cut(reply):
+    """A reply's start and end in 400 characters: an offer or a plan's question usually ends it (spec 025 story 3:
+    the conversation carries them, not a note)."""
+    if len(reply) <= ASSISTANT_CHARS:
+        return reply
+    half = ASSISTANT_CHARS // 2
+    return f"{reply[:half]} … {reply[-half:]}"
+
+
+def state_of(messages):
+    """What Jev reads: user and assistant turns only, the last two exchanges and the latest message."""
     turns = [(m.get("role"), m.get("content") or "") for m in messages if m.get("role") in ("user", "assistant")]
     last_user = max((i for i, (role, _) in enumerate(turns) if role == "user"), default=None)
     if last_user is None:
@@ -136,13 +142,12 @@ def state_of(messages, plan_waiting=False, offer=None):
         if role == "user":
             exchanges.append([text.strip(), ""])
         elif exchanges and not exchanges[-1][1]:
-            exchanges[-1][1] = text[:ASSISTANT_CHARS]
+            exchanges[-1][1] = _cut(text)
     latest = turns[last_user][1].strip()
-    note = "".join(f"{n}\n" for n in (plan_waiting and PLAN_WAITING, offer and OFFERED.format(offer=offer)) if n)
-    if not exchanges and not note:
+    if not exchanges:
         return latest
     convo = "".join(f"USER: {u}\nASSISTANT: {a}\n\n" for u, a in exchanges[-CONTEXT_EXCHANGES:])
-    return f"Earlier conversation:\n{convo}{note}LATEST MESSAGE: {latest}"
+    return f"Earlier conversation:\n{convo}LATEST MESSAGE: {latest}"
 
 
 _client = _pool = None
@@ -170,7 +175,7 @@ def _dict(value):
     return value if isinstance(value, dict) else {}
 
 
-def decide(messages, settings, *, plan_waiting=False, offer=None, connector=False, transport=_http):
+def decide(messages, settings, *, connector=False, transport=_http):
     """Jev's route (and intent) for the latest message. Never raises: anything wrong is a skipped decision.
     ``connector``: GitHub is on, so ``connector`` is one of the routes (spec 023). Each call is one analytics step
     (spec 024), failed when the decision was skipped."""
@@ -179,7 +184,7 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, connector=Fals
     if not settings.get("jev_api_key"):
         return _skipped("no key")  # (no call)
     with recorder.step("jev", "route", JEV_MODEL) as step:
-        decision = _decide(messages, settings, plan_waiting, offer, connector, transport, step)
+        decision = _decide(messages, settings, connector, transport, step)
         step.requested_model = step.served_model = decision.name
         step.cost_usd = recorder.cost(decision.cost)  # (any shape can come back from an alpha endpoint)
         if decision.skipped:
@@ -187,7 +192,7 @@ def decide(messages, settings, *, plan_waiting=False, offer=None, connector=Fals
     return decision
 
 
-def _decide(messages, settings, plan_waiting, offer, connector, transport, step):
+def _decide(messages, settings, connector, transport, step):
     import httpx
     from celery.exceptions import SoftTimeLimitExceeded
 
@@ -197,7 +202,7 @@ def _decide(messages, settings, plan_waiting, offer, connector, transport, step)
     timeout = float(settings.get("jev_timeout_seconds") or 1.5)
     try:
         asked = questions(connector)
-        payload = {"model": JEV_MODEL, "state": state_of(messages, plan_waiting, offer), "questions": asked}
+        payload = {"model": JEV_MODEL, "state": state_of(messages), "questions": asked}
     except ValueError:
         return _skipped("error")
     recorder.text(step, "prompt", payload)

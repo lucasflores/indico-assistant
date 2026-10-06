@@ -1,8 +1,9 @@
-"""Today's abilities as the turn's tools, unchanged inside (spec 025 story 2, FR-016, contracts/agent-tools.md).
+"""Today's abilities as the turn's tools, unchanged inside (spec 025 stories 2 and 3, FR-016, contracts/agent-tools.md).
 
 - ``query_data``: the NL2SQL pipeline, offered only while NL2SQL is on for the event, with the event's allowed tables.
 - ``ask_guide``: the knowledge answer (the user guide, the pages and what the assistant can do).
-- ``ask_github``: the connector's whole answer, offered while GitHub is on; it marks the turn private.
+- ``github_*``: the connector's own read tools, offered while GitHub is on and the user has connected it; a turn that
+  calls one is private.
 - ``propose_change``: the chat-action planner. It makes a plan; the answer shows the plan card, and confirming stays
   outside the turn (a button or a typed "yes", spec 019), so the agent never applies a change.
 """
@@ -11,11 +12,12 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import cache, partial
 from types import SimpleNamespace
 from typing import Any, Literal
 
 from indico.core.db import db
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.knowledge.gate import INTENTS
@@ -72,7 +74,7 @@ def _query_data(ctx: Ctx, args: QueryDataArgs) -> str:
     for flag, use in (
         ("write_request", "use propose_change"),
         ("knowledge_request", "use ask_guide"),
-        ("connector_request", "use ask_github"),
+        ("connector_request", "use the github tools"),
         ("chat_request", "answer it from the conversation"),
     ):
         if getattr(result, flag, False):
@@ -128,40 +130,102 @@ def _ask_guide(ctx: Ctx, args: AskGuideArgs) -> str:
 
 
 # --- GitHub -------------------------------------------------------------------------------------------------------
+# The connector's own read tools (``connectors/github.py``), called by the turn as ``github_<name>``, over one client
+# per turn made with the user's token. Offered only to a connected user; a turn that reads GitHub is private.
+
+CONNECT = (
+    "GitHub: the user hasn't connected it. To read their GitHub, they connect it on the Connected accounts page of "
+    "their profile: {url}"
+)
+RENEW = (
+    "GitHub: it no longer accepts the user's connection. They connect it again on the Connected accounts page of "
+    "their profile: {url}"
+)
+UNAVAILABLE = "GitHub couldn't be reached just now: say so, and that the user can try again in a moment."
 
 
-class AskGithubArgs(BaseModel):
-    """The user's own GitHub, read with their connection: their pull requests, the reviews waiting for them, their
-    issues, searches, an issue or pull request in full, a repository's activity. Ask one question in plain words."""
+def _profile_url(ctx: Ctx) -> str:
+    from urllib.parse import urlsplit
 
-    tool: Literal["ask_github"]
-    question: str
-
-
-def _ask_github(ctx: Ctx, args: AskGithubArgs) -> str:
     from indico.core.plugins import url_for_plugin
 
-    from indico_assistant.services.analytics import recorder
-    from indico_assistant.services.chat.context_builder import get_context_builder
-    from indico_assistant.services.connectors.loop import answer
+    url = str(url_for_plugin("assistant.user_connections", _external=True))
+    ctx.link_paths.add(urlsplit(url).path)  # (this Indico's page: the answer may link it)
+    return url
 
-    recorder.private()  # before it runs: a loop that fails half-way has read GitHub too (spec 024 FR-009)
-    history = get_context_builder().connector_history(ctx.session_id, up_to=ctx.message_id)
-    history = history[:-1] if history and history[-1].get("role") == "user" else history
-    result = answer(
-        ctx.user.id,
-        args.question,
-        history,
-        llm=ctx.llm,
-        settings=ctx.settings,
-        base_url=ctx.base_url,
-        profile_url=url_for_plugin("assistant.user_connections", _external=True),
-        started=ctx.started,
+
+def github_note(ctx: Ctx) -> str | None:
+    """Why this user gets no GitHub tools (None: they get them). Read from the stored connection, without a call."""
+    from indico_assistant.services.connectors import store
+
+    row = store.connection(ctx.user.id)
+    if row is None:
+        return CONNECT.format(url=_profile_url(ctx))
+    if row.needs_renewal:
+        return RENEW.format(url=_profile_url(ctx))
+    return None
+
+
+def _client(ctx: Ctx) -> Any:
+    """The turn's GitHub client (made on first use, bounded by the turn's deadline), or why there is none."""
+    from indico_assistant.services.connectors import github, store
+
+    if ctx.github is None:
+        access = store.token(ctx.user.id, github.app_for(ctx.settings))
+        if access.state != store.OK:
+            reply = {store.RENEW: RENEW, store.UNAVAILABLE: UNAVAILABLE}.get(access.state, CONNECT)
+            return reply.format(url=_profile_url(ctx))
+        store.used(ctx.user.id)  # (commits: no transaction stays open through the calls)
+        ctx.github = github.client_for(access.token, ctx.settings)
+        ctx.github.deadline = ctx.deadline  # (every GitHub call inside the turn's time, however many one tool makes)
+    return ctx.github
+
+
+def _title(url: str) -> str:
+    """owner/repo#12 for an item's address, owner/repo for a repository's."""
+    parts = url.removeprefix("https://github.com/").split("/")
+    return f"{parts[0]}/{parts[1]}#{parts[3]}" if len(parts) >= 4 and parts[3].isdigit() else "/".join(parts[:2])
+
+
+def _github(tool: Tool, ctx: Ctx, args: Any) -> str:
+    from indico_assistant.services.analytics import recorder
+    from indico_assistant.services.connectors import github, store
+
+    recorder.private()  # before it runs: a call that fails half-way may have read GitHub too (spec 024 FR-009)
+    client = _client(ctx)
+    if isinstance(client, str):
+        return client
+    ctx.private = True  # (GitHub's data is in this turn, and in the prompts of the chat's later turns)
+    try:
+        out = tool.run(client, args)
+    except github.GitHubError as error:
+        if error.status == 401:  # (the grant was revoked on GitHub: the stored token looked fine until now)
+            store.renew(ctx.user.id)
+            return RENEW.format(url=_profile_url(ctx))
+        return f"GitHub error {error.status}: {error.message}"
+    found: Any = out if isinstance(out, tuple) else (out, [])
+    text, urls = found[0], [str(u) for u in found[1]]
+    ctx.github_urls.update(urls)  # (never scraped from the text: a body or a comment can hold any address)
+    for url in urls:
+        ctx.memory.add("github", {"url": url}, _title(url))
+    return str(text)
+
+
+def _github_tool(tool: Tool) -> Tool:
+    args = create_model(  # (the same arguments, named for the turn: "search" alone would be ambiguous)
+        f"Github{tool.args.__name__}",
+        __base__=tool.args,
+        __doc__=tool.args.__doc__,
+        tool=(Literal[f"github_{tool.name}"], ...),  # type: ignore[valid-type]
     )
-    if result.access is None:  # (the loop ran: GitHub's data is in this answer, and later prompts)
-        ctx.private = True
-    ctx.github_urls.update(result.urls)
-    return str(result.text)
+    return Tool(f"github_{tool.name}", args, partial(_github, tool))
+
+
+@cache
+def _github_tools() -> tuple[Tool, ...]:
+    from indico_assistant.services.connectors.github import TOOLS
+
+    return tuple(_github_tool(t) for t in TOOLS)
 
 
 # --- changes ------------------------------------------------------------------------------------------------------
@@ -237,8 +301,21 @@ def by_name(request: str, page_event_id: int | None) -> str:
     return _EVENT_ID.sub(title, request).strip()
 
 
+def found_meetings(ctx: Ctx) -> str:
+    """The meetings this turn has looked up, by title and date, for the planner: it finds meetings by name, and
+    "move the talk the notes mention" needs the meeting the notes came from (story 3, T063)."""
+    from indico.modules.events import Event
+
+    ids = [e["ref"]["event_id"] for e in ctx.memory.touched if e["kind"] == "event"]
+    events = Event.query.filter(Event.id.in_(ids), ~Event.is_deleted).all() if ids else []
+    found = [
+        f'"{e.title}" ({e.start_dt.astimezone(e.tzinfo):%A %d %B %Y})' for e in events if e.id != ctx.page_event_id
+    ]
+    return f"\n(Meetings found while answering: {'; '.join(found)})" if found else ""
+
+
 def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
-    request = by_name(args.request, ctx.page_event_id)
+    request = by_name(args.request, ctx.page_event_id) + found_meetings(ctx)
     planned = plan(ctx.user, ctx.session_id, request, ctx.history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
     if planned is None or (planned[1].get("cannot_plan") and ctx.waiting_plan is None):
         return planned[0] if planned else "That is not a change the assistant can plan."
@@ -250,20 +327,19 @@ def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
 
 QUERY_DATA = Tool("query_data", QueryDataArgs, _query_data)
 ASK_GUIDE = Tool("ask_guide", AskGuideArgs, _ask_guide)
-ASK_GITHUB = Tool("ask_github", AskGithubArgs, _ask_github)
 PROPOSE_CHANGE = Tool("propose_change", ProposeChangeArgs, _propose_change)
 
 
 def registry(ctx: Ctx, *, nl2sql: bool, github: bool) -> tuple[Tool, ...]:
     """The tools this turn offers: the document tools, the data tool while NL2SQL is on for the event, the guide,
-    GitHub while an admin has it on, and changes."""
+    GitHub's while an admin has it on and the user has connected it, and changes."""
     from indico_assistant.services.turn.tools import DOCUMENT_TOOLS
 
     return (
         *DOCUMENT_TOOLS,
         *((QUERY_DATA,) if nl2sql else ()),
         ASK_GUIDE,
-        *((ASK_GITHUB,) if github else ()),
+        *(_github_tools() if github else ()),
         PROPOSE_CHANGE,
     )
 

@@ -1,5 +1,8 @@
 """The conversation's memory: what earlier answers touched, by id (spec 025, data-model "Conversation memory").
 
+Kinds: ``document`` (attachment_id), ``event`` (event_id, from the data tool's sources), ``plan`` (plan_id) and
+``github`` (an item's or a repository's url; only a turn that read GitHub has them, and it is private).
+
 Each answer stores the things it presented, in order, in its message's ``metadata_json["touched"]``:
 ``{kind, ref, title, position}``. The next turn reads them, so "the second one" or "that thesis" resolves to an id.
 Nothing about access is stored: every use checks again, as the user (FR-021).
@@ -66,9 +69,19 @@ def load(session_id: UUID, up_to: UUID | None) -> list[dict[str, Any]]:
 
 
 def usable(user: Any, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The entries the user may still use: a document whose attachment they can no longer open is dropped."""
+    """The entries the user may still use: a document or an event they can no longer open is dropped (FR-021)."""
+    from indico.modules.events import Event
+
     from indico_assistant.services.document.search import accessible
 
     documents = [e["ref"]["attachment_id"] for e in entries if e["kind"] == "document"]
     allowed = set(accessible(user, documents)) if documents else set()
-    return [e for e in entries if e["kind"] != "document" or e["ref"]["attachment_id"] in allowed]
+    ids = [e["ref"]["event_id"] for e in entries if e["kind"] == "event"]
+    events = Event.query.filter(Event.id.in_(ids), ~Event.is_deleted).all() if ids else []
+    open_events = {e.id for e in events if e.can_access(user)}
+    return [
+        e
+        for e in entries
+        if (e["kind"] != "document" or e["ref"]["attachment_id"] in allowed)
+        and (e["kind"] != "event" or e["ref"]["event_id"] in open_events)
+    ]
