@@ -83,6 +83,7 @@
                             <dl class="assistant-report-evidence">
                                 {% if message.problem %}<dt>Problem</dt><dd>{{ message.problem }}</dd>{% endif %}
                                 {% if evidence.intent %}<dt>Intent</dt><dd>{{ evidence.intent }} ({{ evidence.intent_confidence }})</dd>{% endif %}
+                                {% for lookup in evidence.queries or [] %}<dt>Lookup {{ loop.index }}</dt><dd>{{ lookup.intent }}, {{ lookup.row_count }} rows{% if lookup.corrections %}, {{ lookup.corrections }} corrections{% endif %}</dd>{% endfor %}
                                 {% if message.sql_generated %}<dt>Query</dt><dd><pre>{{ message.sql_generated }}</pre></dd>{% endif %}
                                 {% if message.confidence is not none %}<dt>Answer confidence</dt><dd>{{ message.confidence }}</dd>{% endif %}
                                 {% if evidence.row_count is defined %}<dt>Rows</dt><dd>{{ evidence.row_count }}</dd>{% endif %}

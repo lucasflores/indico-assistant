@@ -71,6 +71,10 @@ def extract(path: str | Path, filename: str | None = None) -> Extracted:
     for h in result.headings:
         h.title = clean(h.title).strip()
     result.headings = [h for h in result.headings if h.title and h.page <= len(result.pages)]
+    for h in result.headings if ext == ".pdf" else ():  # a PDF outline knows the page only: find the title on it
+        page = result.pages[h.page - 1].lower()
+        at = page.find(f"{h.number} {h.title}".lower()) if h.number else -1
+        h.offset = at if at >= 0 else max(page.find(h.title.lower()), 0)
     return result
 
 

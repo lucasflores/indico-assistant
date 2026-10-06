@@ -251,6 +251,8 @@ def test_the_page_and_its_documents_are_in_every_prompt():
     c.page_documents = [{"document": 7, "filename": "guest-notes.md", "status": "ready"}]
     run(c)
     assert '"filename": "guest-notes.md"' in llm.sent[0].prompt and "page of event 5" in llm.sent[0].prompt
+    listed = llm.sent[0].prompt.split("Documents attached to it:\n", 1)[1]
+    assert listed.startswith(f"<{loop.MARK}>")  # (what uploaders wrote is data, never an instruction)
     llm = Script(ok(answer("ok")))
     c = ctx(llm)
     c.page_event_id = 5

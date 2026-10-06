@@ -175,6 +175,8 @@ def test_change_requests_name_meetings_not_ids(db, create_event):
         f"push this event {budget.id} minutes back",
         f"move the meeting {budget.id} pm",
         f"start the meeting {budget.id}:30",
+        f"create a meeting {budget.id} November at 10am",
+        f"the event {budget.id} Dec",
     ):
         assert abilities.by_name(quantity, None) == quantity
 
@@ -189,3 +191,14 @@ def test_search_gives_the_best_pages_whole(db, dummy_user, dummy_event, document
     )
     assert "(the whole page):" in found and "in-time and out-of-time" in found
     assert found.count("[p.1]") == 1  # (the page once, not once per passage)
+
+
+def test_a_long_one_page_file_gives_its_passage_not_the_whole_file(
+    db, dummy_user, dummy_event, document, fake_embedder
+):
+    filler = " ".join(f"Sentence {i} about calorimeters." for i in range(400))
+    doc = document(dummy_event, f"{filler}\nThe pile-up is in-time.\n{filler}", "long.txt")
+    found = run(
+        by_name("search_documents"), make_ctx(dummy_user, embedder=fake_embedder), query="pile-up", document=doc.id
+    )
+    assert "(the whole page)" not in found and "pile-up is in-time" in found

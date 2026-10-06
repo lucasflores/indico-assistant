@@ -67,6 +67,14 @@ def test_queued_then_read_to_ready(db, read, attach, fake_embedder):
     assert fake_embedder.embed_batch.call_count == 1
 
 
+def test_an_embedding_model_that_fails_leaves_keyword_search(db, attach):
+    broken = MagicMock()
+    broken.embed_batch.side_effect = OSError("the model could not be downloaded")
+    attachment = attach()
+    assert indexing.index_attachment(attachment, embedder=broken)["status"] == "ready"
+    assert chunks(db, attachment)
+
+
 def test_reading_is_visible_while_it_happens(db, read, attach, monkeypatch):
     attachment = attach()
     seen = []

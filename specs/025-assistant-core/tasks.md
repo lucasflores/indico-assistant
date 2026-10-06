@@ -563,6 +563,9 @@ No regressions (SC-004). Timing and cost targets met (SC-006). No replaced compo
   - Register `connectors/github.py`'s tools directly, and remove `ask_github`.
   - Delete `indico_assistant/services/connectors/loop.py`, moving its rules text and URL cleaning into
     `turn/tools.py` where they're still needed.
+  - Tools get the turn's time left: today the deadline is checked only before each step, so a tool started late
+    (the connector loop runs to 100 s from the turn's start, NL2SQL, the planner) can reach the worker's 120 s
+    limit before the answer (review of #22).
 - [ ] T063 [US3] `propose_change` passes the ids found earlier in the turn to the planner's request:
   `indico_assistant/services/turn/abilities.py`.
 - [ ] T064 [US3] The state notes go: `PLAN_WAITING`, `OFFERED` and their arguments in

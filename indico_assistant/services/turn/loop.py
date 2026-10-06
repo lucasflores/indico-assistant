@@ -30,6 +30,7 @@ from indico_assistant.services.turn.tools import Ctx
 logger = logging.getLogger(__name__)
 
 MAX_RESULT_CHARS = 8_000
+SEARCH_RESULT_CHARS = 16_000  # two whole pages (FULL_PAGE_CHARS each) and the other six passages
 STEP_SECONDS = 30.0
 MIN_STEP_SECONDS = 5.0  # with less left, the turn answers instead of looking up more
 FINAL_SECONDS = 10.0  # the answer always gets at least this
@@ -97,10 +98,10 @@ def step_model(tools: tuple[Tool, ...]) -> type[BaseModel]:
     )
 
 
-def mark(text: str) -> str:
+def mark(text: str, limit: int = MAX_RESULT_CHARS) -> str:
     """A tool's text inside the mark, cut to size, unable to close the mark early."""
-    body = _TAG.sub("‹\\1", text[:MAX_RESULT_CHARS])
-    cut = "\n(cut short)" if len(text) > MAX_RESULT_CHARS else ""
+    body = _TAG.sub("‹\\1", text[:limit])
+    cut = "\n(cut short)" if len(text) > limit else ""
     return f"<{MARK}>\n{body}{cut}\n</{MARK}>"
 
 
@@ -111,8 +112,8 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         else "The user is not on an event page."
     )
     if ctx.page_documents:  # FR-011: known without a lookup
-        page += "\nDocuments attached to it:\n" + "\n".join(
-            json.dumps(d, ensure_ascii=False) for d in ctx.page_documents
+        page += "\nDocuments attached to it:\n" + mark(  # (names and openings uploaders wrote: data, FR-024)
+            "\n".join(json.dumps(d, ensure_ascii=False) for d in ctx.page_documents)
         )
     elif ctx.page_event_id is not None:
         page += "\nNo documents attached to it that the user can open."
@@ -121,7 +122,7 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         page,
         "",
         "## Remembered from earlier answers",
-        ctx.memory.render(),
+        mark(ctx.memory.render()),  # (titles from documents and events: data too)
         "",
         "## Tools",
         *(f"- {t.name}: {t.description}" for t in tools),
@@ -132,7 +133,10 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         lines.append("(nothing yet)")
     for n, (call, text) in enumerate(done, 1):
         arguments = _TAG.sub("‹\\1", call.model_dump_json(exclude={"tool"}))  # (the model wrote them)
-        lines += [f"{n}. {call.tool} {arguments}", mark(text)]
+        lines += [
+            f"{n}. {call.tool} {arguments}",
+            mark(text, SEARCH_RESULT_CHARS if call.tool == "search_documents" else MAX_RESULT_CHARS),
+        ]
     if final:
         lines += ["", f"No more lookups ({final}): answer now from what was found."]
     return "\n".join([*lines, "", "## The latest message", message])

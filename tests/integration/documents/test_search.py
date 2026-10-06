@@ -121,7 +121,10 @@ def test_reading_pages_sections_and_the_start(db, dummy_user, dummy_event, docum
     assert start.startswith("notes.md (1 pages), from the start:") and "[p.1]" in start and "Flights only." in start
     assert "[p.1]" in reader.read(dummy_user, doc.id, pages=[1, 9])
     assert reader.read(dummy_user, doc.id, pages=[9]) == "notes.md has 1 pages."
-    assert reader.read(dummy_user, doc.id, section="2").startswith("notes.md, 2 Travel:")
+    travel = reader.read(dummy_user, doc.id, section="2")
+    assert travel.startswith("notes.md, 2 Travel:") and "Flights only." in travel and "Intro." not in travel
+    budget = reader.read(dummy_user, doc.id, section="Budget")  # (a one-page file: from its heading to the next)
+    assert "Approved." in budget and "Intro." not in budget and "Flights" not in budget
     assert "Its top-level sections: Minutes" in reader.read(dummy_user, doc.id, section="Appendix")
     listed = reader.describe(reader.documents(dummy_user, event_id=dummy_event.id)[0])
     assert listed == {

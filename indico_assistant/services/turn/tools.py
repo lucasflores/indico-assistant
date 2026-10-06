@@ -148,6 +148,7 @@ def _read_document(ctx: Ctx, args: ReadDocumentArgs) -> str:
 
 
 FULL_PAGES = 2  # the best pages come whole: a definition in a footnote or a figure beside the passage is on them
+FULL_PAGE_CHARS = 4_000  # a longer "page" (a text file, a Word file without page breaks) gives its passage
 
 
 def _search_documents(ctx: Ctx, args: SearchDocumentsArgs) -> str:
@@ -174,7 +175,7 @@ def _search_documents(ctx: Ctx, args: SearchDocumentsArgs) -> str:
         if (h.attachment_id, h.page) in whole:
             shown.add((h.attachment_id, h.page))
             page = pages_text(h.attachment_id, [h.page]).get(h.page, h.text)
-            out.append(f"{where} (the whole page):\n{page}")
+            out.append(f"{where} (the whole page):\n{page}" if len(page) <= FULL_PAGE_CHARS else f"{where}:\n{h.text}")
         else:
             out.append(f"{where}:\n{h.text}")
     return "\n\n".join(out)
