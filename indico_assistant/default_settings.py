@@ -62,7 +62,7 @@ DEFAULT_SETTINGS = {
     "nl2sql_allowed_tables": None,
     "max_retries": 2,
     # Documents (spec 025): attachments are read into documents the assistant can search and read
-    "vector_search_enabled": True,
+    "vector_search_enabled": True,  # (an old name) read attached files into documents at all; off: none are read
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "embedding_dimensions": 384,
     "embedding_batch_size": 32,

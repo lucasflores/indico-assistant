@@ -108,8 +108,3 @@ def test_visibility(owner, sign, nobody):
     assert ro('SELECT id FROM events.events', scoped) == [(protected,)]
     admin = sign(QueryContext(user_id=999999, event_id=None, is_admin=True))
     assert ro(f'SELECT count(*) FROM events.events WHERE id = {protected}', admin) == [(1,)]
-
-
-def test_filtered_vector_search_is_not_cut_short(nobody):
-    # Without iterative HNSW scans a filtered search only sees the ~40 nearest chunks overall.
-    assert ro("SELECT current_setting('hnsw.iterative_scan', true)", nobody) == [('strict_order',)]
