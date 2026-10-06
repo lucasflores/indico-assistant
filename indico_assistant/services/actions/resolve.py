@@ -589,14 +589,27 @@ def meeting_in_view(chat_session_id, user, page_event_id=PAGE_FROM_CHAT):
     return page if arrived is not None and arrived > made_at else made
 
 
+#: ponytail: the meetings of managed categories looked at per lookup; a category manager of a huge tree gets the
+#: soonest ones only (a date filter on the name would lift it)
+CATEGORY_MEETINGS = 500
+
+
 @memoize_request
 def managed_meetings(user):
-    """Meetings the user manages, from a month ago onwards, soonest first."""
+    """Meetings the user manages, from a month ago onwards, soonest first: the ones linked to them, and those of
+    the categories they manage, through a group or a role too (story 3's full run: a manager through the category's
+    group got "I could not find a meeting called Team Sync that you manage")."""
+    from indico.modules.events import Event
     from indico.modules.users.util import get_linked_events
 
-    events = [e for e in get_linked_events(user, dt=now_utc() - timedelta(days=30))
-              if not e.is_deleted and e.can_manage(user)]
-    return sorted(events, key=lambda e: e.start_dt)
+    since = now_utc() - timedelta(days=30)
+    events = set(get_linked_events(user, dt=since))
+    if not user.is_admin:  # (an admin manages every category: only their linked meetings, as before)
+        categories = _candidates(user, 'manage', []).with_entities(Category.id)
+        events.update(Event.query.filter(Event.category_id.in_(categories.scalar_subquery()), ~Event.is_deleted,
+                                         Event.start_dt >= since)
+                      .order_by(Event.start_dt).limit(CATEGORY_MEETINGS))
+    return sorted((e for e in events if not e.is_deleted and e.can_manage(user)), key=lambda e: e.start_dt)
 
 
 def _event_label(event, tz):
