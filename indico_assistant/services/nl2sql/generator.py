@@ -34,7 +34,7 @@ Use the chat history to understand context or references to previous queries. Th
 
 ## STRICT RULES
 
-1. Use only valid SQL syntax compatible with PostgreSQL and pgvector
+1. Use only valid SQL syntax compatible with PostgreSQL
 2. ONLY generate SELECT statements - never INSERT, UPDATE, DELETE, or DDL
 3. Carefully consider the table and column descriptions to form the query
 4. Do not query for columns that do not exist
