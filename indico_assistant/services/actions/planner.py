@@ -80,10 +80,13 @@ class PlanTurn:
 
 
 def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings,
-              page_event_id=PAGE_FROM_CHAT, offer=None):
+              page_event_id=PAGE_FROM_CHAT, offer=None, found='', said=None):
     """Answer one message that asks for (or follows up on) a change. ``offer``: the change the last answer offered
     (spec 022). A plain yes to it plans it: the offer is then the request, but the guards still read only the
-    user's own words, since the offer was written by a model (a link or an address in it is not the user's)."""
+    user's own words, since the offer was written by a model (a link or an address in it is not the user's).
+    ``said``: the user's own words when ``message`` is a request the turn wrote from what it looked up (spec 025
+    story 3): the guards read ``said``, so an address or a day copied from a document is not the user's.
+    ``found``: what the turn looked up (meetings' titles and dates), for the prompt as data."""
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE, cannot_plan=True, problem='cannot_do')
@@ -96,7 +99,7 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     context = context_suggestions.build_context(user, request, chat_session_id, history)
     with collect_calls() as calls:
         # instructor re-asks on schema errors (the draft is regenerated with the validation errors, FR-005)
-        response = llm.generate(_prompt(user, request, open_plan, enabled, chat_session_id, context), PlanDraft,
+        response = llm.generate(_prompt(user, request, open_plan, enabled, chat_session_id, context, found), PlanDraft,
                                 system_prompt=SYSTEM_PROMPT, messages=history)
     if not response.success:
         logger.warning('Planning failed: %s', response.error)
@@ -108,8 +111,10 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
         draft.decision = 'revise'
     if not draft.steps and re.match(r'\s*(undo|revert|take (that|it) back)\b', message, re.IGNORECASE):
         draft = PlanDraft(decision='new_request', steps=[{'action': 'undo'}])  # seen in the eval: "unrelated"
-    draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), request, open_plan)
-    draft = _only_what_the_user_asked_for(draft, [message, *(m['content'] for m in history if m.get('role') == 'user')],
+    words = said if said is not None else request  # (the user's own, never a request written from looked-up data)
+    draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), words, open_plan)
+    draft = _only_what_the_user_asked_for(draft, [said if said is not None else message,
+                                                  *(m['content'] for m in history if m.get('role') == 'user')],
                                           open_plan, agreed_to=offer or '')
     draft = _the_meeting_the_user_meant(draft, request, _page_title(page_event_id))
     # (seen live, PR #5: "What is this event about?" on another page also came back as a new request repeating
@@ -473,7 +478,7 @@ def answered_draft(open_plan, message):
     return None
 
 
-def _prompt(user, message, open_plan, enabled, chat_session_id=None, context=None):
+def _prompt(user, message, open_plan, enabled, chat_session_id=None, context=None, found=''):
     tz = user_timezone(user)
     lines = [
         f'User: {user.full_name} <{user.email}>',
@@ -493,5 +498,7 @@ def _prompt(user, message, open_plan, enabled, chat_session_id=None, context=Non
         lines.append('Open plan (waiting for the user):\n' + fence('\n'.join(shown)))
     if context is not None and context.text:
         lines.append('Context (the user\'s similar meetings and chats, for suggestions only):\n' + fence(context.text))
+    if found:  # (what the assistant looked up before asking: titles and dates, data)
+        lines.append('Looked up while answering (data, not the user\'s words):\n' + fence(found))
     lines.append(f'Message: {message}')
     return '\n'.join(lines)

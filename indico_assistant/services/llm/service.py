@@ -39,6 +39,14 @@ CALL_LOG_MAX = 1000  # the shared call_log keeps only the most recent records
 _until: contextvars.ContextVar[float | None] = contextvars.ContextVar("llm_until", default=None)
 
 
+def attempts_within(left: float, timeout: float, retries: int) -> tuple[float, int]:
+    """(timeout, retries) for a call that must end in ``left`` seconds: the first attempt gets the time left, and
+    Instructor's validation retries only as many as fit after it (second fresh-review of #24: a share each starved
+    the one attempt most calls make)."""
+    timeout = min(timeout, left)
+    return timeout, min(retries, max(0, int(left // timeout) - 1))
+
+
 @contextlib.contextmanager
 def until(deadline: float | None):
     """Model calls inside the block end by ``deadline`` (``time.monotonic``); one that would start after it fails as
@@ -328,8 +336,7 @@ class LLMService:
             if left <= 0:
                 error = LLMError(error_type=ErrorType.TIMEOUT, message="The turn has no time left for this call")
                 return LLMResponse.error_response(error=error, latency_ms=0, retries=0)
-            # every attempt inside it, Instructor's validation retries too (fresh-review of #24)
-            effective_timeout = min(effective_timeout, left / (effective_max_retries + 1))
+            effective_timeout, effective_max_retries = attempts_within(left, effective_timeout, effective_max_retries)
 
         # Ensure client is ready
         client, error = self._ensure_client(settings)

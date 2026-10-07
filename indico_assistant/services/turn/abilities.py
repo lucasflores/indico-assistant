@@ -171,11 +171,14 @@ def _client(ctx: Ctx) -> Any:
     """The turn's GitHub client (made on first use, bounded by the turn's deadline), or why there is none."""
     from indico_assistant.services.connectors import github, store
 
+    if ctx.github_note:  # (no client this turn: said once, and every later call gets the same answer without a
+        return Failed(ctx.github_note, "no_access")  # token refresh or a GitHub round trip; fresh-review of #24)
     if ctx.github is None:
         access = store.token(ctx.user.id, github.app_for(ctx.settings))
         if access.state != store.OK:
             reply = {store.RENEW: RENEW, store.UNAVAILABLE: UNAVAILABLE}.get(access.state, CONNECT)
-            return reply.format(url=_profile_url(ctx))
+            ctx.github_note = reply.format(url=_profile_url(ctx))
+            return Failed(ctx.github_note, str(access.state))
         store.used(ctx.user.id)  # (commits: no transaction stays open through the calls)
         ctx.github = github.client_for(access.token, ctx.settings)
         ctx.github.deadline = ctx.deadline  # (every GitHub call inside the turn's time, however many one tool makes)
@@ -207,7 +210,9 @@ def _github(tool: Tool, ctx: Ctx, args: Any) -> str:
     except github.GitHubError as error:
         if error.status == 401:  # (the grant was revoked on GitHub: the stored token looked fine until now)
             store.renew(ctx.user.id)
-            return Failed(RENEW.format(url=_profile_url(ctx)), "401")
+            client.close()  # (no more GitHub calls this turn: every one would get the same 401)
+            ctx.github, ctx.github_note = None, RENEW.format(url=_profile_url(ctx))
+            return Failed(ctx.github_note, "401")
         return Failed(f"GitHub error {error.status}: {error.message}", str(error.status))  # (a failed step: spec 024)
     found: Any = out if isinstance(out, tuple) else (out, [])
     text, urls = found[0], [str(u) for u in found[1]]
@@ -256,6 +261,8 @@ def plan(
     waiting_plan: Any,
     page_event_id: int | None,
     offer: str | None = None,
+    found: str = "",
+    said: str | None = None,
 ) -> tuple[str, dict[str, Any], Any] | None:
     """The planner's answer as (reply, metadata, plan), or None when the message turns out to be a question.
     ``offer``: the change the last answer offered, which a plain yes plans."""
@@ -274,6 +281,8 @@ def plan(
             settings=plugin.settings.get_all(),
             page_event_id=page_event_id,
             offer=offer,
+            found=found,
+            said=said,
         )
     if not turn.handled:
         return None
@@ -308,11 +317,12 @@ def by_name(request: str, page_event_id: int | None) -> str:
     return _EVENT_ID.sub(title, request).strip()
 
 
-def found_meetings(ctx: Ctx) -> list[dict[str, str]]:
+def found_meetings(ctx: Ctx) -> str:
     """The meetings this turn has looked up, by title and date, for the planner: it finds meetings by name, and
-    "move the talk the notes mention" needs the meeting the notes came from (story 3, T063). As a line of the
-    conversation, never in the request: the planner's checks read the request as the user's own words (a date
-    there would move a meeting to it; fresh-review of #24)."""
+    "move the talk the notes mention" needs the meeting the notes came from (story 3, T063). For the planner's
+    prompt, as data: never in the request, which the planner's checks read as the user's own words (a date there
+    would move a meeting to it), and never as a turn of the conversation (providers want the roles to alternate;
+    fresh-reviews of #24)."""
     from indico.modules.events import Event
 
     ids = [e["ref"]["event_id"] for e in ctx.memory.touched if e["kind"] == "event"]
@@ -320,14 +330,22 @@ def found_meetings(ctx: Ctx) -> list[dict[str, str]]:
     found = [
         f'"{e.title}" ({e.start_dt.astimezone(e.tzinfo):%A %d %B %Y})' for e in events if e.id != ctx.page_event_id
     ]
-    note = f"(Meetings found while answering: {'; '.join(found)})"
-    return [{"role": "assistant", "content": note}] if found else []
+    return f"(Meetings found while answering: {'; '.join(found)})" if found else ""
 
 
 def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
     request = by_name(args.request, ctx.page_event_id)
-    history = [*ctx.history, *found_meetings(ctx)]
-    planned = plan(ctx.user, ctx.session_id, request, history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
+    planned = plan(  # (the planner's guards read the user's own message, not the request the turn wrote)
+        ctx.user,
+        ctx.session_id,
+        request,
+        ctx.history,
+        ctx.waiting_plan,
+        ctx.page_event_id,
+        ctx.offer,
+        found=found_meetings(ctx),
+        said=ctx.message or None,
+    )
     if planned is None or (planned[1].get("cannot_plan") and ctx.waiting_plan is None):
         return planned[0] if planned else "That is not a change the assistant can plan."
     ctx.plan = planned
