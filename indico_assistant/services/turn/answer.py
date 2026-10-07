@@ -19,8 +19,9 @@ from indico_assistant.services.turn.loop import TurnResult
 logger = logging.getLogger(__name__)
 
 DISABLED = "The assistant is turned off for this event."
-#: Jev's routes that need something looked up (its chat and out_of_scope don't)
-LOOKUP_ROUTES = {"data", "knowledge", "connector", "change"}
+#: Jev's routes that need something looked up (its chat and out_of_scope don't), and the memory kind of each: when
+#: earlier answers touched that kind, the message may be a follow-up about them, answered without a lookup (FR-022)
+LOOKUP_ROUTES = {"data": "event", "knowledge": None, "connector": "github", "change": None}
 DOCUMENT_WORDS = re.compile(
     r"\b(papers?|thesis|theses|reports?|slides?|talks?|documents?|surveys?|articles?|pdfs?|files?|attachments?|"
     r"minutes|notes|proposals?|chapters?|sections?|page \d+)\b",
@@ -197,13 +198,18 @@ def _agent(
         ctx.github_note = github_note(ctx)
     db.session.commit()  # no transaction stays open through the model calls
     # the first step must look something up when documents are in play (the page's, the conversation's, or one
-    # named), or when Jev routed the message to a lookup (story 3's full runs: with GitHub's seven tools offered,
-    # answers "couldn't retrieve" what they never looked up went from 3 to 13). Chat stays free of lookups (FR-022).
+    # named), or when Jev routed the message to a lookup and nothing of that kind is remembered yet (story 3's full
+    # runs: with GitHub's seven tools offered, answers "couldn't retrieve" what they never looked up went from 3 to
+    # 13; a follow-up about the last answer's items still needs none, FR-022). Chat stays free of lookups.
     lookup_first = bool(
         ctx.page_documents
         or ctx.memory.documents()
         or DOCUMENT_WORDS.search(message)
-        or (not decision.skipped and decision.route in LOOKUP_ROUTES)
+        or (
+            not decision.skipped
+            and decision.route in LOOKUP_ROUTES
+            and not any(e["kind"] == LOOKUP_ROUTES[decision.route] for e in ctx.memory.earlier)
+        )
     )
     try:
         result: TurnResult = loop.run(

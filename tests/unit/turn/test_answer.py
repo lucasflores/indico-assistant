@@ -42,6 +42,7 @@ def answered():
     context.build_context.return_value = [{"role": "user", "content": "hi"}]
     context.page_note.return_value = None
     s = SimpleNamespace(
+        memory=[],
         decide=MagicMock(return_value=jev("data")),
         chat=MagicMock(return_value=KnowledgeResult("Glad to help!")),
         agent=MagicMock(
@@ -80,7 +81,7 @@ def answered():
             patch("indico_assistant.services.knowledge.chat.chat_answer", s.chat),
             patch("indico_assistant.services.turn.loop.run", s.agent),
             patch("indico_assistant.services.turn.abilities.plan", s.plan),
-            patch("indico_assistant.services.turn.memory.load", return_value=[]),
+            patch("indico_assistant.services.turn.memory.load", return_value=s.memory),
             patch("indico_assistant.services.document.reader.documents", return_value=[]),
             patch("indico_assistant.services.turn.memory.usable", side_effect=lambda user, entries: entries),
             patch("indico.modules.events.Event.get", return_value=s.event),
@@ -318,6 +319,17 @@ def test_a_message_jev_routes_to_a_lookup_must_look_something_up(answered, decis
     s.decide.return_value = decision
     run("Summarise PR 31, then tell me which day Team Sync is on.")
     assert s.agent.call_args.kwargs["lookup_first"] is first
+
+
+def test_a_follow_up_about_remembered_items_needs_no_first_lookup(answered):
+    """(story 3's GitHub run) "which of those is the oldest?" after a list of pull requests: Jev says GitHub, but the
+    answer is in the conversation (FR-022)."""
+    run, s = answered
+    s.decide.return_value = jev("connector")
+    pr = {"kind": "github", "ref": {"url": "https://github.com/o/r/pull/30"}, "title": "o/r#30", "position": 1}
+    s.memory = [pr]
+    run("Which of those is the oldest?")
+    assert s.agent.call_args.kwargs["lookup_first"] is False
 
 
 def test_the_answers_order_numbers_the_documents():
