@@ -22,7 +22,19 @@ from pydantic import BaseModel, Field
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.turn.memory import Memory
 
-__all__ = ["Ctx", "Tool", "DOCUMENT_TOOLS"]
+__all__ = ["Ctx", "Failed", "Tool", "DOCUMENT_TOOLS"]
+
+
+class Failed(str):
+    """A tool's text that reports a failure (GitHub's 404, a revoked token): still text for the model, but the
+    analytics step is a failed one, with its code (spec 024)."""
+
+    code: str
+
+    def __new__(cls, text: str, code: str) -> Failed:
+        failed = super().__new__(cls, text)
+        failed.code = code
+        return failed
 
 
 @dataclass

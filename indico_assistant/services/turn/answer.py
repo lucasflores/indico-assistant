@@ -19,9 +19,25 @@ from indico_assistant.services.turn.loop import TurnResult
 logger = logging.getLogger(__name__)
 
 DISABLED = "The assistant is turned off for this event."
-#: Jev's routes that need something looked up (its chat and out_of_scope don't), and the memory kind of each: when
-#: earlier answers touched that kind, the message may be a follow-up about them, answered without a lookup (FR-022)
-LOOKUP_ROUTES = {"data": "event", "knowledge": None, "connector": "github", "change": None}
+#: Jev's routes that need something looked up (its chat and out_of_scope don't): the tool each needs, and the memory
+#: kind whose presence in the last answer makes the message a possible follow-up, answered without a lookup (FR-022)
+LOOKUP_ROUTES = {
+    "data": ("query_data", "event"),
+    "knowledge": ("ask_guide", None),
+    "connector": ("github_", "github"),
+    "change": ("propose_change", None),
+}
+
+
+def _needs_lookup(route: str | None, tools: Any, last: list[dict[str, Any]]) -> bool:
+    """Whether a message Jev routed to ``route`` must start with a lookup: its tool is offered (GitHub without a
+    connection, or NL2SQL turned off, is not), and the last answer didn't touch that kind (a follow-up)."""
+    if route not in LOOKUP_ROUTES:
+        return False
+    tool, kind = LOOKUP_ROUTES[route]
+    return any(t.name.startswith(tool) for t in tools) and not any(e["kind"] == kind for e in last)
+
+
 DOCUMENT_WORDS = re.compile(
     r"\b(papers?|thesis|theses|reports?|slides?|talks?|documents?|surveys?|articles?|pdfs?|files?|attachments?|"
     r"minutes|notes|proposals?|chapters?|sections?|page \d+)\b",
@@ -105,6 +121,9 @@ def answer(
 
     decision = gate.decide(context, settings, connector=github_on)
     sure = not decision.skipped and (decision.confidence or 0.0) >= float(settings.get("fast_path_confidence") or 0.8)
+    # (an offer waiting: "sure, go ahead with that" isn't chat, and Jev no longer reads a note of the offer; the
+    # agent's prompt says what was offered: fresh-review of #24)
+    sure = sure and offer is None
     if sure and decision.route == "chat":
         chat = chat_answer(message, history, llm=plugin.llm_service, base_url=base_url)
         return Outcome(
@@ -201,39 +220,29 @@ def _agent(
     # named), or when Jev routed the message to a lookup and nothing of that kind is remembered yet (story 3's full
     # runs: with GitHub's seven tools offered, answers "couldn't retrieve" what they never looked up went from 3 to
     # 13; a follow-up about the last answer's items still needs none, FR-022). Chat stays free of lookups.
+    tools = registry(ctx, nl2sql=nl2sql, github=github_on and ctx.github_note is None)
     lookup_first = bool(
         ctx.page_documents
         or ctx.memory.documents()
         or DOCUMENT_WORDS.search(message)
-        or (
-            not decision.skipped
-            and decision.route in LOOKUP_ROUTES
-            and not any(e["kind"] == LOOKUP_ROUTES[decision.route] for e in ctx.memory.earlier)
-        )
+        or (not decision.skipped and _needs_lookup(decision.route, tools, memory.load(session_id, message_id, 1)))
     )
     try:
-        result: TurnResult = loop.run(
-            ctx,
-            message,
-            registry(ctx, nl2sql=nl2sql, github=github_on and ctx.github_note is None),
-            system_prompt=rules(custom),
-            lookup_first=lookup_first,
-        )
+        result: TurnResult = loop.run(ctx, message, tools, system_prompt=rules(custom), lookup_first=lookup_first)
     finally:
         if ctx.github is not None:
             ctx.github.close()
 
     plan = None
-    if ctx.plan is not None:  # the planner's reply and plan card are the answer
-        text, metadata, plan = ctx.plan
+    paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
+    paths, guide = sorted(paths | ctx.link_paths), guide | ctx.guide_urls
+    if ctx.plan is not None:  # the planner's reply and plan card are the answer, its links checked too: a later
+        reply, metadata, plan = ctx.plan  # answer trusts the GitHub links earlier ones kept (fresh-review of #24)
+        text = clean(reply, paths, guide, base_url, set(ctx.github_urls)) or "Here is the plan: confirm it to go ahead."
         metadata = dict(metadata)
     else:
-        paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
         urls = ctx.github_urls | earlier_github(history)
-        text = (
-            clean(result.text, sorted(paths | ctx.link_paths), guide | ctx.guide_urls, base_url, urls)
-            or loop.NOT_ANSWERED
-        )
+        text = clean(result.text, paths, guide, base_url, urls) or loop.NOT_ANSWERED
         metadata = {"problem": "failed"} if result.failed else {}
     cited = validate(user, result.citations) if result.citations else []
     cited += from_markers(text, ctx.pages_seen, cited)

@@ -88,3 +88,46 @@ def test_a_tool_started_late_gets_no_model_call():
     with until(time.monotonic() - 1):
         response = service.generate("prompt", MagicMock())
     assert not response.success and response.error.error_type.value == "timeout"
+
+
+def test_a_github_error_is_a_failed_step_with_its_code():
+    from indico_assistant.services.turn.tools import Failed
+
+    ctx = make_ctx()
+    tool = SimpleNamespace(run=MagicMock(side_effect=github.GitHubError(404, "Not Found")))
+    with (
+        patch.object(abilities, "_client", return_value=MagicMock()),
+        patch("indico_assistant.services.analytics.recorder.private"),
+    ):
+        text = abilities._github(tool, ctx, MagicMock())
+    assert isinstance(text, Failed) and text.code == "404" and "Not Found" in text
+    failing = loop.Tool("echo", MagicMock(), lambda ctx, args: text)
+    result = loop.TurnResult()
+    with patch.object(loop.recorder, "step") as step:
+        loop._call(ctx, failing, MagicMock(), result, lambda: 0.0)
+    assert result.tools[0]["ok"] is False and step.return_value.__enter__.return_value.error_code == "404"
+
+
+def test_only_items_are_remembered_and_not_too_many():
+    """(fresh-review of #24) a list of repositories or of 20 items would push documents and events out of memory."""
+    ctx = make_ctx()
+    urls = ["https://github.com/o/r"] + [f"https://github.com/o/r/pull/{n}" for n in range(1, 21)]
+    tool = SimpleNamespace(run=lambda client, args: ("listed", urls))
+    with (
+        patch.object(abilities, "_client", return_value=MagicMock()),
+        patch("indico_assistant.services.analytics.recorder.private"),
+    ):
+        abilities._github(tool, ctx, MagicMock())
+    remembered = [e["title"] for e in ctx.memory.touched]
+    assert len(remembered) == abilities.GITHUB_REMEMBERED and "o/r" not in remembered
+    assert ctx.github_urls == set(urls)  # (the answer may still link them all)
+
+
+def test_the_connect_link_is_allowed_under_a_subpath():
+    ctx = make_ctx()
+    ctx.base_url = "https://host.test/indico"
+    with patch(
+        "indico.core.plugins.url_for_plugin", return_value="https://host.test/indico/user/assistant-connections/"
+    ):
+        abilities._profile_url(ctx)
+    assert ctx.link_paths == {"/user/assistant-connections/"}

@@ -328,7 +328,8 @@ class LLMService:
             if left <= 0:
                 error = LLMError(error_type=ErrorType.TIMEOUT, message="The turn has no time left for this call")
                 return LLMResponse.error_response(error=error, latency_ms=0, retries=0)
-            effective_timeout = min(effective_timeout, left)
+            # every attempt inside it, Instructor's validation retries too (fresh-review of #24)
+            effective_timeout = min(effective_timeout, left / (effective_max_retries + 1))
 
         # Ensure client is ready
         client, error = self._ensure_client(settings)
