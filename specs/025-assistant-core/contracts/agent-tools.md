@@ -39,11 +39,15 @@
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `find_events` | `text?`, `from?`, `to?`, `category?` | up to 20 events the user can open: id, title, dates, place |
-| `get_event` | `event` | details, managers' contact only if Indico shows them, link |
-| `get_timetable` | `event` | entries via `TimetableSerializer(user=user)`; nothing for unpublished contributions unless Indico shows them to this user |
-| `get_registrations` | `event` | the manager view, or the published participant list (clarification 3) |
-| `get_notes` | `event` or a contribution | note text for objects the user can open |
+| `find_events` | `text?`, `since?`, `until?` (ISO dates in the user's time zone), `category?`, `person?` (who speaks or chairs) | up to 20 events the user can open, soonest first: id, title, type, dates, place, category, link; with `person`, each one's talks by that person |
+| `get_event` | `event` | details, description, chairpersons, contact; the managers (the category's included) only to a manager; link. A protected event the user can't open is "not found": its existence stays hidden |
+| `get_timetable` | `event` | entries via `TimetableSerializer(user=user)`, one line each; while the programme is unpublished, non-managers get "not published yet" (as the export API) |
+| `get_registrations` | `event` | the manager view (every registration, with state) to the event's registration managers, else the published participant list: the form's visibility, each registrant's consent, the columns Indico shows (FR-031) |
+| `get_notes` | `event`, or `text` | an event's notes and its talks' (objects the user can open), or the notes anywhere mentioning `text` |
+
+- **They are offered in every turn** from story 4 on, beside `query_data` while NL2SQL stays on (decision 4).
+- **The prompt says today's date** in the user's time zone, so "Tuesday next week" becomes `since`/`until`.
+- **Memory:** `event`, `contribution` and `note` items.
 
 ## The turn
 

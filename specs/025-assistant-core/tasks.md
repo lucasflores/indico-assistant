@@ -634,7 +634,7 @@ the baseline (SC-004).
 
 ### Tests first
 
-- [ ] T068 [P] [US4] `tests/integration/lookups/test_events.py`. `find_events` returns exactly the events each user
+- [x] T068 [P] [US4] `tests/integration/lookups/test_events.py`. `find_events` returns exactly the events each user
   can open. Cover:
   - a direct grant;
   - a local group;
@@ -643,20 +643,24 @@ the baseline (SC-004).
   - a protected event with no grant.
 
   Date filters and unlisted events are covered too.
-- [ ] T069 [P] [US4] `tests/integration/lookups/test_timetable.py`. Non-managers get no unpublished contributions.
+  - Done 2026-10-07 in `tests/integration/lookups/` (a shared `world` fixture). The identity-provider group is a
+    real `GroupProxy("physicists", provider="testidp")` on the event's ACL with a real identity on the user; the
+    provider itself is faked at multipass's boundary (`multipass.get_group` returns a group that holds the
+    identifier), since the test config has no static provider.
+- [x] T069 [P] [US4] `tests/integration/lookups/test_timetable.py`. Non-managers get no unpublished contributions.
   Managers do.
-- [ ] T070 [P] [US4] `tests/integration/lookups/test_registrations.py`.
+- [x] T070 [P] [US4] `tests/integration/lookups/test_registrations.py`.
   - Managers see what Indico shows them.
   - Non-managers see exactly the published list.
   - A non-consenting registrant is absent, and only the configured columns appear.
-- [ ] T071 [P] [US4] `tests/integration/lookups/test_notes.py`. Notes are returned only for objects the user can
+- [x] T071 [P] [US4] `tests/integration/lookups/test_notes.py`. Notes are returned only for objects the user can
   open.
 
 ### Code
 
-- [ ] T072 [US4] `indico_assistant/services/lookups/events.py`, `timetable.py`, `registrations.py` and `notes.py`
+- [x] T072 [US4] `indico_assistant/services/lookups/events.py`, `timetable.py`, `registrations.py` and `notes.py`
   (research R7). All run inside `acting_as(user)` for that user only (the `Contribution.can_manage` trap).
-- [ ] T073 [US4] Register `find_events`, `get_event`, `get_timetable`, `get_registrations` and `get_notes` in
+- [x] T073 [US4] Register `find_events`, `get_event`, `get_timetable`, `get_registrations` and `get_notes` in
   `indico_assistant/services/turn/abilities.py` (contracts/agent-tools.md). Their results report `touched`.
 - [ ] T074 [US4] **Live, paid on Lucas's go:** a full run with `query_data` still registered, then a run without it.
   Compare them per data scenario.

@@ -139,7 +139,18 @@ def test_a_waiting_plan_keeps_the_planners_reply_even_when_it_cannot_plan(dummy_
 def test_the_registry_offers_data_and_github_only_when_on():
     ctx = make_ctx(MagicMock())
     names = [t.name for t in abilities.registry(ctx, nl2sql=False, github=False)]
-    assert names == ["list_documents", "read_document", "search_documents", "ask_guide", "propose_change"]
+    assert names == [
+        "list_documents",
+        "read_document",
+        "search_documents",
+        "find_events",
+        "get_event",
+        "get_timetable",
+        "get_registrations",
+        "get_notes",
+        "ask_guide",
+        "propose_change",
+    ]
     names = [t.name for t in abilities.registry(ctx, nl2sql=True, github=True)]
     assert "query_data" in names and "github_my_pull_requests" in names
 

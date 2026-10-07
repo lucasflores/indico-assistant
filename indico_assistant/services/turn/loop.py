@@ -111,6 +111,8 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         if ctx.page_event_id is not None
         else "The user is not on an event page."
     )
+    if ctx.today:
+        page = f"{ctx.today}\n{page}"
     if ctx.page_documents:  # FR-011: known without a lookup
         page += "\nDocuments attached to it:\n" + mark(  # (names and openings uploaders wrote: data, FR-024)
             "\n".join(json.dumps(d, ensure_ascii=False) for d in ctx.page_documents)

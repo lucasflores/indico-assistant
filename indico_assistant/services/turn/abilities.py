@@ -360,12 +360,14 @@ PROPOSE_CHANGE = Tool("propose_change", ProposeChangeArgs, _propose_change)
 
 
 def registry(ctx: Ctx, *, nl2sql: bool, github: bool) -> tuple[Tool, ...]:
-    """The tools this turn offers: the document tools, the data tool while NL2SQL is on for the event, the guide,
-    GitHub's while an admin has it on and the user has connected it, and changes."""
+    """The tools this turn offers: the document tools, the typed lookups (story 4), the data tool while NL2SQL is
+    on for the event, the guide, GitHub's while an admin has it on and the user has connected it, and changes."""
+    from indico_assistant.services.turn.lookups import LOOKUP_TOOLS
     from indico_assistant.services.turn.tools import DOCUMENT_TOOLS
 
     return (
         *DOCUMENT_TOOLS,
+        *LOOKUP_TOOLS,
         *((QUERY_DATA,) if nl2sql else ()),
         ASK_GUIDE,
         *(_github_tools() if github else ()),

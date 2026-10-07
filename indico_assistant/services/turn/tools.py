@@ -50,6 +50,7 @@ class Ctx:
     llm: Any
     base_url: str
     message: str = ""  # the user's latest message, as typed (the planner's guards read the user's own words)
+    today: str = ""  # today's date and time in the user's time zone, for the prompt (dates in lookups count from it)
     memory: Memory = field(default_factory=Memory)
     embedder: Any = None
     allowed_tables: list[str] | None = None

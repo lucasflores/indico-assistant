@@ -202,6 +202,7 @@ def _agent(
         offer=offer,
         started=started,
     )
+    ctx.today = today_line(user)
     if page_event_id is not None:  # FR-011: the turn knows the page's documents without a lookup
         from indico_assistant.services.document import reader
 
@@ -276,6 +277,16 @@ GITHUB_URL = re.compile(r"https://github\.com/[^\s<>()\[\]\"'`]+")
 
 USER_URL = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
 _LABEL = re.compile(r"\[[^\]]*\]\(")  # a link's label: text, never an address the answer may keep
+
+
+def today_line(user: Any) -> str:
+    """Today, as the user reads it: lookups by date ("Tuesday next week") count from here (story 4)."""
+    from datetime import datetime
+
+    from indico_assistant.services.actions.context import user_timezone
+
+    now = datetime.now(user_timezone(user))
+    return f"Today is {now:%A %d %B %Y}, {now:%H:%M} {now.tzinfo.zone} (the user's time zone)."
 
 
 def earlier_github(history: list[dict[str, str]]) -> set[str]:

@@ -326,3 +326,11 @@ def test_a_waiting_plan_is_in_the_prompt():
     c.waiting_plan = SimpleNamespace(summary="Move Team Sync to 3pm")
     run(c)
     assert 'waiting for the user to confirm it: "Move Team Sync to 3pm"' in llm.sent[0].prompt
+
+
+def test_todays_date_opens_the_page_section():
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.today = "Today is Tuesday 07 October 2026, 10:15 Europe/Zurich (the user's time zone)."
+    run(c)
+    assert llm.sent[0].prompt.startswith("## The page\nToday is Tuesday 07 October 2026")

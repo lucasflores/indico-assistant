@@ -68,11 +68,14 @@ def answered():
     plugin.settings.get.side_effect = setting
     plugin.event_settings.get.side_effect = lambda event, key: s.event_settings.get(key)
 
+    settings = MagicMock()
+    settings.get.return_value = None  # (the user's timezone: Indico's default)
+
     def run(message="hi", waiting_plan=None, offer=None, event_id=None):
         manager.offer_before.return_value = offer
         manager.page_event_of.return_value = event_id
         with (
-            patch.object(service, "_load_user", return_value=MagicMock(id=1, is_admin=False)),
+            patch.object(service, "_load_user", return_value=MagicMock(id=1, is_admin=False, settings=settings)),
             patch.object(service, "_validate_event_access"),
             patch("indico_assistant.plugin.AssistantPlugin", MagicMock(instance=plugin)),
             patch("indico_assistant.services.turn.answer.base_url_of", return_value="https://indico.test"),
@@ -425,3 +428,18 @@ def test_earlier_github_links_are_targets_and_bare_addresses_never_label_text():
         {"role": "user", "content": "https://github.com/o/r/pull/3"},
     ]
     assert earlier_github(history) == {"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}
+
+
+def test_today_is_said_in_the_users_time_zone():
+    from indico_assistant.services.turn.answer import today_line
+
+    user = MagicMock()
+    user.settings.get.return_value = "Europe/Zurich"
+    line = today_line(user)
+    assert line.startswith("Today is ") and line.endswith("Europe/Zurich (the user's time zone).")
+
+
+def test_the_agent_knows_todays_date(answered):
+    run, s = answered
+    run("What meetings are there on Tuesday next week?")
+    assert s.agent.call_args.args[0].today.startswith("Today is ")

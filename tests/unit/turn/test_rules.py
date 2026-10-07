@@ -13,6 +13,7 @@ def test_each_rule_is_in_the_instructions():
     assert "Remembered from earlier answers" in text  # references through the memory
     assert "the planner can't look anything up" in text and "look it up first" in text  # story 3: lookup, then plan
     assert "for reviews, comments or a description, look the item up" in text  # (spec 023's rule, kept)
+    assert "find_events" in text and "get_registrations" in text and "get_notes" in text  # story 4's lookups
 
 
 def test_an_events_own_prompt_is_appended():
