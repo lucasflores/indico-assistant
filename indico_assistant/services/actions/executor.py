@@ -164,7 +164,6 @@ def run(plan_id, enabled=None):
     plan = ActionPlan.query.get(plan_id)
 
     g.assistant_rollback_callbacks = []
-    g.pop('assistant_new_events', None)
     g.assistant_plan_id = str(plan.id)  # (an upload this plan attaches is marked as used by it)
     try:
         user = User.get(plan.user_id, is_deleted=False)

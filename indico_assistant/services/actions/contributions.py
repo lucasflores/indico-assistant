@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 
 from flask import g
 from pydantic import BaseModel, model_validator
+from sqlalchemy import update
 
+from indico.core.db import db
 from indico.modules.events import Event
 from indico.modules.events.contributions.models.contributions import Contribution
 from indico.modules.events.contributions.models.persons import AuthorType, ContributionPersonLink
@@ -121,14 +123,17 @@ class AddContribution(Action):
     def execute(self, user, args):
         event = Event.get(args.event_id)
         links = _person_links(event, args.speakers)
-        if event.id in g.get('assistant_new_events', ()):
-            # Indico numbers contributions per event from a separate DB session, which cannot see an event
-            # this plan created and has not committed yet. Nobody else can see it either, so take the next
-            # number on the event itself, as Indico's event cloning does. (Indico's test fixture shares that
-            # session, so only a real database shows this.)
-            event._last_friendly_contribution_id += 1
-            (g.setdefault('friendly_ids', {}).setdefault(Contribution, {}).setdefault(event.id, [])
-             .append(event._last_friendly_contribution_id))
+        # Indico numbers contributions per event from a separate DB session. That session can't see an event this
+        # plan created and hasn't committed, and it waits forever on an event this plan already changed (its row is
+        # locked by the plan's own transaction: story 3's full run hung a worker on "move Team Sync, then add a
+        # talk"). So the number is taken in the plan's transaction, as one atomic increment of the event's row.
+        # (Indico's test fixture shares that session, so only a real database shows either.)
+        number = db.session.execute(
+            update(Event).where(Event.id == event.id)
+            .values({Event._last_friendly_contribution_id: Event._last_friendly_contribution_id + 1})
+            .returning(Event._last_friendly_contribution_id)).scalar_one()
+        db.session.expire(event, ['_last_friendly_contribution_id'])
+        g.setdefault('friendly_ids', {}).setdefault(Contribution, {}).setdefault(event.id, []).append(number)
         contribution = create_contribution(event, {
             'title': args.title,
             'duration': timedelta(minutes=args.duration_minutes),
