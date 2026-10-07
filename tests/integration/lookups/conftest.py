@@ -91,7 +91,8 @@ def world(db, create_user, create_identity, create_category, create_event, idp):
     team.update_principal(manager, full_access=True)
     restricted = create_category(title="Restricted Projects", protection_mode=ProtectionMode.protected)
     restricted.update_principal(cat, read_access=True)
-    t0 = now_utc().replace(minute=0, second=0, microsecond=0) + timedelta(days=7)
+    t0 = now_utc().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=7)  # (mid-day: an event
+    # ending at midnight is "on" the next day too, as Indico's inclusive overlap counts it)
 
     def event(title, category, days, **kwargs):
         start = t0 + timedelta(days=days)

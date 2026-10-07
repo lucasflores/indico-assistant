@@ -82,8 +82,15 @@ def find_events(
         or_(~Event.is_unlisted, Event.creator_id == user.id),
         Event.happens_between(start, end),
     )
-    for word in words(text):  # (every telling word, each in the title or the description)
-        query = query.filter(or_(Event.title.ilike(f"%{word}%"), Event.description.ilike(f"%{word}%")))
+    for word in words(text):  # (every telling word, each in the title, the description or a talk's title: "the
+        like = f"%{word}%"  # design review with the Option C walkthrough" names the event by its talk)
+        query = query.filter(
+            or_(
+                Event.title.ilike(like),
+                Event.description.ilike(like),
+                Event.contributions.any(db.and_(~Contribution.is_deleted, Contribution.title.ilike(like))),
+            )
+        )
     if category:
         ids = _category_ids(category)
         if not ids:

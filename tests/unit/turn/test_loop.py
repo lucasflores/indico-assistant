@@ -334,3 +334,13 @@ def test_todays_date_opens_the_page_section():
     c.today = "Today is Tuesday 07 October 2026, 10:15 Europe/Zurich (the user's time zone)."
     run(c)
     assert llm.sent[0].prompt.startswith("## The page\nToday is Tuesday 07 October 2026")
+
+
+def test_the_pages_event_is_described_in_the_prompt():
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.page_event_id, c.page_summary = 5, '"Budget Review", Friday 09 October 2026, 10:00–10:45 Europe/Zurich, Room 4.'
+    run(c)
+    assert (
+        'page of event 5: "this event" and "this meeting" mean it. It is "Budget Review", Friday' in llm.sent[0].prompt
+    )

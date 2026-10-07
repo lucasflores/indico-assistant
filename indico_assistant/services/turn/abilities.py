@@ -263,6 +263,7 @@ def plan(
     offer: str | None = None,
     found: str = "",
     said: str | None = None,
+    trusted_urls: frozenset[str] = frozenset(),
 ) -> tuple[str, dict[str, Any], Any] | None:
     """The planner's answer as (reply, metadata, plan), or None when the message turns out to be a question.
     ``offer``: the change the last answer offered, which a plain yes plans."""
@@ -283,6 +284,7 @@ def plan(
             offer=offer,
             found=found,
             said=said,
+            trusted_urls=trusted_urls,
         )
     if not turn.handled:
         return None
@@ -334,6 +336,8 @@ def found_meetings(ctx: Ctx) -> str:
 
 
 def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
+    from indico_assistant.services.turn.answer import earlier_github
+
     request = by_name(args.request, ctx.page_event_id)
     planned = plan(  # (the planner's guards read the user's own message, not the request the turn wrote)
         ctx.user,
@@ -345,6 +349,7 @@ def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
         ctx.offer,
         found=found_meetings(ctx),
         said=ctx.message or None,
+        trusted_urls=frozenset(ctx.github_urls | earlier_github(ctx.history)),  # (addresses the tools returned)
     )
     if planned is None or (planned[1].get("cannot_plan") and ctx.waiting_plan is None):
         return planned[0] if planned else "That is not a change the assistant can plan."

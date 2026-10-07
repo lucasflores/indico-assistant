@@ -203,6 +203,10 @@ def _agent(
         started=started,
     )
     ctx.today = today_line(user)
+    if event is not None:  # (its title, times and place: "how long is this meeting" needs no lookup; story 4's run)
+        from indico_assistant.services.lookups.events import when, where
+
+        ctx.page_summary = f'"{event.title}", {when(event)}' + (f", {where(event)}" if where(event) else "") + "."
     if page_event_id is not None:  # FR-011: the turn knows the page's documents without a lookup
         from indico_assistant.services.document import reader
 

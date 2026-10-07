@@ -62,3 +62,11 @@ def test_words_match_one_by_one_and_generic_ones_are_skipped(world):
     assert titles(world.nora, text="contracts sync") == []  # (every telling word must match)
     assert titles(world.lou, text="meeting") == ["Lab Members Meeting"]  # (only generic words: matched as they are)
     assert events.words("the Q3 planning meeting") == ["Q3", "planning"]
+
+
+def test_an_event_is_found_by_one_of_its_talks(world):
+    from .conftest import talk
+
+    talk(world.sync, "Option C walkthrough", ("Dana", "Test", "dana@example.test"))
+    assert titles(world.nora, text="the sync with the Option C walkthrough") == ["Team Sync"]
+    assert titles(world.nora, text="Option walkabout") == []  # (every telling word must match)

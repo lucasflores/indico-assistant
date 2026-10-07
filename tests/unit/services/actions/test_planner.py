@@ -252,3 +252,36 @@ def test_the_guards_read_the_users_own_words_not_the_turns_request(dummy_user, c
     assert asked.call_args.args[1] == ['move Team Sync to the same time as Q3 Planning']
     prompt = llm.generate.call_args.args[0]
     assert 'Q3 Planning" (Monday' in prompt and prompt.endswith('Message: move Team Sync to 14:00, the time of Q3 Planning')
+
+
+def test_a_day_the_turn_looked_up_and_an_address_a_tool_returned_are_trusted(dummy_user, chat):
+    """(story 4's run) "move Thesis Club to the seminar's day" and "attach a link to that pull request": the day is
+    a looked-up meeting's, the address a GitHub tool's; neither is in the user's own words."""
+    llm = llm_returning(decision='unrelated')
+    keep = lambda draft, *args, **kwargs: draft  # noqa: E731
+    with patch.object(planner, '_only_what_the_user_said', side_effect=keep) as dates, \
+            patch.object(planner, '_only_what_the_user_asked_for', side_effect=keep) as asked:
+        planner.plan_turn(dummy_user, chat.id, 'move Thesis Club to Monday 19 October at 17:00', [], None, llm=llm,
+                          settings=ON, said="move Thesis Club to the seminar's day at 17:00",
+                          found='"Dark Matter Seminar" (Monday 19 October 2026)',
+                          trusted_urls=frozenset({'https://github.com/o/r/pull/16'}))
+    assert dates.call_args.args[1] == 'move Thesis Club to Monday 19 October at 17:00'  # (the found day: accepted)
+    assert asked.call_args.kwargs['trusted_urls'] == frozenset({'https://github.com/o/r/pull/16'})
+    with patch.object(planner, '_only_what_the_user_said', side_effect=keep) as dates:
+        planner.plan_turn(dummy_user, chat.id, 'move Thesis Club to Monday 19 October at 17:00', [], None, llm=llm,
+                          settings=ON, said='move Thesis Club to 17:00',
+                          found='"Dark Matter Seminar" (Tuesday 20 October 2026)')
+    assert dates.call_args.args[1] == 'move Thesis Club to 17:00'  # (a day nothing looked up names: the user's words)
+
+
+def test_an_address_a_tool_returned_may_be_attached():
+    from indico_assistant.services.llm.models.plan import Attach
+
+    draft = PlanDraft.model_validate({'reply': 'OK', 'decision': 'new_request',
+                                      'steps': [{'action': 'attach', 'target': 'the meeting',
+                                                 'url': 'https://github.com/o/r/pull/16'}]})
+    kept = planner._only_what_the_user_asked_for(draft, ['attach a link to that pull request to Team Sync'],
+                                                 trusted_urls={'https://github.com/o/r/pull/16'})
+    assert isinstance(kept.steps[0], Attach) and kept.steps[0].url == 'https://github.com/o/r/pull/16'
+    dropped = planner._only_what_the_user_asked_for(draft, ['attach a link to that pull request to Team Sync'])
+    assert dropped.steps[0].url is None

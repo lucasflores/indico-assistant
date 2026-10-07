@@ -87,6 +87,11 @@ def answered():
             patch("indico_assistant.services.turn.memory.load", return_value=s.memory),
             patch("indico_assistant.services.document.reader.documents", return_value=[]),
             patch("indico_assistant.services.turn.memory.usable", side_effect=lambda user, entries: entries),
+            patch(
+                "indico_assistant.services.lookups.events.when",
+                return_value="Friday 09 October 2026, 10:00–10:45 Europe/Zurich",
+            ),
+            patch("indico_assistant.services.lookups.events.where", return_value="Room 4"),
             patch("indico.modules.events.Event.get", return_value=s.event),
             patch("indico_assistant.services.chat.service.db"),
             patch("indico.core.db.db"),
@@ -443,3 +448,13 @@ def test_the_agent_knows_todays_date(answered):
     run, s = answered
     run("What meetings are there on Tuesday next week?")
     assert s.agent.call_args.args[0].today.startswith("Today is ")
+
+
+def test_the_pages_event_is_summarised_for_the_agent(answered):
+    run, s = answered
+    s.event = MagicMock(id=5, title="Budget Review")
+    run("How long is this meeting?", event_id=5)
+    summary = s.agent.call_args.args[0].page_summary
+    assert summary == '"Budget Review", Friday 09 October 2026, 10:00–10:45 Europe/Zurich, Room 4.'
+    run("How long is this meeting?")
+    assert s.agent.call_args.args[0].page_summary == ""  # (no page: nothing to say)

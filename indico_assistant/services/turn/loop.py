@@ -108,6 +108,7 @@ def mark(text: str, limit: int = MAX_RESULT_CHARS) -> str:
 def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any, str]], final: str | None) -> str:
     page = (
         f'The user is on the page of event {ctx.page_event_id}: "this event" and "this meeting" mean it.'
+        + (f" It is {ctx.page_summary}" if ctx.page_summary else "")
         if ctx.page_event_id is not None
         else "The user is not on an event page."
     )

@@ -80,13 +80,15 @@ class PlanTurn:
 
 
 def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settings,
-              page_event_id=PAGE_FROM_CHAT, offer=None, found='', said=None):
+              page_event_id=PAGE_FROM_CHAT, offer=None, found='', said=None, trusted_urls=()):
     """Answer one message that asks for (or follows up on) a change. ``offer``: the change the last answer offered
     (spec 022). A plain yes to it plans it: the offer is then the request, but the guards still read only the
     user's own words, since the offer was written by a model (a link or an address in it is not the user's).
     ``said``: the user's own words when ``message`` is a request the turn wrote from what it looked up (spec 025
     story 3): the guards read ``said``, so an address or a day copied from a document is not the user's.
-    ``found``: what the turn looked up (meetings' titles and dates), for the prompt as data."""
+    ``found``: what the turn looked up (meetings' titles and dates), for the prompt as data; a day the request names
+    that ``found`` holds is the user's ("move it to the seminar's day"). ``trusted_urls``: addresses the turn's tools
+    returned (a GitHub item): a link the user asked to attach may be one of them (story 4's run)."""
     enabled = enabled_actions(settings)
     if not enabled:
         return PlanTurn(NOT_AVAILABLE, cannot_plan=True, problem='cannot_do')
@@ -112,10 +114,12 @@ def plan_turn(user, chat_session_id, message, history, open_plan, *, llm, settin
     if not draft.steps and re.match(r'\s*(undo|revert|take (that|it) back)\b', message, re.IGNORECASE):
         draft = PlanDraft(decision='new_request', steps=[{'action': 'undo'}])  # seen in the eval: "unrelated"
     words = said if said is not None else request  # (the user's own, never a request written from looked-up data)
+    if said is not None and _names_a_found_day(request, found):
+        words = request  # (the day it names is a looked-up meeting's: Indico's, not invented)
     draft = _only_what_the_user_said(_only_what_the_user_confirmed(draft, open_plan), words, open_plan)
     draft = _only_what_the_user_asked_for(draft, [said if said is not None else message,
                                                   *(m['content'] for m in history if m.get('role') == 'user')],
-                                          open_plan, agreed_to=offer or '')
+                                          open_plan, agreed_to=offer or '', trusted_urls=trusted_urls)
     draft = _the_meeting_the_user_meant(draft, request, _page_title(page_event_id))
     # (seen live, PR #5: "What is this event about?" on another page also came back as a new request repeating
     # the waiting one)
@@ -200,7 +204,17 @@ RELATIVE_DAY = re.compile(r'\b(?:(?:next|this|on) )?(?:mon|tues|wednes|thurs|fri
 TALK_WORDS = ('slot', 'talk', 'contribut', 'present', 'speaker', 'speak')
 
 
-def _only_what_the_user_asked_for(draft, user_messages, open_plan=None, agreed_to=''):
+def _names_a_found_day(request, found):
+    """Whether the day or date the request names is one the turn looked up (it appears in ``found``)."""
+    if not found:
+        return False
+    found = found.lower()
+    named = [m.group(0) for m in NAMED_DATE.finditer(request)] + re.findall(
+        r'\b(?:mon|tues|wednes|thurs|fri|satur|sun)day\b', request, re.IGNORECASE)
+    return any(n.lower() in found for n in named)
+
+
+def _only_what_the_user_asked_for(draft, user_messages, open_plan=None, agreed_to='', trusted_urls=()):
     """Steps come from the user's own messages, never from context (FR-017): talks only if the user asked for
     talks, people only if the user named them. (Seen live: the model copied a past meeting's talks, which
     were in the context block, into a new meeting.) What context offers is shown as suggestions instead."""
@@ -225,15 +239,15 @@ def _only_what_the_user_asked_for(draft, user_messages, open_plan=None, agreed_t
         # (Copilot review, PR #3: a link or description copied from the context would otherwise be written)
         if getattr(step, 'description', None) and step.description.lower().strip(' .') not in said:
             step.description = None
-        if getattr(step, 'url', None) and step.url.lower() not in said:
-            step.url = None
+        if getattr(step, 'url', None) and step.url.lower() not in said and step.url not in trusted_urls:
+            step.url = None  # (an address the user gave, or one a tool returned this turn: never one from context)
         if isinstance(step, ChangeMeeting):
             step.teams = step.teams and 'teams' in asked
             if step.reminder and 'remind' not in asked:
                 step.reminder = None  # (a change the user did not ask for: an email to everyone)
         if not isinstance(step, CreateMeeting):
             continue
-        step.links = [url for url in step.links if url.lower() in said]  # (accepted suggestions are in ``earlier``)
+        step.links = [url for url in step.links if url.lower() in said or url in trusted_urls]
         step.teams = step.teams and 'teams' in said
         if not any(word in said for word in TALK_WORDS):
             step.slots = []
