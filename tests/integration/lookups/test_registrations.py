@@ -61,7 +61,11 @@ def test_a_manager_sees_the_management_list(world, workshop):
     assert all(r["email"].endswith("@example.test") and r["state"] == "complete" for r in found["registrations"])
 
 
-def test_a_non_manager_sees_exactly_the_published_list(world, workshop):
+@pytest.mark.parametrize("merged", [True, False])  # (Indico's merged list, or one table per form)
+def test_a_non_manager_sees_exactly_the_published_list(world, workshop, merged):
+    from indico.modules.events.registration import registration_settings
+
+    registration_settings.set(world.sync, "merge_registration_forms", merged)
     with acting_as(world.nora):
         found = registrations.registrations(world.nora, world.sync)
     assert found["view"] == "published" and found["published"] and found["shown"] == 1
