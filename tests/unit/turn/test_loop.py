@@ -298,3 +298,31 @@ def test_an_empty_memory_is_not_marked_as_data():
     c.memory = Memory(earlier=[{"kind": "event", "ref": {"event_id": 5}, "title": "Sync", "position": 1}])
     run(c)
     assert f"<{loop.MARK}>\n- event #1: Sync" in llm.sent[0].prompt
+
+
+class GhArgs(BaseModel):
+    """GitHub."""
+
+    tool: Literal["github_item"]
+
+
+def test_a_github_results_links_are_not_the_turns_to_keep():
+    """(second fresh-review of #24) a page's address in an issue anyone wrote never becomes a link the answer may give."""
+    text = "see https://indico.test/event/42/manage/"
+    for tool, kept in (
+        (Tool("github_item", GhArgs, lambda ctx, args: text), set()),
+        (Tool("echo", EchoArgs, lambda ctx, args: text), {"/event/42/manage/"}),
+    ):
+        tools = (tool, OTHER)
+        args = GhArgs(tool="github_item") if tool.name == "github_item" else EchoArgs(tool="echo", word="x")
+        c = ctx(Script(ok(loop.step_model(tools)(call=args)), ok(answer("ok"))))
+        run(c, tools=tools)
+        assert c.link_paths == kept, tool.name
+
+
+def test_a_waiting_plan_is_in_the_prompt():
+    llm = Script(ok(answer("ok")))
+    c = ctx(llm)
+    c.waiting_plan = SimpleNamespace(summary="Move Team Sync to 3pm")
+    run(c)
+    assert 'waiting for the user to confirm it: "Move Team Sync to 3pm"' in llm.sent[0].prompt

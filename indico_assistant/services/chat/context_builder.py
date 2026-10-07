@@ -15,17 +15,6 @@ from uuid import UUID
 from indico_assistant.models.message import ChatMessage
 
 
-#: An Indico answer's place in the connector's history: the turns still alternate, and the model knows one is missing
-#: (fresh-review: some providers refuse two user turns in a row).
-HIDDEN = "(An answer about Indico, not shown here.)"
-
-
-def _github(msg):
-    """An answer that read GitHub: the connector route's (spec 023), or a turn that called a GitHub tool (spec 025)."""
-    route = (msg.metadata_json or {}).get("route") or {}
-    return route.get("route") == "connector" or bool(route.get("private"))
-
-
 class ContextBuilder:
     """Builds conversation context for LLM prompts.
     
@@ -69,15 +58,6 @@ class ContextBuilder:
         return [
             {"role": msg.role, "content": msg.content}
             for msg in self._recent(session_id, up_to)
-        ]
-
-    def connector_history(self, session_id: UUID, up_to: UUID | None = None) -> list[dict[str, str]]:
-        """The conversation as the connector's loop may see it (spec 023: no Indico data in the loop; Copilot, PR
-        #17): the user's own messages, and only the answers that came from GitHub. Never Indico's answers, nor the
-        page note."""
-        return [
-            {"role": msg.role, "content": msg.content if msg.role == "user" or _github(msg) else HIDDEN}
-            for msg in self._recent(session_id, up_to) if msg.role in ("user", "assistant")
         ]
 
     def _recent(self, session_id: UUID, up_to: UUID | None = None) -> list:

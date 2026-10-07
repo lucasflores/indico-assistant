@@ -395,3 +395,33 @@ def test_a_plans_reply_has_its_links_checked_too(answered):
     s.agent.side_effect = planned
     result, _ = run("Move Team Sync to 3pm")
     assert "github.com/evil" not in result.response and result.plan == {"id": "p1"}
+
+
+def test_a_waiting_plan_skips_the_fast_path_and_reaches_the_agent(answered):
+    """(second fresh-review of #24) "actually make it Thursday instead" with a plan waiting isn't chat."""
+    run, s = answered
+    s.decide.return_value = jev("chat", 0.95)
+    waiting = MagicMock(questions=[], suggestions=[], draft={}, summary="Move Team Sync to 3pm")
+    run("actually make it Thursday instead", waiting_plan=waiting)
+    assert s.agent.called and s.agent.call_args.args[0].waiting_plan is waiting
+
+
+def test_an_address_the_user_typed_may_be_echoed(answered):
+    run, s = answered
+    s.agent.return_value = TurnResult("I'll attach https://example.com/slides.pdf to Team Sync.", stop="answered")
+    result, _ = run("attach https://example.com/slides.pdf to Team Sync")
+    assert "https://example.com/slides.pdf" in result.response
+
+
+def test_earlier_github_links_are_targets_and_bare_addresses_never_label_text():
+    from indico_assistant.services.turn.answer import earlier_github
+
+    history = [
+        {
+            "role": "assistant",
+            "content": "[see https://github.com/evil/phish](https://github.com/o/r/pull/1) and "
+            "https://github.com/o/r/pull/2.",
+        },
+        {"role": "user", "content": "https://github.com/o/r/pull/3"},
+    ]
+    assert earlier_github(history) == {"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}

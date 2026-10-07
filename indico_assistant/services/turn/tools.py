@@ -49,6 +49,7 @@ class Ctx:
     settings: dict[str, Any]
     llm: Any
     base_url: str
+    message: str = ""  # the user's latest message, as typed (the planner's guards read the user's own words)
     memory: Memory = field(default_factory=Memory)
     embedder: Any = None
     allowed_tables: list[str] | None = None

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from indico_assistant.services.connectors import github
+from indico_assistant.services.connectors import github, store
 from indico_assistant.services.turn import abilities, loop
 from indico_assistant.services.turn.tools import Ctx
 
@@ -131,3 +131,44 @@ def test_the_connect_link_is_allowed_under_a_subpath():
     ):
         abilities._profile_url(ctx)
     assert ctx.link_paths == {"/user/assistant-connections/"}
+
+
+def test_after_a_401_no_more_github_calls_this_turn():
+    ctx = make_ctx()
+    client = MagicMock()
+    ctx.github = client
+    tool = SimpleNamespace(run=MagicMock(side_effect=github.GitHubError(401, "Bad credentials")))
+    with (
+        patch("indico_assistant.services.analytics.recorder.private"),
+        patch("indico_assistant.services.connectors.store.renew"),
+        patch.object(abilities, "_profile_url", return_value="https://indico.test/c/"),
+    ):
+        first = abilities._github(tool, ctx, MagicMock())
+        second = abilities._github(tool, ctx, MagicMock())
+    assert client.close.called and ctx.github is None and tool.run.call_count == 1
+    assert "no longer accepts" in first and second == first and second.code == "no_access"
+
+
+def test_no_token_is_a_failed_step_said_once():
+    from indico_assistant.services.turn.tools import Failed
+
+    ctx = make_ctx()
+    down = SimpleNamespace(state=store.UNAVAILABLE, token=None)
+    with (
+        patch("indico_assistant.services.connectors.store.token", return_value=down) as token,
+        patch("indico_assistant.services.connectors.github.app_for"),
+        patch.object(abilities, "_profile_url", return_value="https://indico.test/c/"),
+        patch("indico_assistant.services.analytics.recorder.private"),
+    ):
+        first = abilities._github(SimpleNamespace(run=MagicMock()), ctx, MagicMock())
+        second = abilities._github(SimpleNamespace(run=MagicMock()), ctx, MagicMock())
+    assert isinstance(first, Failed) and first.code == store.UNAVAILABLE and "couldn't be reached" in first
+    assert token.call_count == 1 and second == first
+
+
+def test_a_tools_model_call_gets_the_time_left_and_retries_only_as_fit():
+    from indico_assistant.services.llm.service import attempts_within
+
+    assert attempts_within(40.0, 30.0, 3) == (30.0, 0)  # (the one attempt gets its 30 s; a retry wouldn't fit)
+    assert attempts_within(90.0, 30.0, 3) == (30.0, 2)
+    assert attempts_within(9.0, 30.0, 2) == (9.0, 0)

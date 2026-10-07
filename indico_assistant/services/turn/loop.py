@@ -121,6 +121,11 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         page += "\n" + ctx.github_note
     if ctx.offer:  # (the last answer offered a change: agreeing to it is a propose_change)
         page += f'\nYour last answer offered to make this change: "{ctx.offer}". If the user agrees, propose it.'
+    if ctx.waiting_plan is not None:  # (Jev no longer reads a note of it: the agent must know; fresh-review of #24)
+        page += (
+            f'\nA plan made in this chat is waiting for the user to confirm it: "{ctx.waiting_plan.summary}". A '
+            "message about it (a change to it, an answer to its questions, a yes or a no) is a propose_change."
+        )
     lines = [
         "## The page",
         page,
@@ -289,7 +294,10 @@ def _call(ctx: Ctx, tool: Tool, call: Any, result: TurnResult, now: Callable[[],
     result.tools.append({"name": tool.name, "ms": int((now() - began) * 1000), "ok": ok})
     from indico_assistant.services.knowledge import links
 
-    paths, guide = links.found_in([text], ctx.base_url)  # (this Indico's pages and the guide's: the answer may link)
-    ctx.link_paths.update(paths)
-    ctx.guide_urls.update(guide)
+    if not tool.name.startswith("github_"):  # (a page's address in an issue anyone wrote is not the tool's to give)
+        paths, guide = links.found_in(
+            [text], ctx.base_url
+        )  # (this Indico's pages and the guide's: the answer may link)
+        ctx.link_paths.update(paths)
+        ctx.guide_urls.update(guide)
     return text

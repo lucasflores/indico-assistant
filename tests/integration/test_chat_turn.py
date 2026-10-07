@@ -146,7 +146,7 @@ def test_a_lookup_then_a_proposal_then_a_typed_yes_applies_it(
 
     proposed = []
 
-    def first_plan(user, session_id, message, history, waiting_plan, page_event_id, offer=None):
+    def first_plan(user, session_id, message, history, waiting_plan, page_event_id, offer=None, **kwargs):
         proposed.append(message)
         steps = [{"n": 1, "action": "update_event", "args": {"event_id": dummy_event.id, "title": "Pile-up Review"}}]
         plan, token = executor.create_plan(user, session_id, steps=steps, summary="Rename the event")

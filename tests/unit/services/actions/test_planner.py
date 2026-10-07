@@ -236,3 +236,19 @@ def test_a_confirmed_plan_that_did_not_run_is_flagged(dummy_user, chat, shown, s
             patch('indico_assistant.tasks.actions.outcome_message', return_value='outcome'):
         result = turn(dummy_user, chat, MagicMock(), open_plan=shown, message='yes')
     assert result.reply == 'outcome' and result.problem == problem
+
+
+def test_the_guards_read_the_users_own_words_not_the_turns_request(dummy_user, chat):
+    """(second fresh-review of #24) the turn rewrites a request from what it looked up: an address or a day it
+    copied from a document is not the user's. What it found reaches the model as data."""
+    llm = llm_returning(decision='unrelated')
+    keep = lambda draft, *args, **kwargs: draft  # noqa: E731
+    with patch.object(planner, '_only_what_the_user_said', side_effect=keep) as dates, \
+            patch.object(planner, '_only_what_the_user_asked_for', side_effect=keep) as asked:
+        planner.plan_turn(dummy_user, chat.id, 'move Team Sync to 14:00, the time of Q3 Planning', [], None, llm=llm,
+                          settings=ON, said='move Team Sync to the same time as Q3 Planning',
+                          found='"Q3 Planning" (Monday 12 October 2026)')
+    assert dates.call_args.args[1] == 'move Team Sync to the same time as Q3 Planning'
+    assert asked.call_args.args[1] == ['move Team Sync to the same time as Q3 Planning']
+    prompt = llm.generate.call_args.args[0]
+    assert 'Q3 Planning" (Monday' in prompt and prompt.endswith('Message: move Team Sync to 14:00, the time of Q3 Planning')

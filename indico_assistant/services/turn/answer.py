@@ -121,9 +121,9 @@ def answer(
 
     decision = gate.decide(context, settings, connector=github_on)
     sure = not decision.skipped and (decision.confidence or 0.0) >= float(settings.get("fast_path_confidence") or 0.8)
-    # (an offer waiting: "sure, go ahead with that" isn't chat, and Jev no longer reads a note of the offer; the
-    # agent's prompt says what was offered: fresh-review of #24)
-    sure = sure and offer is None
+    # (an offer or a plan waiting: "sure, go ahead with that" and "actually make it Thursday" aren't chat, and Jev
+    # no longer reads a note of either; the agent's prompt says what is waiting: fresh-reviews of #24)
+    sure = sure and offer is None and waiting_plan is None
     if sure and decision.route == "chat":
         chat = chat_answer(message, history, llm=plugin.llm_service, base_url=base_url)
         return Outcome(
@@ -191,6 +191,7 @@ def _agent(
         message_id=message_id,
         page_event_id=page_event_id,
         history=history,
+        message=message,
         settings=settings,
         llm=plugin.llm_service,
         base_url=base_url,
@@ -236,12 +237,13 @@ def _agent(
     plan = None
     paths, guide = links.found_in([m.get("content") for m in history] + [message], base_url)
     paths, guide = sorted(paths | ctx.link_paths), guide | ctx.guide_urls
+    # GitHub items this turn and earlier answers returned, and addresses the user typed themselves
+    urls = ctx.github_urls | earlier_github(history) | own_urls(history, message)
     if ctx.plan is not None:  # the planner's reply and plan card are the answer, its links checked too: a later
         reply, metadata, plan = ctx.plan  # answer trusts the GitHub links earlier ones kept (fresh-review of #24)
-        text = clean(reply, paths, guide, base_url, set(ctx.github_urls)) or "Here is the plan: confirm it to go ahead."
+        text = clean(reply, paths, guide, base_url, urls) or "Here is the plan: confirm it to go ahead."
         metadata = dict(metadata)
     else:
-        urls = ctx.github_urls | earlier_github(history)
         text = clean(result.text, paths, guide, base_url, urls) or loop.NOT_ANSWERED
         metadata = {"problem": "failed"} if result.failed else {}
     cited = validate(user, result.citations) if result.citations else []
@@ -272,14 +274,27 @@ def _agent(
 GITHUB_URL = re.compile(r"https://github\.com/[^\s<>()\[\]\"'`]+")
 
 
+USER_URL = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
+_LABEL = re.compile(r"\[[^\]]*\]\(")  # a link's label: text, never an address the answer may keep
+
+
 def earlier_github(history: list[dict[str, str]]) -> set[str]:
-    """The GitHub items earlier answers linked (checked when they were given): the answer may link them again."""
+    """The GitHub items earlier answers linked (checked when they were given): the answer may link them again. Link
+    targets and bare addresses only: a label is text, which a read issue could have steered (second fresh-review
+    of #24)."""
     return {
         u.rstrip(".,;:!?")
         for m in history
         if m.get("role") == "assistant"
-        for u in GITHUB_URL.findall(m.get("content") or "")
+        for u in GITHUB_URL.findall(_LABEL.sub("[](", m.get("content") or ""))
     }
+
+
+def own_urls(history: list[dict[str, str]], message: str) -> set[str]:
+    """Addresses the user typed themselves, in this message or earlier ones: the answer may echo them ("attach
+    https://… to Team Sync"; second fresh-review of #24)."""
+    texts = [message, *(m.get("content") or "" for m in history if m.get("role") == "user")]
+    return {u.rstrip(".,;:!?") for t in texts for u in USER_URL.findall(t)}
 
 
 def clean(text: str, paths: list[str], guide: set[str], base_url: str, urls: set[str]) -> str | None:

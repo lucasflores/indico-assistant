@@ -12,6 +12,7 @@ def test_each_rule_is_in_the_instructions():
     assert "never say a change was made" in text and "waiting for their confirmation" in text
     assert "Remembered from earlier answers" in text  # references through the memory
     assert "the planner can't look anything up" in text and "look it up first" in text  # story 3: lookup, then plan
+    assert "for reviews, comments or a description, look the item up" in text  # (spec 023's rule, kept)
 
 
 def test_an_events_own_prompt_is_appended():
