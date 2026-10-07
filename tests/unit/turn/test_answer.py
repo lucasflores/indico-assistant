@@ -296,10 +296,28 @@ def test_an_event_page_without_its_own_settings_inherits_the_global_ones(answere
 
 def test_documents_in_play_require_a_first_lookup(answered):
     run, s = answered
+    s.decide.return_value = Decision(None, None, True, "no key")  # (documents alone, not Jev's route)
     run("What is the weather like?")
     assert s.agent.call_args.kwargs["lookup_first"] is False
     run("What does the thesis say about pile-up?")
     assert s.agent.call_args.kwargs["lookup_first"] is True
+
+
+@pytest.mark.parametrize(
+    ("decision", "first"),
+    [
+        (jev("data"), True),
+        (jev("connector"), True),
+        (jev("change"), True),
+        (jev("chat", 0.5), False),
+        (Decision(None, None, True, "no key"), False),
+    ],
+)
+def test_a_message_jev_routes_to_a_lookup_must_look_something_up(answered, decision, first):
+    run, s = answered
+    s.decide.return_value = decision
+    run("Summarise PR 31, then tell me which day Team Sync is on.")
+    assert s.agent.call_args.kwargs["lookup_first"] is first
 
 
 def test_the_answers_order_numbers_the_documents():
