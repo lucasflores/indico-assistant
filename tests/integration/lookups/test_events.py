@@ -52,3 +52,13 @@ def test_filters_by_date_category_and_text(world):
 def test_an_unlisted_event_is_its_creators_only(world):
     assert titles(world.nora, text="Draft") == ["Nora's Draft"]
     assert titles(world.dana, text="Draft") == []
+
+
+def test_words_match_one_by_one_and_generic_ones_are_skipped(world):
+    """(quick run 1 of story 4) "Q3 planning meeting" and "the roadmap meeting" found nothing as whole phrases."""
+    assert titles(world.cat, text="roadmap meeting") == ["Restricted Roadmap Review"]
+    assert titles(world.dana, text="supplier contracts briefing") == ["Briefing: Supplier Contracts"]
+    assert titles(world.nora, text="team sync meeting") == ["Team Sync"]
+    assert titles(world.nora, text="contracts sync") == []  # (every telling word must match)
+    assert titles(world.lou, text="meeting") == ["Lab Members Meeting"]  # (only generic words: matched as they are)
+    assert events.words("the Q3 planning meeting") == ["Q3", "planning"]

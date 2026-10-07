@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -41,6 +42,21 @@ def _category_ids(text: str) -> list[int]:
     return [row.id for row in db.session.query(subtree.c.id)]
 
 
+#: Words that name a kind of event, not one event: "the roadmap meeting" names the roadmap (quick run 1 of story 4)
+GENERIC = set(
+    """a an and at for from in of on or the this that to with meeting meetings event events talk talks
+seminar seminars workshop workshops conference conferences lecture lectures session sessions review reviews call
+calls sync syncs standup standups minutes notes""".split()
+)
+
+
+def words(text: str | None) -> list[str]:
+    """The words of ``text`` worth matching: not the generic ones, unless nothing else is left."""
+    all_words = [w for w in re.findall(r"[\w'-]+", text or "") if len(w) > 1]
+    telling = [w for w in all_words if w.lower() not in GENERIC]
+    return telling or all_words
+
+
 def _names(name: str) -> Any:
     """A person-link filter: the full name, or either name alone, as typed ("Priya", "Shah", "Priya Shah")."""
     words = [w for w in name.split() if w]
@@ -66,8 +82,8 @@ def find_events(
         or_(~Event.is_unlisted, Event.creator_id == user.id),
         Event.happens_between(start, end),
     )
-    if text:
-        query = query.filter(or_(Event.title.ilike(f"%{text}%"), Event.description.ilike(f"%{text}%")))
+    for word in words(text):  # (every telling word, each in the title or the description)
+        query = query.filter(or_(Event.title.ilike(f"%{word}%"), Event.description.ilike(f"%{word}%")))
     if category:
         ids = _category_ids(category)
         if not ids:

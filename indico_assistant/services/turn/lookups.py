@@ -27,7 +27,9 @@ class FindEventsArgs(BaseModel):
     by id for more."""
 
     tool: Literal["find_events"]
-    text: str | None = Field(None, description="Words of the title or description")
+    text: str | None = Field(
+        None, description="Words of the title or description (each must match; 'the roadmap meeting' is just 'roadmap')"
+    )
     since: date | None = Field(None, description="First day (YYYY-MM-DD)")
     until: date | None = Field(None, description="Last day (YYYY-MM-DD)")
     category: str | None = Field(None, description="A category's name, or part of it")
