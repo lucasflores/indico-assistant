@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta
 
-from flask import g
 from pydantic import model_validator
 
 from indico.modules.categories import Category
@@ -70,7 +69,6 @@ class CreateEvent(Action):
 
     def execute(self, user, args):
         event = create_event(Category.get(args.category_id), EventType.meeting, self._data(args))
-        g.setdefault('assistant_new_events', set()).add(event.id)  # uncommitted until the plan is done
         notify_event_creation(event)  # the page does this after the operation
         return {'created': {'event_id': event.id}}
 
@@ -134,7 +132,6 @@ class ProposeEvent(Action):
     def execute(self, user, args):
         category = Category.get(args.category_id)
         event = create_event(None, EventType.meeting, CreateEvent._data(args))  # unlisted until approved
-        g.setdefault('assistant_new_events', set()).add(event.id)
         request = create_event_request(event, category, args.comment)
         notify_move_request_creation([event], category, args.comment)
         return {'created': {'event_id': event.id, 'request_id': request.id}}

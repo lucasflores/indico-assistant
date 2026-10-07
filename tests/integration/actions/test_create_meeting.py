@@ -9,6 +9,7 @@ from flask import g
 from indico.core.db import db
 from indico.modules.categories.models.categories import EventCreationMode
 from indico.modules.events import Event
+from indico.modules.events.contributions.models.contributions import Contribution
 from indico.modules.events.reminders.models.reminders import EventReminder
 from indico.modules.logs import EventLogEntry
 from indico.modules.vc.models.vc_rooms import VCRoom
@@ -149,3 +150,23 @@ def test_talks_of_a_new_meeting_are_numbered_on_the_meeting(run_example, monkeyp
     assert plan.status == 'done', plan.error
     (event,) = meetings()
     assert sorted(c.friendly_id for c in event.contributions) == [1, 2]
+
+
+def test_a_talk_added_to_a_meeting_the_plan_changed_is_numbered_in_the_plans_transaction(
+        db, people, dummy_event, create_contribution, monkeypatch):
+    """(story 3's full run) "move Team Sync, then add a talk": Indico's separate-session numbering waited forever on
+    the meeting's row, which the plan's own update had locked. The number is taken in the plan's transaction."""
+    from indico.modules.events.contributions.models import contributions as model
+
+    from indico_assistant.services.actions import ACTIONS
+
+    create_contribution(dummy_event, 'Earlier talk')
+    db.session.flush()
+    monkeypatch.setattr(model, 'increment_and_get', lambda *a, **kw: pytest.fail('separate-session allocation'))
+    action = ACTIONS['add_contribution']
+    args = action.Args(event_id=dummy_event.id, title='Roadmap follow-up', start_dt=dummy_event.start_dt,
+                       duration_minutes=10)
+    first = action.execute(people['manager'], args)['created']['contribution_id']
+    second = action.execute(people['manager'], args)['created']['contribution_id']
+    numbers = [Contribution.get(i).friendly_id for i in (first, second)]
+    assert numbers == [2, 3] and dummy_event._last_friendly_contribution_id == 3
