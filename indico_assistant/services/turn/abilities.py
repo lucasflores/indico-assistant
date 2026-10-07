@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, create_model
 
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.knowledge.gate import INTENTS
-from indico_assistant.services.turn.tools import Ctx
+from indico_assistant.services.turn.tools import Ctx, Failed
 
 logger = logging.getLogger(__name__)
 
@@ -145,12 +145,13 @@ UNAVAILABLE = "GitHub couldn't be reached just now: say so, and that the user ca
 
 
 def _profile_url(ctx: Ctx) -> str:
-    from urllib.parse import urlsplit
-
     from indico.core.plugins import url_for_plugin
 
+    from indico_assistant.services.knowledge import links
+
     url = str(url_for_plugin("assistant.user_connections", _external=True))
-    ctx.link_paths.add(urlsplit(url).path)  # (this Indico's page: the answer may link it)
+    paths, _ = links.found_in([url], ctx.base_url)  # (this Indico's page: the answer may link it; as the check reads
+    ctx.link_paths.update(paths)  # paths, without BASE_URL's root: fresh-review of #24)
     return url
 
 
@@ -181,6 +182,11 @@ def _client(ctx: Ctx) -> Any:
     return ctx.github
 
 
+#: GitHub items one call adds to the memory: a list of 20 would push the conversation's documents and events out of
+#: its 30 entries (fresh-review of #24)
+GITHUB_REMEMBERED = 8
+
+
 def _title(url: str) -> str:
     """owner/repo#12 for an item's address, owner/repo for a repository's."""
     parts = url.removeprefix("https://github.com/").split("/")
@@ -201,12 +207,13 @@ def _github(tool: Tool, ctx: Ctx, args: Any) -> str:
     except github.GitHubError as error:
         if error.status == 401:  # (the grant was revoked on GitHub: the stored token looked fine until now)
             store.renew(ctx.user.id)
-            return RENEW.format(url=_profile_url(ctx))
-        return f"GitHub error {error.status}: {error.message}"
+            return Failed(RENEW.format(url=_profile_url(ctx)), "401")
+        return Failed(f"GitHub error {error.status}: {error.message}", str(error.status))  # (a failed step: spec 024)
     found: Any = out if isinstance(out, tuple) else (out, [])
     text, urls = found[0], [str(u) for u in found[1]]
     ctx.github_urls.update(urls)  # (never scraped from the text: a body or a comment can hold any address)
-    for url in urls:
+    items = [u for u in urls if "#" in _title(u)]  # (issues and pull requests: a list of repositories isn't "that")
+    for url in items[:GITHUB_REMEMBERED]:
         ctx.memory.add("github", {"url": url}, _title(url))
     return str(text)
 
@@ -301,9 +308,11 @@ def by_name(request: str, page_event_id: int | None) -> str:
     return _EVENT_ID.sub(title, request).strip()
 
 
-def found_meetings(ctx: Ctx) -> str:
+def found_meetings(ctx: Ctx) -> list[dict[str, str]]:
     """The meetings this turn has looked up, by title and date, for the planner: it finds meetings by name, and
-    "move the talk the notes mention" needs the meeting the notes came from (story 3, T063)."""
+    "move the talk the notes mention" needs the meeting the notes came from (story 3, T063). As a line of the
+    conversation, never in the request: the planner's checks read the request as the user's own words (a date
+    there would move a meeting to it; fresh-review of #24)."""
     from indico.modules.events import Event
 
     ids = [e["ref"]["event_id"] for e in ctx.memory.touched if e["kind"] == "event"]
@@ -311,12 +320,14 @@ def found_meetings(ctx: Ctx) -> str:
     found = [
         f'"{e.title}" ({e.start_dt.astimezone(e.tzinfo):%A %d %B %Y})' for e in events if e.id != ctx.page_event_id
     ]
-    return f"\n(Meetings found while answering: {'; '.join(found)})" if found else ""
+    note = f"(Meetings found while answering: {'; '.join(found)})"
+    return [{"role": "assistant", "content": note}] if found else []
 
 
 def _propose_change(ctx: Ctx, args: ProposeChangeArgs) -> str:
-    request = by_name(args.request, ctx.page_event_id) + found_meetings(ctx)
-    planned = plan(ctx.user, ctx.session_id, request, ctx.history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
+    request = by_name(args.request, ctx.page_event_id)
+    history = [*ctx.history, *found_meetings(ctx)]
+    planned = plan(ctx.user, ctx.session_id, request, history, ctx.waiting_plan, ctx.page_event_id, ctx.offer)
     if planned is None or (planned[1].get("cannot_plan") and ctx.waiting_plan is None):
         return planned[0] if planned else "That is not a change the assistant can plan."
     ctx.plan = planned

@@ -84,3 +84,19 @@ def test_every_kind_resolves_in_a_later_turn_while_it_can_be_opened(db, dummy_us
     assert [e["title"] for e in usable] == ["Budget Review", "Move Budget", "o/r#16"]
     rendered = memory.Memory(earlier=usable).render()
     assert f"event #1: Budget Review (event_id {budget.id})" in rendered and "github #1: o/r#16" in rendered
+
+
+def test_the_last_answer_alone_can_be_loaded(db, dummy_user):
+    session = ChatSession.create(user_id=dummy_user.id)
+    db.session.flush()
+    for n in (1, 2):
+        item = {
+            "kind": "github",
+            "ref": {"url": f"https://github.com/o/r/pull/{n}"},
+            "title": f"o/r#{n}",
+            "position": 1,
+        }
+        ChatMessage.create(session_id=session.id, role="assistant", content="...", metadata={"touched": [item]})
+        db.session.flush()
+    assert [e["title"] for e in memory.load(session.id, None)] == ["o/r#2", "o/r#1"]
+    assert [e["title"] for e in memory.load(session.id, None, 1)] == ["o/r#2"]

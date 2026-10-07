@@ -48,9 +48,9 @@ class Memory:
         return "\n".join(lines)
 
 
-def load(session_id: UUID, up_to: UUID | None) -> list[dict[str, Any]]:
-    """The touched lists of the last answers before ``up_to``: the most recent answer's first (so "the second one"
-    is its second), each thing once."""
+def load(session_id: UUID, up_to: UUID | None, answers: int = EARLIER_ANSWERS) -> list[dict[str, Any]]:
+    """The touched lists of the last ``answers`` answers before ``up_to``: the most recent answer's first (so "the
+    second one" is its second), each thing once."""
     query = ChatMessage.query.filter(ChatMessage.session_id == session_id, ChatMessage.role == "assistant")
     if up_to is not None:
         query = query.filter(
@@ -59,7 +59,7 @@ def load(session_id: UUID, up_to: UUID | None) -> list[dict[str, Any]]:
         )
     entries: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for message in query.order_by(ChatMessage.created_at.desc()).limit(EARLIER_ANSWERS):
+    for message in query.order_by(ChatMessage.created_at.desc()).limit(answers):
         for e in (message.metadata_json or {}).get("touched") or []:
             key = (e.get("kind"), repr(sorted((e.get("ref") or {}).items())))
             if key not in seen and e.get("kind") and isinstance(e.get("ref"), dict):

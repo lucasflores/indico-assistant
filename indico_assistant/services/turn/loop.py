@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, create_model, model_validator
 from indico_assistant.services.analytics import recorder
 from indico_assistant.services.connectors import Tool
 from indico_assistant.services.turn.citations import Citation
-from indico_assistant.services.turn.tools import Ctx
+from indico_assistant.services.turn.tools import Ctx, Failed
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,8 @@ def _prompt(ctx: Ctx, message: str, tools: Sequence[Tool], done: list[tuple[Any,
         page += "\nNo documents attached to it that the user can open."
     if ctx.github_note:  # (GitHub is on, but its tools aren't offered: the user can fix that)
         page += "\n" + ctx.github_note
+    if ctx.offer:  # (the last answer offered a change: agreeing to it is a propose_change)
+        page += f'\nYour last answer offered to make this change: "{ctx.offer}". If the user agrees, propose it.'
     lines = [
         "## The page",
         page,
@@ -273,6 +275,8 @@ def _call(ctx: Ctx, tool: Tool, call: Any, result: TurnResult, now: Callable[[],
         try:
             with until(ctx.deadline):
                 text = tool.run(ctx, call)
+            if isinstance(text, Failed):  # (text for the model, a failed step for the analytics)
+                ok, tool_step.error_code = False, text.code
             db.session.commit()  # no transaction stays open through the next model call
         except SoftTimeLimitExceeded:  # (the worker's limit: the task reports the timeout)
             raise

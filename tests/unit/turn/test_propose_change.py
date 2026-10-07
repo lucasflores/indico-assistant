@@ -31,11 +31,12 @@ def test_the_planner_hears_which_meetings_the_turn_found(db, dummy_user, create_
         abilities._propose_change(
             ctx, abilities.ProposeChangeArgs(tool="propose_change", request="move the talk to 3pm")
         )
-    request = planner.call_args.args[2]
-    assert request.startswith("move the talk to 3pm\n(Meetings found while answering:") and '"Budget Review"' in request
-    with patch.object(abilities, "plan", return_value=planned) as planner:  # (nothing found: the request as written)
+    request, history = planner.call_args.args[2], planner.call_args.args[3]
+    assert request == "move the talk to 3pm"  # (the planner's checks read it as the user's words: no dates added)
+    assert history[-1]["role"] == "assistant" and '"Budget Review"' in history[-1]["content"]
+    with patch.object(abilities, "plan", return_value=planned) as planner:  # (nothing found: no line added)
         abilities._propose_change(make_ctx(dummy_user), abilities.ProposeChangeArgs(tool="propose_change", request="x"))
-    assert planner.call_args.args[2] == "x"
+    assert planner.call_args.args[3] == []
 
 
 def test_the_turn_ends_at_a_plan_and_never_applies_it():

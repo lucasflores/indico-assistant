@@ -308,7 +308,7 @@ def test_documents_in_play_require_a_first_lookup(answered):
     ("decision", "first"),
     [
         (jev("data"), True),
-        (jev("connector"), True),
+        (jev("connector"), False),  # (GitHub's tools aren't offered here)
         (jev("change"), True),
         (jev("chat", 0.5), False),
         (Decision(None, None, True, "no key"), False),
@@ -321,14 +321,36 @@ def test_a_message_jev_routes_to_a_lookup_must_look_something_up(answered, decis
     assert s.agent.call_args.kwargs["lookup_first"] is first
 
 
+def test_a_github_message_starts_with_a_lookup_only_when_its_tools_are_offered(answered):
+    run, s = answered
+    s.decide.return_value = jev("connector")
+    s.settings["github_enabled"] = True
+    with patch("indico_assistant.services.turn.abilities.github_note", return_value=None):
+        run("What PRs are waiting for my review?")
+    assert s.agent.call_args.kwargs["lookup_first"] is True
+    with patch("indico_assistant.services.turn.abilities.github_note", return_value="GitHub: not connected"):
+        run("What PRs are waiting for my review?")
+    assert s.agent.call_args.kwargs["lookup_first"] is False  # (no GitHub tool to call: the prompt says how)
+
+
+def test_an_offer_waiting_skips_the_fast_path_and_reaches_the_agent(answered):
+    """(fresh-review of #24) Jev no longer reads a note of the offer: "sure, go ahead with that" isn't chat."""
+    run, s = answered
+    s.decide.return_value = jev("chat", 0.95)
+    run("sure, go ahead with that", offer="add a reminder to Team Sync")
+    assert s.agent.called and s.agent.call_args.args[0].offer == "add a reminder to Team Sync"
+
+
 def test_a_follow_up_about_remembered_items_needs_no_first_lookup(answered):
     """(story 3's GitHub run) "which of those is the oldest?" after a list of pull requests: Jev says GitHub, but the
     answer is in the conversation (FR-022)."""
     run, s = answered
     s.decide.return_value = jev("connector")
+    s.settings["github_enabled"] = True
     pr = {"kind": "github", "ref": {"url": "https://github.com/o/r/pull/30"}, "title": "o/r#30", "position": 1}
     s.memory = [pr]
-    run("Which of those is the oldest?")
+    with patch("indico_assistant.services.turn.abilities.github_note", return_value=None):  # (GitHub's tools offered)
+        run("Which of those is the oldest?")
     assert s.agent.call_args.kwargs["lookup_first"] is False
 
 
@@ -360,3 +382,16 @@ def test_checking_links_until_nothing_changes_leaves_no_image_or_outside_address
     assert cleaned is None or ("![" not in cleaned and "evil" not in cleaned.lower())
     if "ok" in text:
         assert "[ok](https://github.com/o/r/pull/1)" in cleaned  # (what is allowed stays a link)
+
+
+def test_a_plans_reply_has_its_links_checked_too(answered):
+    """(fresh-review of #24) a later answer trusts the GitHub links earlier answers kept: none may skip the check."""
+    run, s = answered
+
+    def planned(ctx, *args, **kwargs):
+        ctx.plan = ("Here is the plan, see [this](https://github.com/evil/x/pull/1).", {"plan_id": "p1"}, {"id": "p1"})
+        return TurnResult("ignored", stop="plan")
+
+    s.agent.side_effect = planned
+    result, _ = run("Move Team Sync to 3pm")
+    assert "github.com/evil" not in result.response and result.plan == {"id": "p1"}
