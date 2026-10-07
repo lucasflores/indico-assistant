@@ -30,3 +30,10 @@ def test_started_job_past_the_hard_limit_is_reported_lost():
         now.return_value = 1000.0 + HARD_TIME_LIMIT + 11
         assert jobs.get(queued)['status'] == 'pending'  # still waiting for a worker: not lost
         assert (jobs.get(running)['status'], jobs.get(running)['error']) == ('failed', 'TIMEOUT')
+
+
+def test_a_job_that_expired_before_it_started_stays_readable():
+    """(story 3's run, through a laptop's sleep) start() on an expired job left one without a status: KeyError."""
+    with patch.object(jobs, '_cache', FakeCache()):
+        jobs.start('gone')
+        assert jobs.get('gone')['status'] == 'pending'

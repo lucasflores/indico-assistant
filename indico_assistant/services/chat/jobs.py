@@ -42,6 +42,6 @@ def get(job_id):
 
 def finish(job_id, **result):
     """Mark a job done (``status='done'``) or failed (``status='failed'``) with its payload."""
-    job = get(job_id) or {}
+    job = get(job_id) or {'status': 'pending'}  # (expired meanwhile: kept in shape, or the next read fails)
     job.update(result)
     _cache.set(job_id, job, timeout=TTL)
